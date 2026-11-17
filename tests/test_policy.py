@@ -127,7 +127,8 @@ def test_absent() -> None:
 # ------------------------------------------------- the missing-argument loophole
 
 EVIL = {"to": {"glob": "*@evil.com"}}
-ODD_VALUES = [["x@evil.com"], {"addr": "x@evil.com"}, None, 5, True, float("nan")]
+# NaN and infinity cannot reach the policy: Call refuses them at construction.
+ODD_VALUES = [["x@evil.com"], {"addr": "x@evil.com"}, None, 5, True, 1.5]
 
 
 def loophole_policy(effect: str) -> Policy:
@@ -169,7 +170,7 @@ def test_allow_rule_never_matches_on_missing_or_wrong_type(value: object) -> Non
         ({"in": ["a", 1]}, False, "deny"),
         ({"max": 10}, "11", "deny"),
         ({"max": 10}, 11, "allow"),
-        ({"max": 10}, float("inf"), "deny"),
+        ({"max": 10}, [1], "deny"),
         ({"max": 10}, True, "deny"),
     ],
 )
@@ -448,6 +449,11 @@ EXAMPLE_CASES = [
     ("send_email", {"body": "hi"}, "approve", "approve-external-email"),
     ("send_email", {"to": "ana@example.com", "bcc": "x@evil.com"}, "deny", "deny-bcc"),
     ("send_sms", {"to": "ana@example.com"}, "deny", None),
+    # P5: only the recipient arguments the policy has reasoned about pass on their own
+    ("send_email", {"to": "a@example.com", "cc": "evil@x.com"}, "approve", "approve-cc"),
+    ("send_email", {"to": "a@example.com", "cc": None}, "approve", "approve-cc"),
+    ("send_email", {"to": "x@evil.com", "cc": "a@example.com"}, "approve", "approve-cc"),
+    ("send_email", {"to": "a@example.com", "cc": "b@example.com", "bcc": ""}, "deny", "deny-bcc"),
     ("search_email", {"query": "invoice"}, "allow", "allow-email-read"),
     ("list_events", {"days": 7}, "allow", "allow-calendar-read"),
     ("create_event", {"title": "focus", "duration_minutes": 60}, "allow", "allow-personal-events"),
@@ -589,3 +595,160 @@ def test_dropping_an_argument_never_escapes_a_restrictive_rule(
     fewer = Call(call.tool, {k: v for k, v in call.args.items() if k != name})
     if restrictive.matches(call):
         assert restrictive.matches(fewer)
+
+
+# ------------------------------------------------------- security review findings
+
+
+def test_p1_oversized_file_with_multibyte_text_is_refused_not_truncated(tmp_path: Path) -> None:
+    # An allow "*" rule, a long comment of two-byte characters crossing the limit, then a
+    # deny rule. Reading MAX + 1 bytes and counting characters dropped the deny rule.
+    head = "version: 1\nrules:\n  - {id: a, effect: allow, tools: ['*']}\n#"
+    head += " " * ((MAX_POLICY_BYTES + 1 - len(head)) % 2)  # the cut lands between characters
+    tail = "\n  - {id: d, effect: deny, tools: [delete_file]}\n"
+    path = tmp_path / "big.yaml"
+    path.write_bytes((head + "\u00e9" * 600_000 + tail).encode("utf-8"))
+    assert path.stat().st_size > MAX_POLICY_BYTES
+    with pytest.raises(PolicyError, match="larger"):
+        Policy.from_file(path)
+    # the same rules in a file under the limit keep the deny
+    path.write_bytes((head + "\u00e9" * 10 + tail).encode("utf-8"))
+    assert effect_of(Policy.from_file(path), "delete_file") == "deny"
+
+
+def test_p1_size_limit_counts_bytes_not_characters() -> None:
+    text = GOOD + "# " + "\u00e9" * (MAX_POLICY_BYTES // 2)
+    assert len(text) < MAX_POLICY_BYTES < len(text.encode())
+    with pytest.raises(PolicyError, match="larger"):
+        Policy.from_yaml(text)
+
+
+AMBIGUOUS_NUMBERS = [
+    "1e3",
+    "1E3",
+    "1.5e3",
+    "1e-3",
+    "1.5e+3",
+    "1e+3",
+    "-1e3",
+    ".5e3",
+    "0o17",
+    "0O17",
+    "08",
+    "0.1e-400",
+    "9007199254740993.0",
+    "0.1000000000000000055",
+]
+
+
+@pytest.mark.parametrize("text", AMBIGUOUS_NUMBERS)
+@pytest.mark.parametrize("where", ["when: {x: {eq: %s}}", "when: {x: {in: [a, %s]}}", "id2: %s"])
+def test_p2_unquoted_numeric_looking_scalars_are_refused(text: str, where: str) -> None:
+    body = "id: r\neffect: deny\ntools: [t]\n" + where % text
+    with pytest.raises(PolicyError, match="quote it"):
+        Policy.from_yaml(one_rule(body))
+
+
+def test_p2_quoted_text_and_plain_decimals_still_load() -> None:
+    body = "id: r\neffect: allow\ntools: [t]\nwhen: {x: {in: ['1e3', \"0o17\", 1000, 1.5, -0.25]}}"
+    p = Policy.from_yaml(one_rule(body))
+    for value in ("1e3", "0o17", 1000, 1.5, -0.25):
+        assert effect_of(p, x=value) == "allow"
+    assert effect_of(p, x=1000.5) == "deny"
+    plain = "id: v1.2.3\neffect: allow\ntools: [t]\nwhen: {x: {eq: 3rd}}"
+    assert Policy.from_yaml(one_rule(plain)).rules[0].id == "v1.2.3"
+
+
+@pytest.mark.parametrize(
+    "directive", ["%YAML 1.2\n---\n", "%YAML 1.1\n---\n", "%TAG ! tag:example.com,2000:\n---\n"]
+)
+def test_p2_directives_are_refused(directive: str) -> None:
+    with pytest.raises(PolicyError, match="directives"):
+        Policy.from_yaml(directive + GOOD)
+
+
+BAD_TOOL_PATTERNS = [
+    " read",
+    "read ",
+    "read file",
+    "read\tfile",
+    "read\nfile",
+    "a\u00a0b",
+    "a\x00b",
+]
+BAD_TOOL_PATTERNS += ["a\u200bb", "a\x7fb", "a\u2028b"]
+
+
+@pytest.mark.parametrize("pattern", BAD_TOOL_PATTERNS)
+def test_p3_tool_patterns_with_whitespace_or_control_characters_are_refused(pattern: str) -> None:
+    with pytest.raises(PolicyError, match="whitespace or a control character"):
+        policy(rule("r", "deny", [pattern]))
+    with pytest.raises(PolicyError, match="whitespace or a control character"):
+        Rule("r", "deny", (pattern,))
+
+
+def test_p3_multi_line_plain_scalar_under_tools_is_refused() -> None:
+    body = "id: r\neffect: deny\ntools:\n  - read_file\n    write_file"
+    with pytest.raises(PolicyError, match="list dash is missing"):
+        Policy.from_yaml(one_rule(body))
+    quoted = 'id: r\neffect: deny\ntools: [" read_file"]'
+    with pytest.raises(PolicyError, match="whitespace"):
+        Policy.from_yaml(one_rule(quoted))
+
+
+@pytest.mark.parametrize("effect", sorted(RANK))
+def test_p3_absent_and_unless_on_the_same_argument_is_refused(effect: str) -> None:
+    body = f"id: r\neffect: {effect}\ntools: [t]\nunless: {{x: {{eq: 1}}}}\nabsent: [x]"
+    with pytest.raises(PolicyError, match="both absent and unless"):
+        Policy.from_yaml(one_rule(body))
+    other = f"id: r\neffect: {effect}\ntools: [t]\nunless: {{x: {{eq: 1}}}}\nabsent: [y]"
+    assert Policy.from_yaml(one_rule(other)).rules[0].absent == ("y",)
+
+
+def test_p4_warnings_for_presence_tests_on_restrictive_rules() -> None:
+    p = policy(
+        rule("ap", "approve", ["transfer"], absent=["confirmation"]),
+        rule("dn", "deny", when={"bcc": {"any": True}}),
+        rule("al", "allow", absent=["x"], when={"y": {"any": True}}),
+        rule("ok", "deny", when={"to": {"glob": "*@evil.com"}}, unless={"z": {"any": True}}),
+    )
+    assert isinstance(p.warnings, tuple) and len(p.warnings) == 2
+    assert "'ap'" in p.warnings[0] and "absent" in p.warnings[0]
+    assert "'confirmation'" in p.warnings[0]
+    assert "'dn'" in p.warnings[1] and "any" in p.warnings[1] and "'bcc'" in p.warnings[1]
+    # the trap the warning describes: the caller switches the approve rule off
+    q = policy(rule("ap", "approve", absent=["confirmation"]), rule("al", "allow"))
+    assert effect_of(q, amount=5) == "approve"
+    assert effect_of(q, amount=5, confirmation=None) == "allow"
+
+
+def test_p4_warning_for_exact_deny_next_to_allow_star() -> None:
+    p = policy(rule("all", "allow", ["*"]), rule("no-delete", "deny", ["delete_file", "rm_*"]))
+    assert len(p.warnings) == 1
+    assert "'no-delete'" in p.warnings[0] and "'delete_file'" in p.warnings[0]
+    assert "'all'" in p.warnings[0]
+    assert effect_of(p, "Delete_File") == "allow"  # the fragility being warned about
+    assert policy(rule("all", "allow", ["*"]), rule("d", "deny", ["rm_*"])).warnings == ()
+    assert policy(rule("some", "allow", ["read_*"]), rule("d", "deny", ["rm"])).warnings == ()
+    assert policy(rule("all", "approve", ["*"]), rule("d", "deny", ["rm"])).warnings == ()
+
+
+def test_p4_warnings_do_not_change_decisions_or_equality() -> None:
+    assert policy().warnings == ()
+    assert Policy.from_yaml(GOOD).warnings == ()
+    rules = (Rule("d", "deny", ("t",), absent=("x",)),)
+    assert Policy(rules) == Policy(rules) and Policy(rules).warnings
+    example = Policy.from_file(EXAMPLE)
+    assert all(type(w) is str for w in example.warnings)
+    assert any("'deny-bcc'" in w for w in example.warnings)
+    assert not any("allow-email-send" in w for w in example.warnings)
+
+
+def test_p5_example_policy_documents_the_two_layers() -> None:
+    text = EXAMPLE.read_text()
+    assert "closed-world" in text and "canonical" in text
+    p = Policy.from_file(EXAMPLE)
+    for extra in ("cc", "bcc"):
+        for value in ("evil@x.com", None, "", ["evil@x.com"]):
+            call = Call("send_email", {"to": "a@example.com", extra: value})
+            assert p.decide(call).effect != "allow"

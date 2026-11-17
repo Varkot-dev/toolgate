@@ -11,8 +11,15 @@
 #   - a deny or approve rule matches unless a condition is proven false.
 # So `deny ... when path glob "secrets/*"` also denies a call with no `path`.
 #
-# Quote anything that is meant as text. Unquoted no, yes, on, off, 010 and
-# 1:30 are rejected at load time instead of being silently reinterpreted.
+# Quote anything that is meant as text. Unquoted no, yes, on, off, 010, 1e3
+# and 1:30 are rejected at load time instead of being silently reinterpreted.
+#
+# Policy is the SECOND defence against arguments nobody thought about. The
+# first is the capability layer's closed-world argument rule: a grant lists
+# the arguments a call may carry, and a call with any other argument is
+# refused before policy is asked. Policy rules are open-world (an argument a
+# rule does not mention is ignored), so each section below names the
+# arguments it has reasoned about and restricts the ones it knows are risky.
 
 version: 1
 
@@ -23,9 +30,20 @@ rules:
     tools: ["delete_file"]
     reason: Agents never delete files, whatever the user delegated.
 
-  # Glob is string matching, not path matching: "reports/../secrets/x" does
-  # not match "secrets/*". The file tools must canonicalize paths before the
-  # gateway sees them.
+  # Glob is string matching, not path matching. This rule is only as good as
+  # the canonical form of `path` that the file tools hand to the gateway.
+  # None of these match "secrets/*", and each one reaches the directory if
+  # the tool resolves it:
+  #     reports/../secrets/key.pem     (dot-dot segments)
+  #     ./secrets/key.pem, //secrets/key.pem, /srv/data/secrets/key.pem
+  #     Secrets/key.pem                (on a case-insensitive file system)
+  #     notes/link-to-secrets/key.pem  (a symbolic link)
+  #     secrets                        (the directory itself, for list_files)
+  # So the file tools must resolve dot segments, symbolic links, case and
+  # absolute paths to one canonical relative path BEFORE the gateway decides,
+  # and must act on exactly the string that was decided on. A deny rule on a
+  # string is a second line of defence; the first is a grant whose path
+  # constraint only admits the directories the task needs.
   - id: deny-secret-paths
     effect: deny
     tools: ["read_file", "write_file", "list_files"]
@@ -49,12 +67,27 @@ rules:
     tools: ["write_file"]
 
   # ---------------------------------------------------------------- email
+  # Every recipient-carrying argument of send_email is decided here, not only
+  # `to`: bcc is denied, cc goes to a person, and the allow rule at the end
+  # of the section applies only when both are absent. Checking `to` alone
+  # would let {to: a@example.com, cc: evil@x.com} through as internal mail.
+  # An argument this section does not name (reply_to, say) is still ignored
+  # by policy: the grant's closed-world argument rule is what stops it, and
+  # this section is the second check behind that.
   - id: deny-bcc
     effect: deny
     tools: ["send_email"]
     when:
       bcc: {any: true}
     reason: Hidden recipients are not allowed.
+
+  # Present with any value, null and "" included, counts as carrying cc.
+  - id: approve-cc
+    effect: approve
+    tools: ["send_email"]
+    when:
+      cc: {any: true}
+    reason: Copied recipients are not checked against example.com, so a person must look.
 
   # `to` must be a single address string. A list of addresses, or a missing
   # `to`, is not proven internal, so it goes to approval. The email tool must
@@ -74,6 +107,7 @@ rules:
   - id: allow-email-send
     effect: allow
     tools: ["send_email"]
+    absent: [cc, bcc]
 
   # ------------------------------------------------------------- calendar
   - id: allow-calendar-read

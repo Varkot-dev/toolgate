@@ -101,6 +101,58 @@ plain scalars that YAML 1.1 would silently reinterpret (`no`, `on`, `010`,
 `yaml.SafeLoader` that only removes features; `yaml.safe_load` alone cannot
 see duplicate keys, because it keeps the last one silently.
 
+Numbers. YAML 1.1 (what PyYAML implements) and YAML 1.2 disagree about which
+unquoted scalars are numbers: `1e3` is text in 1.1 and 1000.0 in 1.2, `0o17`
+is text in 1.1 and 15 in 1.2, `010` is 8 in 1.1 and 10 in 1.2. So an unquoted
+scalar that looks numeric must be a plain decimal integer (`1000`) or a plain
+decimal number with digits on both sides of the point (`1.5`); every other
+numeric-looking form, exponents included, must be quoted to mean text or is
+refused. A decimal that a float cannot hold to the digits written
+(`9007199254740993.0`) is refused as well, because the rule would compare
+against a different number than the one in the file. `%YAML` and `%TAG`
+directives are refused: the loader cannot honour a requested version, and
+pretending to would be worse than saying so.
+
+Also refused: a file larger than `MAX_POLICY_BYTES` (measured in bytes, and
+never read in part); a tool pattern holding whitespace or a control character
+(which is also what an unquoted scalar running over several lines turns into);
+and, when loading YAML, a rule that names one argument in both `absent` and
+`unless`, since the exception could never be proven.
+
+What a policy author must know
+------------------------------
+
+Each of these is a property of the language, not a bug, and `Policy.warnings`
+lists the ones that can be spotted mechanically ((a) and (c)).
+
+(a) `absent` and `any` are pure presence tests. On a RESTRICTIVE rule (deny or
+    approve) the caller decides whether the rule applies.
+
+        approve transfer absent: [confirmation]
+        is dodged by sending  confirmation: null
+
+(b) Approve rules do not preserve default deny. An approve rule creates a path
+    to execution (through a human) for calls that no allow rule covers.
+
+        approve "*"  with no allow rule at all: every tool can run once a
+        person clicks yes
+
+(c) Deny rules match exact strings. Tool names and values must be made
+    canonical upstream (case, whitespace, Unicode look-alikes), and a broad
+    allow next to an exact deny is fragile. Prefer listing what is allowed.
+
+        allow "*" plus deny delete_file  lets "Delete_File" through if the
+        tool layer folds case
+
+(d) A glob on a recipient-style string proves the shape of the string only.
+    Tools must take one address per value.
+
+        to glob "*@corp.com"  is satisfied by  "evil@x.com, a@corp.com"
+
+(e) `max` is an upper bound only, so negative numbers satisfy it.
+
+        unless {amount: {max: 100}}  is satisfied by  amount: -5000
+
 Limits: conditions address top-level arguments only. Matching is exact string
 comparison with no Unicode normalization and no path canonicalization, so the
 gateway must hand the policy the same canonical tool name and argument values
@@ -111,8 +163,10 @@ from __future__ import annotations
 
 import math
 import re
+import unicodedata
 from collections.abc import Mapping
 from dataclasses import dataclass
+from decimal import Decimal
 from pathlib import Path
 from typing import Any
 
@@ -129,7 +183,19 @@ MAX_POLICY_BYTES = 1_000_000
 _TOP_KEYS = frozenset({"version", "rules"})
 _RULE_KEYS = frozenset({"id", "effect", "tools", "when", "unless", "absent", "reason"})
 _INT = re.compile(r"-?(0|[1-9][0-9]*)")
-_FLOAT = re.compile(r"-?(0|[1-9][0-9]*)\.[0-9]+([eE][-+]?[0-9]+)?")
+_FLOAT = re.compile(r"-?(0|[1-9][0-9]*)\.[0-9]+")
+# Unquoted text that YAML 1.1 or YAML 1.2 (or a reader) could take for a number.
+_NUMBERISH = re.compile(
+    r"""[-+]?(?:
+        0[oO][0-7_]* | 0[xX][0-9a-fA-F_]* | 0[bB][01_]*
+      | [0-9][0-9_]*(?:\.[0-9_]*)?(?:[eE][-+]?[0-9_]*)?
+      | \.[0-9][0-9_]*(?:[eE][-+]?[0-9_]*)?
+      | [0-9][0-9_]*(?::[0-9_]+)+(?:\.[0-9_]*)?
+      | \.(?:inf|Inf|INF|nan|NaN|NAN)
+    )""",
+    re.VERBOSE,
+)
+_BAD_PATTERN_CATEGORIES = frozenset({"Cc", "Cf", "Zs", "Zl", "Zp"})
 
 
 class PolicyError(ValueError):
@@ -152,6 +218,16 @@ class _StrictLoader(yaml.SafeLoader):
             line = event.start_mark.line + 1
             raise PolicyError(f"line {line}: YAML anchors and aliases are not allowed")
         return super().compose_node(parent, index)
+
+    def process_directives(self) -> Any:
+        if self.check_token(yaml.DirectiveToken):
+            token = self.peek_token()
+            line = token.start_mark.line + 1
+            raise PolicyError(
+                f"line {line}: YAML directives (%{token.name}) are not allowed; this loader "
+                "applies one fixed set of rules whatever version a file asks for"
+            )
+        return super().process_directives()
 
     def construct_mapping(self, node: Any, deep: bool = False) -> dict[str, Any]:
         # No merge-key handling on purpose: "<<" has no constructor here and fails.
@@ -194,18 +270,39 @@ def _strict_float(loader: _StrictLoader, node: yaml.ScalarNode) -> float:
             f"{_where(node)}: {node.value[:40]!r} is ambiguous, YAML reads it as a number; "
             "write a plain decimal such as 1.5, or quote it to mean the text"
         )
-    return float(node.value)
+    value = float(node.value)
+    if not math.isfinite(value) or Decimal(repr(value)) != Decimal(node.value):
+        raise PolicyError(
+            f"{_where(node)}: {node.value[:40]!r} cannot be held exactly as written, a float "
+            f"would make it {value!r}; write a number a float can hold, or quote it to mean "
+            "the text"
+        )
+    return value
+
+
+def _strict_str(loader: _StrictLoader, node: yaml.ScalarNode) -> str:
+    if not node.style and _NUMBERISH.fullmatch(node.value):
+        raise PolicyError(
+            f"{_where(node)}: {node.value[:40]!r} is ambiguous, it looks like a number but "
+            "YAML versions disagree on it; write a plain decimal such as 1000 or 1.5, or "
+            "quote it to mean the text"
+        )
+    return loader.construct_scalar(node)
 
 
 _StrictLoader.add_constructor("tag:yaml.org,2002:bool", _strict_bool)
 _StrictLoader.add_constructor("tag:yaml.org,2002:int", _strict_int)
 _StrictLoader.add_constructor("tag:yaml.org,2002:float", _strict_float)
+_StrictLoader.add_constructor("tag:yaml.org,2002:str", _strict_str)
 
 
 def _load_yaml(text: str) -> Any:
     if type(text) is not str:
         raise PolicyError("policy text must be a string")
-    if len(text) > MAX_POLICY_BYTES:
+    if (
+        len(text) > MAX_POLICY_BYTES
+        or len(text.encode("utf-8", "surrogatepass")) > MAX_POLICY_BYTES
+    ):
         raise PolicyError(f"policy is larger than {MAX_POLICY_BYTES} bytes")
     try:
         return yaml.load(text, Loader=_StrictLoader)  # noqa: S506 (a SafeLoader subclass)
@@ -260,6 +357,18 @@ def _names(value: Any, what: str) -> tuple[str, ...]:
     return tuple(value)
 
 
+def _pattern_problem(pattern: str) -> str | None:
+    """Why this tool pattern is refused, or None. Tool names never hold blanks."""
+    for ch in pattern:
+        if ch.isspace() or unicodedata.category(ch) in _BAD_PATTERN_CATEGORIES:
+            return (
+                f"tool pattern {pattern[:60]!r} contains whitespace or a control character "
+                f"(U+{ord(ch):04X}); if it is an unquoted YAML scalar that runs over several "
+                "lines, a list dash is missing"
+            )
+    return None
+
+
 def _conditions(value: Any, what: str) -> tuple[Constraint, ...]:
     if type(value) is not dict or not value:
         raise PolicyError(f"{what} must be a non-empty mapping of argument to operators")
@@ -302,6 +411,10 @@ class Rule:
         if type(self.effect) is not str or self.effect not in EFFECTS:
             raise PolicyError(f"{what}: unknown effect {self.effect!r}")
         object.__setattr__(self, "tools", _names(self.tools, f"{what}: tools"))
+        for pattern in self.tools:
+            problem = _pattern_problem(pattern)
+            if problem:
+                raise PolicyError(f"{what}: {problem}")
         for name in ("when", "unless"):
             value = tuple(getattr(self, name))
             if not all(type(c) is Constraint for c in value):
@@ -374,6 +487,48 @@ class PolicyDecision:
     reason: str
 
 
+def _warnings(rules: tuple[Rule, ...]) -> tuple[str, ...]:
+    """The traps of "What a policy author must know" that can be seen in the rules."""
+    out: list[str] = []
+    for rule in rules:
+        if rule.effect == ALLOW:
+            continue
+        if rule.absent:
+            out.append(
+                f"rule {rule.id!r}: `absent` on a {rule.effect} rule is a presence test the "
+                f"caller controls; sending {rule.absent[0]!r} with any value, even null, "
+                "switches the rule off"
+            )
+        for condition in rule.when:
+            if condition.op == "any":
+                out.append(
+                    f"rule {rule.id!r}: `any` in `when` on a {rule.effect} rule is a presence "
+                    f"test the caller controls; leaving {condition.arg!r} out switches the "
+                    "rule off"
+                )
+    broad = [rule.id for rule in rules if rule.effect == ALLOW and "*" in rule.tools]
+    if broad:
+        for rule in rules:
+            exact = [t for t in rule.tools if "*" not in t]
+            if rule.effect == DENY and exact:
+                out.append(
+                    f"rule {rule.id!r}: denies the exact tool name {exact[0]!r} while rule "
+                    f'{broad[0]!r} allows "*"; any other spelling the tool layer accepts '
+                    "is allowed, so list the allowed tools instead"
+                )
+    return tuple(out)
+
+
+def _absent_unless_clash(rule: Rule) -> str | None:
+    clash = sorted({c.arg for c in rule.unless} & set(rule.absent))
+    if not clash:
+        return None
+    return (
+        f"rule {rule.id!r}: argument {clash[0]!r} is in both absent and unless; the rule only "
+        "applies when the argument is missing, so the exception can never be proven"
+    )
+
+
 @dataclass(frozen=True)
 class Policy:
     """An ordered, validated list of rules."""
@@ -389,6 +544,12 @@ class Policy:
             if rule.id in seen:
                 raise PolicyError(f"duplicate rule id {rule.id!r}")
             seen.add(rule.id)
+        object.__setattr__(self, "_warnings", _warnings(self.rules))
+
+    @property
+    def warnings(self) -> tuple[str, ...]:
+        """Load-time advice about rules a caller can steer. Never changes a decision."""
+        return self._warnings
 
     @classmethod
     def from_dict(cls, data: Any) -> Policy:
@@ -408,15 +569,25 @@ class Policy:
 
     @classmethod
     def from_yaml(cls, text: str) -> Policy:
-        return cls.from_dict(_load_yaml(text))
+        loaded = cls.from_dict(_load_yaml(text))
+        for rule in loaded.rules:
+            problem = _absent_unless_clash(rule)
+            if problem:
+                raise PolicyError(problem)
+        return loaded
 
     @classmethod
     def from_file(cls, path: str | Path) -> Policy:
         try:
             with open(path, "rb") as handle:
-                raw = handle.read(MAX_POLICY_BYTES + 1)
+                raw = handle.read()  # all of it: a partial read must never be parsed
+        except OSError as exc:
+            raise PolicyError(f"cannot read policy file: {exc}") from exc
+        if len(raw) > MAX_POLICY_BYTES:
+            raise PolicyError(f"policy is larger than {MAX_POLICY_BYTES} bytes")
+        try:
             text = raw.decode("utf-8")
-        except (OSError, UnicodeDecodeError) as exc:
+        except UnicodeDecodeError as exc:
             raise PolicyError(f"cannot read policy file: {exc}") from exc
         return cls.from_yaml(text)
 

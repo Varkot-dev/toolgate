@@ -1,0 +1,207 @@
+# toolgate: plan
+
+An authorization gateway for LLM agents.
+
+## 1. The problem
+
+An agent that can call tools usually holds one broad, long-lived credential, such as an API key or a user's OAuth token. That creates three risks:
+
+1. **The agent acts on text it should only read.** A document or tool result can contain instructions, and the agent may carry them out with the user's authority. In security terms this is a confused deputy.
+2. **Standing access is far wider than the task.** The task needs "read one calendar"; the credential allows everything, indefinitely.
+3. **Delegation has no limits.** An orchestrator passes its full credential to every sub-agent.
+
+Afterwards, nobody can reconstruct who authorized what.
+
+The principle behind this project: the model does not decide what it is allowed to do. A separate component outside the model checks every tool call against an explicit grant. This is ordinary least-privilege access control applied to agents.
+
+## 2. What exists today (verify before building)
+
+**MCP authorization.** The Model Context Protocol's authorization spec is based on OAuth 2.1. The current revision in late 2026 is 2026-07-28. An MCP server acts as an OAuth 2.1 resource server: it validates tokens and does not issue them. Servers publish Protected Resource Metadata (RFC 9728), and clients send the `resource` parameter (RFC 8707) so each token is bound to one server. Spec: https://modelcontextprotocol.io/specification/2026-07-28/basic/authorization
+
+**OAuth building blocks to know.**
+- Token Exchange (RFC 8693), including the nested `act` claim that records who is acting for whom
+- DPoP proof of possession (RFC 9449)
+- Rich Authorization Requests (RFC 9396)
+- JWT access tokens (RFC 9068)
+
+**IETF drafts on agent authorization (2026, all still drafts).**
+- Agent Authorization Profile for OAuth 2.0 (draft-aap-oauth-profile)
+- OAuth 2.0 Extension: On-Behalf-Of User Authorization for AI Agents
+- Credential Delegation Protocol for AI Agents (draft-sweeney-wimse-credential-delegation), which combines RFC 8693, 9449 and 9396
+- Verifiable Attenuated Delegation for AI Agent Chains (draft-asor-wimse-agent-delegation-chain)
+
+Read at least the last two. The delegation design here should be explainable in their vocabulary.
+
+**Capability tokens.** Macaroons (Birgisson and coauthors at Google, NDSS 2014) are tokens whose holder can add restrictions that only narrow them. Biscuit is a public-key successor. The attenuation idea in this project comes from that line of work.
+
+**Policy engines.** Cedar (AWS) and Open Policy Agent. Google's Zanzibar paper (2019) describes relationship-based access control at scale and is a useful contrast.
+
+**Information-flow control for agents.** "Defeating Prompt Injections by Design" (Debenedetti and coauthors, Google and Google DeepMind with ETH Zurich, arXiv 2503.18813), known as CaMeL. A privileged model sees only the user's request and writes the plan as code; a separate quarantined model with no tool access parses untrusted content; a custom interpreter attaches metadata ("capabilities") to every value recording where it came from and who may receive it, and security policies are checked when tools are called. Code: github.com/google-research/camel-prompt-injection. Section 3.7 builds a smaller version of this idea into the gateway.
+
+**The gap this project fills.** MCP authorization covers how a client obtains a token for a server. It says little about limits on individual calls and arguments ("may send email, only to this domain, at most 3 per task"), about narrowing authority down a chain of sub-agents, or about human approval. That is what to build.
+
+## 3. Design
+
+```
+agent ── tool call + token ──▶ GATEWAY ──▶ real tool or MCP server
+                                 │
+          ┌──────────────────────┼───────────────────────┐
+     verify token          policy decision            audit log
+  (signature, expiry,     allow / deny / needs      (hash chained,
+   audience, revocation)    human approval           every decision)
+```
+
+### 3.1 Capabilities
+A capability is a tool name plus constraints on its arguments. The constraint language is deliberately small and closed:
+
+| operator | meaning |
+|---|---|
+| `eq` | argument equals a value |
+| `in` | argument is in an allow-list |
+| `max` | numeric argument is at most a ceiling |
+| `glob` | string argument matches a pattern |
+| `max_calls` | budget on number of calls |
+
+A grant is a set of capabilities, an expiry time and the delegation chain.
+
+**Fail closed:** unknown tool, missing argument or unknown operator means deny.
+
+### 3.2 The core algorithm: attenuation
+When an agent requests a weaker token for a sub-agent, the gateway must show that the child grant allows nothing the parent does not. "Child constraint is at least as strict as parent constraint" is defined case by case:
+
+| parent | child is accepted when |
+|---|---|
+| `eq a` | child is `eq a` |
+| `in S` | child is `eq a` with a in S, or `in T` with T a subset of S |
+| `max m` | child is `max n` with n <= m, or `eq`/`in` with every value <= m |
+| `glob g` | child is `eq`/`in` with every value matching g, or the identical pattern, or a pattern that extends a literal prefix (parent `reports/*`, child `reports/q3/*`) |
+
+- A child capability is covered if, for every parent constraint, some child constraint on the same argument is at least as strict.
+- A child grant is valid if every one of its capabilities is covered by some parent capability and the child's expiry is no later than the parent's.
+
+The check is **sound but not complete**. It never accepts an escalation, but it rejects some safe requests: general pattern containment is hard to decide, and a child covered only by the combination of two parent capabilities is rejected. For a security check that is the right trade, and explaining why is the strongest interview material in this project.
+
+**How to test it.** Property-based testing with Hypothesis: generate random parent grants, random accepted child grants and random calls, then assert that every call the child allows is also allowed by the parent. That single property is the security invariant of the whole system.
+
+### 3.3 Tokens
+JWTs signed with Ed25519.
+- Claims: `iss`, `aud` (the one gateway or tool server the token is for), `sub` (the user), `act` (actor chain in the RFC 8693 style), `exp` (minutes, not days), `jti`, `caps`, `chain` (ancestor token ids).
+- Revocation: revoking any ancestor invalidates every descendant.
+- A depth limit on delegation.
+- Later milestone: DPoP-style key binding, so a copied token is useless without the holder's private key.
+
+### 3.4 Policy and human approval
+Operator policy sits above grants. A grant says what the user delegated; policy says what the organization permits. Rules are YAML with effects `allow`, `deny` and `approve`. Deny beats approve, approve beats allow, and the default is deny. `approve` holds the call in a queue until a person accepts or rejects it, and that decision is logged with who made it.
+
+### 3.5 Audit log
+Append-only. Each entry stores a hash of the previous entry, so changing or removing any record breaks the chain, and a `verify` command reports the first bad entry. Each entry holds the time, token id, actor chain, tool, a hash of the arguments, the decision and the rule that fired.
+
+Know the limit: a hash chain shows that records were altered, but someone with full write access could rebuild the entire chain. The remedy is to publish the latest hash somewhere external. Describe this in the README and implement it as a stretch goal.
+
+### 3.6 MCP proxy mode
+The gateway runs in front of an MCP server. It reduces `tools/list` to what the token allows, so the agent never sees tools it cannot use, and it enforces on `tools/call`.
+
+### 3.7 Provenance: permissions that depend on where data came from
+Sections 3.1 to 3.6 ask "may this agent call this tool with these arguments?" This section adds "where did these arguments come from?"
+
+Build it in two levels.
+
+**Level 1, session labels (coarse).** Every tool is marked as returning trusted or untrusted content (a web fetch or an inbox read is untrusted). Once a session has read untrusted content, the session is labeled, and policy can require approval for sensitive tools in a labeled session. Simple and conservative, but it flags a lot.
+
+**Level 2, value labels (precise).**
+- The gateway keeps tool results and gives the agent a handle for each one. Each stored value carries a label: its sources (user, a named tool, untrusted) and its allowed readers.
+- A tool argument is either a literal written by the model or a reference to a handle. References have known provenance. Literals written after the session read untrusted content are treated as untrusted.
+- Derived values take the union of their inputs' sources. Combining a trusted and an untrusted value gives an untrusted value.
+- Two new policy conditions: `source_in` (the argument's sources must all be in a set) and `readers_include` (the destination must be an allowed reader of the data being sent). Example rule: `send_email.to` must come from the user or the contacts tool; the body may only contain data whose readers include the recipient.
+- Plan-then-execute mode, following CaMeL: one model call sees only the user's request and produces a short plan in a restricted format; steps that parse untrusted content run in a separate call with no tools; the gateway executes the plan and tracks labels through it.
+
+Things to be able to explain:
+- Why this is stronger than argument constraints alone: it blocks misuse that stays inside the allowed arguments.
+- Label creep: conservative propagation labels more and more values untrusted until everything needs approval. Measure it and show the usability cost.
+- What it cannot see: information that leaks through which branch was taken or whether a call happened at all (implicit flows).
+- How it differs from CaMeL: CaMeL enforces this in an interpreter around the model; this project enforces it at the tool boundary. State the trade-offs and do not claim CaMeL's guarantees.
+
+### 3.8 Offline attenuation with chained signatures
+In section 3.3 an agent asks the gateway for a weaker token. Here the agent narrows a token by itself, with no network call, and nobody can widen one.
+
+**Construction 1, macaroon style (HMAC).**
+- The gateway holds a root key. It issues a token with an identifier and signature **sig0 = HMAC(root_key, identifier)**.
+- To add a restriction c1, the holder computes **sig1 = HMAC(sig0, c1)**, appends c1 and replaces sig0 with sig1. Each further restriction chains the same way.
+- The gateway verifies by recomputing the chain from its root key and comparing the final signature, then checks that every restriction holds for the call.
+- Why a holder cannot remove a restriction: removing c1 requires sig0, and the holder of the narrowed token only has sig1. HMAC cannot be run backwards.
+
+**Construction 2, public-key chain (Biscuit style).** HMAC tokens can only be verified by whoever holds the root key. Replace each step with an Ed25519 signature: each block is signed by the previous block's private key and names a fresh public key for the next block. Anyone with the root public key can verify. Implement Construction 1 first.
+
+**The point to notice.** Restrictions are only ever added and all must hold, so every derived token is weaker by construction. The online exchange in 3.2 needs a subsumption check because the child grant is written fresh; the offline chain needs none. Explaining why the two designs differ here is strong material.
+
+Limits to state: these are bearer tokens, so theft still matters and proof of possession still applies; revocation needs a lookup, which removes part of the offline benefit; long chains grow the token.
+
+### 3.9 Proving the attenuation check with an SMT solver
+Property tests in M0 sample the input space. This milestone has a solver search all of it.
+
+- Model each constraint operator as a formula over a symbolic argument value in Z3 (integers and reals for `max`, finite sets for `in`, Z3's string theory for prefix patterns).
+- For each row of the table in 3.2, ask: does there exist an argument that the child constraint accepts and the parent rejects, given the row's side condition? An answer of unsatisfiable means that rule can never permit an escalation.
+- Then the reverse question for completeness: use the solver to find child constraints that are truly safe but that the checker rejects. Count them to measure how incomplete the checker is, and decide whether any rule is worth extending.
+- Differential testing: generate random pairs, compare the Python checker's answer with the solver's. Any case where the checker accepts and the solver finds a counterexample is a security bug.
+
+Be precise about the claim: the solver proves the rules as modeled. The Python implementation is tied to that model by the differential tests, not by proof. General glob patterns stay outside the proven fragment; say so.
+
+## 4. Milestones
+
+| # | Milestone | Done when |
+|---|---|---|
+| M0 | Capability model: constraints, capabilities, grants, `allows(call)`, attenuation check | Hypothesis property tests pass on 10,000+ generated cases; every row of the attenuation table has a unit test |
+| M0b | Solver verification of the attenuation rules (section 3.9) with Z3, plus differential tests against the Python checker | Every table row returns unsatisfiable for the escalation query; the completeness gap is measured and reported |
+| M1 | Tokens: mint, verify, exchange, revoke with ancestor chain, depth limit | Tests cover expired, wrong audience, bad signature, revoked ancestor and an attempted escalation |
+| M1b | Offline attenuation (section 3.8): HMAC chain first, then the Ed25519 chain | Tests show a holder can add a restriction offline, cannot remove one, and a modified chain fails verification |
+| M2 | Policy engine and hash-chained audit log with `verify` | Editing any log line is detected at the correct index |
+| M3 | Gateway service (FastAPI): `/token`, `/token/exchange`, `/call`, `/approvals`, `/audit/verify` | An end-to-end test drives a scripted client through allow, deny and approve |
+| M4 | MCP proxy mode in front of a simple real MCP server, following the current spec | An MCP client connected through the gateway sees and can call only permitted tools |
+| M4b | Provenance (section 3.7): session labels, then value labels with handles, then plan-then-execute mode | Tests show labels propagate correctly through derived values; label creep is measured on the sandbox tasks |
+| M5 | Agent demo: a Gemini or local model with email, calendar and file tools in a sandbox, run with and without the gateway | A results table produced by a script comparing four configurations (no gateway, argument constraints only, plus session labels, plus value labels): unintended tool calls, normal tasks still completed, and approvals requested |
+| M6 | Measurement and polish: added latency per call (p50, p99), throughput, README, demo recording | README complete, repo ready to make public |
+
+Order of work: M0, M0b, M1, M1b, M2, M3, M4, M4b, M5, M6. The project is worth showing from M3 onward; each later milestone adds a distinct talking point.
+
+Stretch: DPoP binding; external anchoring of the audit log head; Cedar or OPA as an alternative policy backend; suggesting least-privilege grants from audit logs.
+
+## 5. What the README will report
+1. **Security invariant:** number of property-test cases with zero violations, and the solver result for each attenuation rule.
+2. **Protection:** unintended tool calls with and without the gateway on the sandbox scenarios.
+3. **Usefulness:** normal tasks still completed with the gateway on. A gateway that blocks everything is worthless.
+4. **Cost:** latency added per tool call, and how many approvals each configuration asks a person for.
+
+## 6. Visuals
+- **Hero:** an animated diagram of one tool call passing through the gateway, being denied, and the audit entry appearing.
+- **Delegation tree:** an orchestrator and its sub-agents, each node showing its shrinking set of capabilities.
+- **Dashboard:** live decision feed, approval queue, and the audit chain with a "change this entry" button that makes verification fail visibly.
+- **Provenance graph:** for one task, every value as a node colored by source, with the blocked call highlighted.
+- **Token chain:** a token gaining restrictions step by step, with the signature changing at each step and a failed attempt to drop one.
+- **Charts:** protection vs approvals requested across the four configurations; unintended calls with and without the gateway; latency histogram.
+
+## 7. Stack
+Python, Z3 (`z3-solver`), FastAPI, PyJWT with `cryptography` (Ed25519), Pydantic, SQLite, PyYAML, Hypothesis, pytest. The official MCP Python SDK for M4. Dashboard as one static page with HTMX, or a small React app.
+
+## 8. Questions you should be able to answer
+1. What is a confused deputy, and how does an agent become one?
+2. Why may the attenuation check be incomplete but never unsound?
+3. Why use short-lived tokens and revocation together?
+4. What does the `aud` claim prevent? What does DPoP add?
+5. Authentication vs authorization, in this system specifically.
+6. Why does a hash chain reveal tampering, and what does it not protect against?
+7. Why filter `tools/list` as well as enforcing on `tools/call`?
+8. How does this differ from macaroons, from OAuth scopes and from Zanzibar?
+9. What can this gateway not prevent? (An allowed tool used badly within its constraints; approval fatigue.)
+10. How would you scale it to thousands of calls per second?
+11. What does provenance tracking stop that argument constraints cannot?
+12. What is label creep, and how did you measure its cost?
+13. What is an implicit flow, and why does this design not catch it?
+14. How does your design differ from CaMeL, and what guarantee does CaMeL have that yours does not?
+15. Walk through the HMAC chain. Why can a holder add a restriction but not remove one?
+16. Why does the offline chain need no subsumption check while the online exchange does?
+17. Why move from HMAC to a public-key chain?
+18. What exactly did the solver prove, and what is still only tested?
+19. Soundness vs completeness: which did you prove, which did you measure, and why that way round?
+
+## Decision log
+(empty)

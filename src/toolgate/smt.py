@@ -50,6 +50,20 @@ def _make_value_sort() -> z3.DatatypeSortRef:
 Value = _make_value_sort()
 
 
+MAX_CODE_POINT = 0x2FFFF  # the largest character Z3's default string theory has
+
+
+def string_lit(text: str) -> z3.SeqRef:
+    """A Z3 string constant for exactly this Python string.
+
+    Every character is written as an explicit code point escape, because Z3
+    would otherwise read a literal backslash-u sequence in the text as an escape.
+    """
+    if any(ord(ch) > MAX_CODE_POINT for ch in text):
+        raise ValueError("character outside the range of the solver's string theory")
+    return z3.StringVal("".join(f"\\u{{{ord(ch):x}}}" for ch in text))
+
+
 def lit(value: Any) -> z3.ExprRef:
     """The model value for a Python constraint value (bool, int, float or str)."""
     if type(value) is bool:
@@ -58,7 +72,7 @@ def lit(value: Any) -> z3.ExprRef:
         f = Fraction(value)
         return Value.N(z3.Q(f.numerator, f.denominator))
     if type(value) is str:
-        return Value.S(z3.StringVal(value))
+        return Value.S(string_lit(value))
     raise ValueError(f"no model literal for {type(value).__name__}")
 
 
@@ -71,9 +85,9 @@ def glob_regex(pattern: str) -> z3.ReRef:
         if i:
             pieces.append(anything)
         if part:
-            pieces.append(z3.Re(z3.StringVal(part)))
+            pieces.append(z3.Re(string_lit(part)))
     if not pieces:
-        return z3.Re(z3.StringVal(""))
+        return z3.Re(string_lit(""))
     return pieces[0] if len(pieces) == 1 else z3.Concat(*pieces)
 
 

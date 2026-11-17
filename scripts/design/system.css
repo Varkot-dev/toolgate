@@ -1,0 +1,183 @@
+/* toolgate figure design system.
+ *
+ * Every README figure is an HTML page built on these tokens and rendered to
+ * PNG/GIF by scripts/design/render.py. Pages are designed at their README
+ * display width (800 CSS px), so a size here is the size a reader sees.
+ * Files are captured at 2x.
+ *
+ * Layout concept: soft tinted stage, white cards with real shadows, icon
+ * badges for every actor, plain-language pills, SVG connectors on top.
+ */
+
+@font-face {
+  font-family: "Jakarta";
+  src: url("fonts/plus-jakarta-sans-latin-500-normal.woff2") format("woff2");
+  font-weight: 500;
+}
+@font-face {
+  font-family: "Jakarta";
+  src: url("fonts/plus-jakarta-sans-latin-700-normal.woff2") format("woff2");
+  font-weight: 700;
+}
+@font-face {
+  font-family: "Jakarta";
+  src: url("fonts/plus-jakarta-sans-latin-800-normal.woff2") format("woff2");
+  font-weight: 800;
+}
+@font-face {
+  font-family: "Mono";
+  src: url("fonts/jetbrains-mono-latin-500-normal.woff2") format("woff2");
+  font-weight: 500;
+}
+
+:root {
+  /* color */
+  --stage-a: #f3f2ff;      /* stage gradient, top left */
+  --stage-b: #fbf6ff;      /* stage gradient, bottom right */
+  --card: #ffffff;
+  --ink: #1d1b3a;          /* titles, names: 15.9:1 on card */
+  --muted: #5e5c7e;        /* secondary text: 6.3:1 on card */
+  --hair: #e9e7f5;         /* card borders, quiet lines */
+  --chip: #f4f3fb;         /* neutral pill fill */
+
+  --accent: #5b4cf0;       /* gateway, structure, motion */
+  --accent-ink: #4437d4;
+  --accent-tint: #eeecff;
+
+  --ok: #12a46f;           /* allowed / accepted, solid icon fill */
+  --ok-ink: #0b6e4b;       /* 5.9:1 on ok-tint */
+  --ok-tint: #e2f6ec;
+
+  --no: #ef5a4c;           /* denied / rejected, solid icon fill */
+  --no-ink: #b8322a;       /* 5.3:1 on no-tint */
+  --no-tint: #fdeceb;
+
+  /* type: three sizes */
+  --font: "Jakarta", sans-serif;
+  --mono: "Mono", monospace;
+  --size-title: 30px;
+  --size-label: 18px;
+  --size-body: 16px;
+
+  /* shape */
+  --r-stage: 28px;
+  --r-card: 20px;
+  --r-badge: 12px;
+  --shadow: 0 1px 2px rgba(29, 27, 58, 0.06), 0 12px 32px -10px rgba(29, 27, 58, 0.18);
+  --shadow-soft: 0 1px 2px rgba(29, 27, 58, 0.05), 0 6px 16px -8px rgba(29, 27, 58, 0.14);
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+*, *::before, *::after { transition: none !important; animation: none !important; }
+
+html, body { background: transparent; }
+body {
+  font-family: var(--font);
+  font-size: var(--size-body);
+  font-weight: 500;
+  color: var(--ink);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: geometricPrecision;
+  font-kerning: normal;
+}
+
+.stage {
+  position: relative;
+  width: 800px;
+  padding: 36px 32px 32px;
+  background:
+    radial-gradient(420px 260px at 88% 8%, rgba(214, 196, 255, 0.45), transparent 70%),
+    radial-gradient(380px 260px at 6% 96%, rgba(190, 214, 255, 0.40), transparent 70%),
+    linear-gradient(135deg, var(--stage-a), var(--stage-b));
+  border-radius: var(--r-stage);
+  overflow: hidden;
+}
+.square .stage { border-radius: 0; }
+
+/* headline */
+.title {
+  font-size: var(--size-title);
+  font-weight: 800;
+  letter-spacing: -0.015em;
+  line-height: 1.15;
+}
+.subtitle {
+  margin-top: 8px;
+  font-size: var(--size-label);
+  font-weight: 500;
+  color: var(--muted);
+  letter-spacing: -0.005em;
+}
+
+/* cards */
+.card {
+  position: relative;
+  background: var(--card);
+  border-radius: var(--r-card);
+  box-shadow: var(--shadow);
+  padding: 18px;
+}
+.card.focus { box-shadow: 0 0 0 2px var(--accent), var(--shadow); }
+.card.reject {
+  background: rgba(255, 255, 255, 0.72);
+  box-shadow: none;
+  outline: 2px dashed var(--no);
+  outline-offset: -2px;
+}
+
+.head { display: flex; align-items: center; gap: 12px; }
+.head .name { font-size: var(--size-label); font-weight: 700; letter-spacing: -0.01em; line-height: 1.2; }
+.head .sub { color: var(--muted); line-height: 1.2; white-space: nowrap; }
+.head .meta { margin-left: auto; display: flex; align-items: center; gap: 6px; color: var(--muted); white-space: nowrap; }
+.head .meta svg { width: 18px; height: 18px; }
+
+/* icon badge: soft tile, line icon */
+.badge {
+  flex: none;
+  width: 44px; height: 44px;
+  border-radius: var(--r-badge);
+  display: grid; place-items: center;
+  background: var(--accent-tint); color: var(--accent);
+}
+.badge svg { width: 24px; height: 24px; stroke-width: 2; }
+.badge.solid { background: var(--accent); color: #fff; box-shadow: 0 6px 14px -6px rgba(91, 76, 240, 0.7); }
+.badge.user { background: #fbe9f6; color: #b5338f; }
+.badge.ok { background: var(--ok-tint); color: var(--ok-ink); }
+.badge.no { background: var(--no-tint); color: var(--no-ink); }
+.badge.plain { background: var(--chip); color: var(--muted); }
+
+/* pills */
+.pill {
+  display: inline-flex; align-items: center; gap: 8px;
+  height: 34px; padding: 0 14px 0 10px;
+  border-radius: 999px;
+  background: var(--chip); color: var(--ink);
+  white-space: nowrap; line-height: 1;
+}
+.pill svg { width: 18px; height: 18px; flex: none; stroke-width: 2.2; }
+.pill.mono { font-family: var(--mono); letter-spacing: -0.01em; }
+.pill.ok { background: var(--ok-tint); color: var(--ok-ink); }
+.pill.no { background: var(--no-tint); color: var(--no-ink); }
+.pill.accent { background: var(--accent-tint); color: var(--accent-ink); }
+.pill.strong { font-weight: 700; }
+
+/* round status dot with a solid fill and white mark */
+.dot {
+  flex: none;
+  width: 30px; height: 30px; border-radius: 50%;
+  display: grid; place-items: center; color: #fff;
+  border: 3px solid #fff;
+  box-shadow: var(--shadow-soft);
+}
+.dot svg { width: 16px; height: 16px; stroke-width: 3; }
+.dot.ok { background: var(--ok); }
+.dot.no { background: var(--no); }
+.dot.sm { width: 22px; height: 22px; border-width: 0; box-shadow: none; }
+.dot.sm svg { width: 14px; height: 14px; stroke-width: 3; }
+
+.mono { font-family: var(--mono); }
+.muted { color: var(--muted); }
+
+/* connectors layer */
+svg.wires { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; pointer-events: none; }
+svg.wires path { fill: none; stroke-linecap: round; stroke-linejoin: round; }

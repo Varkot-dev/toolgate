@@ -3,9 +3,11 @@
 Builds four grants with the real library, validates every edge with
 toolgate.check_attenuation, adds one request the checker rejects, and writes
 
-    assets/delegation_tree.png
-    assets/delegation_tree.svg
     results/m0_delegation_tree.json
+    assets/delegation_tree.png    2x, drawn from scripts/design/delegation_tree.html
+
+The figure is an HTML page on the shared design system in scripts/design/,
+captured with headless Chromium (see scripts/design/render.py).
 
 Run from the repo root: .venv/bin/python scripts/fig_delegation_tree.py
 """
@@ -13,9 +15,9 @@ Run from the repo root: .venv/bin/python scripts/fig_delegation_tree.py
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass
 
 import style
+from design.render import Shot, render
 from toolgate import Capability, Grant, check_attenuation
 
 T0 = 1_800_000_000  # fixed "now" in epoch seconds, so the output never changes
@@ -91,77 +93,22 @@ def chip_text(cap: Capability) -> str:
     return words
 
 
-# ---------------------------------------------------------------- layout, logical px
+# ---------------------------------------------------------------- the page
 
-W, H = 800, 584
-PAD = 16  # inside a node
-NODE_H = 104
-HEAD_DY, CHIP_DY = 28, 70  # name baseline row and chip row, from a node's top
-CHIP_GAP = 8
-COL_W, COL_GAP = 232, 20
-ROW_Y = [96, 272, 448]  # node tops
+NAMES = {"user": "user", "orchestrator": "orchestrator", "research": "researcher", "mailer": "mailer"}
+ICON = {"read_file": "file-text", "send_email": "mail", "search_calendar": "calendar"}
 
 
-@dataclass
-class Node:
-    name: str
-    grant: Grant
-    x: float
-    y: float
-    w: float
-    rejected: bool = False
-
-    @property
-    def cx(self) -> float:
-        return self.x + self.w / 2
-
-    @property
-    def bottom(self) -> float:
-        return self.y + NODE_H
-
-    def chips(self) -> list[str]:
-        return [chip_text(cap) for cap in self.grant.capabilities]
-
-
-def chips_width(texts: list[str]) -> float:
-    return sum(style.text_width(t) + 24 for t in texts) + CHIP_GAP * (len(texts) - 1)
-
-
-def draw_node(c: style.Canvas, node: Node) -> None:
-    if node.rejected:
-        c.box(node.x, node.y, node.w, NODE_H, fill=style.CARD, edge=style.BAD, dashed=True)
-    else:
-        c.box(node.x, node.y, node.w, NODE_H)
-    minutes = round((node.grant.expires_at - T0) / 60)
-    c.text(node.x + PAD, node.y + HEAD_DY, node.name, size=style.LABEL, weight=style.STRONG)
-    expiry = f"{minutes} min"
-    right = node.x + node.w - PAD
-    c.text(right, node.y + HEAD_DY, expiry, size=style.SMALL, color=style.GRAY, ha="right")
-    c.clock(right - style.text_width(expiry, style.SMALL) - 15, node.y + HEAD_DY)
-    x = node.x + PAD
-    for text in node.chips():
-        _, w = c.chip(x, node.y + CHIP_DY, text, tone="bad" if node.rejected else "plain")
-        x += w + CHIP_GAP
-
-
-def draw_edge(c: style.Canvas, parent: Node, child: Node, ok: bool, label: str = "") -> None:
-    """Straight down from parent to child, with the checker's verdict as a badge."""
-    x, y0, y1 = child.cx, parent.bottom + 6, child.y - 4
-    tone = "good" if ok else "bad"
-    c.arrow((x, y0), (x, y1), tone=tone, dashed=not ok)
-    mid = (y0 + y1) / 2 - 2
-    c.badge(x, mid, tone)
-    if label:
-        right = child.cx < W / 2 + 1  # label on the side with room
-        c.text(
-            x + 22 if right else x - 22,
-            mid,
-            label,
-            size=style.SMALL,
-            color=style.GOOD if ok else style.BAD,
-            weight=style.STRONG,
-            ha="left" if right else "right",
-        )
+def node_view(key: str, name: str, g: Grant, rejected: bool = False) -> dict:
+    minutes = round((g.expires_at - T0) / 60)
+    return {
+        "key": key,
+        "name": name,
+        "role": "user" if key == "user" else "agent",
+        "rejected": rejected,
+        "note": f"{minutes} min",
+        "chips": [{"text": chip_text(c), "icon": ICON[c.tool]} for c in g.capabilities],
+    }
 
 
 def main() -> None:
@@ -194,49 +141,21 @@ def main() -> None:
     out.write_text(json.dumps(record, indent=2) + "\n")
 
     # 3. Draw, from the same grants the checker just judged.
-    c = style.Canvas(W, H)
-    c.title("Each hand-off can only narrow authority")
-
-    names = {
-        "user": "user",
-        "orchestrator": "orchestrator",
-        "research": "researcher",
-        "mailer": "mailer",
+    view = {
+        "title": "Each hand-off can only narrow authority",
+        "subtitle": "Every delegation is checked. Asking for more than the parent holds fails.",
+        "nodes": {k: node_view(k, NAMES[k], GRANTS[k]) for k in GRANTS}
+        | {"wider": node_view("wider", "researcher", REJECTED, rejected=True)},
+        "edges": [
+            {"parent": p, "child": c, "ok": r.ok, "label": "narrower"}
+            for (p, c), r in results.items()
+        ]
+        + [{"parent": "orchestrator", "child": "wider", "ok": denied.ok, "label": "wider, refused"}],
     }
-    top_w = (
-        max(
-            chips_width([chip_text(cap) for cap in GRANTS[k].capabilities])
-            for k in ("user", "orchestrator")
-        )
-        + 2 * PAD
-    )
-    top_w = max(top_w, 3 * COL_W + 2 * COL_GAP - 2 * 96)
-    nodes = {
-        "user": Node(names["user"], GRANTS["user"], (W - top_w) / 2, ROW_Y[0], top_w),
-        "orchestrator": Node(
-            names["orchestrator"], GRANTS["orchestrator"], (W - top_w) / 2, ROW_Y[1], top_w
-        ),
-    }
-    left = (W - 3 * COL_W - 2 * COL_GAP) / 2
-    cols = [left + k * (COL_W + COL_GAP) for k in range(3)]
-    nodes["research"] = Node(names["research"], GRANTS["research"], cols[0], ROW_Y[2], COL_W)
-    nodes["mailer"] = Node(names["mailer"], GRANTS["mailer"], cols[1], ROW_Y[2], COL_W)
-    wider = Node("researcher", REJECTED, cols[2], ROW_Y[2], COL_W, rejected=True)
-    for node in nodes.values():
-        assert chips_width(node.chips()) + 2 * PAD <= node.w, node.name
-
-    for (parent, child), result in results.items():
-        draw_edge(
-            c,
-            nodes[parent],
-            nodes[child],
-            result.ok,
-            "narrower: accepted" if parent == "user" else "",
-        )
-    draw_edge(c, nodes["orchestrator"], wider, denied.ok, "wider: rejected")
-    for node in [*nodes.values(), wider]:
-        draw_node(c, node)
-    for path in (*c.save("delegation_tree"), out):
+    style.ASSETS.mkdir(exist_ok=True)
+    png = style.ASSETS / "delegation_tree.png"
+    render("delegation_tree.html", view, [Shot(str(png), scale=2)])
+    for path in (png, out):
         print(path.relative_to(style.ROOT))
     print(f"rejected: {denied.reason}")
 

@@ -25,7 +25,8 @@ Configuration. The operator names, per tool, the kind of each argument:
 Kinds:
 
     path        posixpath.normpath, then refused if it is empty, ".", starts
-                with ".." or "/", or contains NUL or a backslash
+                with ".." or "/", contains NUL, a backslash or a control
+                character, or has a segment made only of dots ("...")
     email       exactly one address local@domain; the domain is lowercased;
                 refused if it holds whitespace, a comma, semicolon, angle
                 bracket, quote, a second "@", a control character or any
@@ -112,6 +113,9 @@ def canonical_path(value: Any, arg: str = "path") -> str:
     clean = posixpath.normpath(value)
     if clean in (".", "..") or clean.startswith(("/", "../")):
         raise CanonicalError("path_escapes_root", arg)
+    if any(set(segment) == {"."} for segment in clean.split("/")):
+        # "..." and longer: a plain name to POSIX, but not to every file system.
+        raise CanonicalError("bad_path", arg)
     return clean
 
 

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import sqlite3
 import threading
 
@@ -111,6 +112,84 @@ def test_charge_increments_every_entry_on_the_path(store):
     assert store.usage("mid", 1) == (1, 5)
     assert store.usage("mid", 0) == (0, None)
     assert store.usage("root", 0) == (1, 10)
+
+
+def test_refund_takes_one_call_back_off_every_entry_on_the_path(store):
+    store.register("root", [10])
+    store.register("leaf", [3, None])
+    path = [("leaf", 0), ("root", 0)]
+    assert store.charge(path) and store.charge(path)
+    assert store.refund(path) is True
+    assert store.usage("leaf", 0) == (1, 3) and store.usage("root", 0) == (1, 10)
+    assert store.usage("leaf", 1) == (0, None)  # an entry not on the path is untouched
+    # An entry listed twice was charged twice, so it is refunded twice.
+    assert store.charge([("root", 0), ("root", 0)])
+    assert store.usage("root", 0) == (3, 10)
+    assert store.refund([("root", 0), ("root", 0)])
+    assert store.usage("root", 0) == (1, 10)
+
+
+def test_refund_never_goes_below_zero_and_skips_what_it_does_not_know(store):
+    store.register("t", [2])
+    assert store.refund([("t", 0)]) is True
+    assert store.usage("t", 0) == (0, 2)  # not -1: the limit cannot be raised by refunding
+    assert store.charge([("t", 0)])
+    assert store.refund([("t", 0), ("never-registered", 0)]) is True
+    assert store.usage("t", 0) == (0, 2) and store.usage("never-registered", 0) is None
+    for bad in ([], None, [("t",)], [("t", -1)], [("", 0)], "t"):
+        assert store.refund(bad) is False
+    assert store.usage("t", 0) == (0, 2)
+    # A refunded call can be spent again, and the limit still holds afterwards.
+    assert store.charge([("t", 0)]) and store.charge([("t", 0)])
+    assert not store.charge([("t", 0)])
+
+
+def test_refund_works_for_a_revoked_token(store):
+    # The gateway refunds exactly when a token was revoked between charge and run.
+    store.register("t", [2])
+    assert store.charge([("t", 0)])
+    store.revoke("t")
+    assert store.refund([("t", 0)]) is True
+    assert store.usage("t", 0) == (0, 2)
+
+
+def test_concurrent_charges_and_refunds_balance(store):
+    store.register("t", [None])
+    barrier = threading.Barrier(8)
+
+    def work() -> None:
+        barrier.wait()
+        for _ in range(25):
+            assert store.charge([("t", 0)])
+            assert store.refund([("t", 0)])
+
+    threads = [threading.Thread(target=work) for _ in range(8)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert store.usage("t", 0) == (0, None)
+
+
+def test_sqlite_store_file_is_created_private_and_a_shared_one_is_refused(tmp_path):
+    path = tmp_path / "store.db"
+    old_umask = os.umask(0o022)  # the usual default, which would give 0644
+    try:
+        first = SqliteStore(str(path))
+    finally:
+        os.umask(old_umask)
+    first.register("t", [1])
+    first.close()
+    assert path.stat().st_mode & 0o777 == 0o600
+    for mode in (0o640, 0o604, 0o660, 0o644, 0o620):
+        os.chmod(path, mode)
+        with pytest.raises(sqlite3.Error, match="group- or world-accessible"):
+            SqliteStore(str(path))
+    os.chmod(path, 0o600)
+    again = SqliteStore(str(path))
+    assert again.usage("t", 0) == (0, 1)
+    again.close()
+    SqliteStore(":memory:").close()  # no file, nothing to check
 
 
 @pytest.mark.parametrize("exhausted", ["leaf", "mid", "root"])
@@ -518,6 +597,7 @@ def test_sqlite_opens_a_database_file_from_before_pruning(tmp_path):
         """
     )
     old.close()
+    os.chmod(path, 0o600)  # sqlite3 made it with the umask; the store now refuses that
 
     s = SqliteStore(path)
     assert s.usage("t", 0) == (1, 2)

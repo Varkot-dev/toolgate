@@ -1142,6 +1142,57 @@ def test_a_limited_child_of_an_unlimited_parent_is_limited():
     assert authority.store.usage(authority.verify(root).jti, 0) == (2, None)
 
 
+def test_refund_gives_back_exactly_what_authorize_charged():
+    authority, _ = make()
+    root = authority.mint("u", Grant((SEND, budgeted(10)), T0 + 300), "a0", ttl=300)
+    child = authority.exchange(root, [budgeted(5)], "a1", ttl=200)
+    grandchild = authority.exchange(child, [budgeted(4)], "a2", ttl=100)
+    kept = authority.authorize(child, READ_CALL)
+    charged = authority.authorize(grandchild, READ_CALL)
+    assert charged and kept
+    assert (used(authority, grandchild), used(authority, child), used(authority, root, 1)) == (
+        1,
+        2,
+        2,
+    )
+    assert authority.refund(charged) is True
+    # Every level of the grandchild's path gets one call back; the child's own call stays.
+    assert (used(authority, grandchild), used(authority, child), used(authority, root, 1)) == (
+        0,
+        1,
+        1,
+    )
+    assert used(authority, root, 0) == 0
+
+
+def test_refund_of_a_denied_authorization_changes_nothing():
+    authority, _ = make()
+    token = authority.mint("u", Grant((budgeted(1),), T0 + 300), "a0", ttl=300)
+    assert authority.authorize(token, READ_CALL)
+    exhausted = authority.authorize(token, READ_CALL)
+    not_granted = authority.authorize(token, Call("delete", {}))
+    assert not exhausted and not not_granted
+    assert authority.refund(exhausted) is False and authority.refund(not_granted) is False
+    assert used(authority, token) == 1
+    for bad in (None, True, (exhausted.decision, exhausted.verified)):
+        with pytest.raises(ValueError):
+            authority.refund(bad)
+
+
+def test_refund_reports_a_store_failure_as_unavailable():
+    class NoRefunds(MemoryStore):
+        def refund(self, path):
+            raise OSError("disk gone")
+
+    authority, _ = make(store=NoRefunds())
+    token = authority.mint("u", Grant((budgeted(2),), T0 + 300), "a0", ttl=300)
+    charged = authority.authorize(token, READ_CALL)
+    with pytest.raises(TokenError) as info:
+        authority.refund(charged)
+    assert info.value.code == "unavailable"
+    assert used(authority, token) == 1  # fails closed: the budget stays spent
+
+
 def test_a_denied_call_charges_nothing():
     authority, _ = make()
     parent = authority.mint("u", Grant((budgeted(3),), T0 + 300), "a0", ttl=300)
@@ -1525,8 +1576,45 @@ def test_a_charge_that_finishes_after_expiry_is_denied():
     assert not result
     assert result.decision.reason == "expired during authorization"
     assert result.verified.jti == claims_of(token)["jti"]
-    # The call was charged and stays charged: no refund.
-    assert authority.store.usage(result.verified.jti, 0) == (1, 3)
+    # The call was charged and will not run, so the charge was given back.
+    assert authority.store.usage(result.verified.jti, 0) == (0, 3)
+
+
+def test_a_clock_fault_right_after_the_charge_refunds_it():
+    clock = Clock()
+
+    class BrokenAfterCharge(MemoryStore):
+        def charge(self, path):
+            result = super().charge(path)
+            clock.now = float("nan")  # the second clock reading is invalid
+            return result
+
+    authority, _ = make(store=BrokenAfterCharge(), clock=clock)
+    token = authority.mint("u", Grant((budgeted(3),), T0 + 300), "a", ttl=60)
+    jti = claims_of(token)["jti"]
+    with pytest.raises(TokenError) as info:
+        authority.authorize(token, READ_CALL)
+    assert info.value.code == "unavailable"
+    assert authority.store.usage(jti, 0) == (0, 3)
+
+
+def test_a_late_refund_that_fails_inside_authorize_leaves_the_budget_spent():
+    clock = Clock()
+
+    class NoRefund(MemoryStore):
+        def charge(self, path):
+            result = super().charge(path)
+            clock.now = T0 + 60
+            return result
+
+        def refund(self, path):
+            raise OSError("disk gone")
+
+    authority, _ = make(store=NoRefund(), clock=clock)
+    token = authority.mint("u", Grant((budgeted(3),), T0 + 300), "a", ttl=60)
+    result = authority.authorize(token, READ_CALL)
+    assert not result and result.decision.reason == "expired during authorization"
+    assert authority.store.usage(claims_of(token)["jti"], 0) == (1, 3)  # fails closed
 
 
 def test_a_slow_charge_that_finishes_just_before_expiry_is_allowed():

@@ -26,7 +26,9 @@ from __future__ import annotations
 
 import contextlib
 import math
+import os
 import sqlite3
+import stat
 import threading
 from collections import Counter
 from collections.abc import Callable, Iterable, Sequence
@@ -98,6 +100,16 @@ class Store(Protocol):
 
     def charge(self, path: Sequence[Entry]) -> ChargeResult:
         """Atomically add one call to every entry on `path`, or to none."""
+        ...
+
+    def refund(self, path: Sequence[Entry]) -> bool:
+        """Atomically take one call back off every entry on `path`.
+
+        The inverse of a successful `charge(path)`, for a call that was charged
+        and then did not run. A counter never goes below zero, and an entry the
+        store no longer has is skipped. False (nothing changed) if `path` is
+        not a well-formed path.
+        """
         ...
 
     def usage(self, jti: str, index: int) -> tuple[int, int | None] | None:
@@ -265,6 +277,16 @@ class MemoryStore:
                 self._used[entry] += n
             return _OK
 
+    def refund(self, path: Sequence[Entry]) -> bool:
+        counts = _count_path(path)
+        if counts is None:
+            return False
+        with self._lock:
+            for entry, n in counts.items():
+                if entry in self._used:
+                    self._used[entry] = max(0, self._used[entry] - n)
+        return True
+
     def usage(self, jti: str, index: int) -> tuple[int, int | None] | None:
         with self._lock:
             entry = (jti, index)
@@ -301,8 +323,39 @@ def _to_sql(value: int | float | None) -> int | float | None:
     return value
 
 
+def _prepare_file(path: str) -> None:
+    """Create the database file readable by its owner only, before SQLite opens it.
+
+    SQLite would create it with the process umask, usually world-readable, and
+    the file holds every token id, budget and revocation. An existing file
+    that group or others can read or write is refused, the way the audit log
+    refuses a writable one. ":memory:", "" and "file:" URIs name no plain file
+    and are left to SQLite.
+    """
+    if path in ("", ":memory:") or path.startswith("file:"):
+        return
+    try:
+        fd = os.open(path, os.O_RDWR | os.O_CREAT, 0o600)
+    except OSError as exc:
+        raise sqlite3.OperationalError(
+            f"cannot open the store file: {exc.strerror or exc}"
+        ) from None
+    try:
+        mode = stat.S_IMODE(os.fstat(fd).st_mode)
+    finally:
+        os.close(fd)
+    if os.name == "posix" and mode & 0o077:
+        raise sqlite3.OperationalError(
+            f"refusing to open a store file that is group- or world-accessible (mode {mode:#o}); "
+            "remove those permissions, for example chmod 600"
+        )
+
+
 class SqliteStore:
     """SQLite-backed store. `path` is a file name or ":memory:".
+
+    The file is created with mode 0600, and an existing file that group or
+    others can access is refused.
 
     One connection guarded by a lock serves all threads of this process. Every
     write runs inside BEGIN IMMEDIATE, which takes SQLite's write lock up
@@ -312,6 +365,7 @@ class SqliteStore:
 
     def __init__(self, path: str, timeout: float = 30.0) -> None:
         self._lock = threading.Lock()
+        _prepare_file(str(path))
         # isolation_level=None: no implicit transactions, we write BEGIN/COMMIT.
         self._db = sqlite3.connect(
             str(path), timeout=timeout, isolation_level=None, check_same_thread=False
@@ -448,6 +502,22 @@ class SqliteStore:
                     "UPDATE budget SET used = used + ? WHERE jti = ? AND idx = ?", (n, jti, index)
                 )
             return _OK
+
+        return self._write(work)
+
+    def refund(self, path: Sequence[Entry]) -> bool:
+        counts = _count_path(path)
+        if counts is None:
+            return False
+
+        def work(db: sqlite3.Connection) -> bool:
+            # One transaction: every entry is given back, or (on an error) none.
+            for (jti, index), n in counts.items():
+                db.execute(
+                    "UPDATE budget SET used = MAX(0, used - ?) WHERE jti = ? AND idx = ?",
+                    (n, jti, index),
+                )
+            return True
 
         return self._write(work)
 

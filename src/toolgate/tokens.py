@@ -55,6 +55,7 @@ from __future__ import annotations
 
 import base64
 import binascii
+import contextlib
 import json
 import math
 import re
@@ -537,9 +538,10 @@ class Authority:
         Raises TokenError if the token does not verify, or with code
         "unavailable" if the store or the clock fails; never a raw store or
         clock exception. Otherwise returns the Decision with the Verified
-        record. A denied call charges nothing, with one exception: a call
-        whose charge only completed after the token expired is denied and
-        stays charged.
+        record. A denied call charges nothing: a call whose charge only
+        completed after the token expired, or after which the clock failed,
+        is refused and its charge is given back (best effort; if the refund
+        itself fails the budget stays spent, which fails closed).
         """
         now = self._now()
         verified = self._verify(token, self.audience, now)
@@ -555,16 +557,22 @@ class Authority:
         for index, capability in enumerate(verified.grant.capabilities):
             if not capability.decide(call).allowed:
                 continue
-            charged = self._ask_store("charge", verified.budget_path(index))
+            path = verified.budget_path(index)
+            charged = self._ask_store("charge", path)
             if charged.ok:
                 # The charge may have waited on a lock for a long time. `now`
                 # is stale by then, so the clock is read again: a call must
                 # not be allowed after the token's expiry just because its
-                # check started before. The charge is deliberately not
-                # refunded. A refund is a second write that can fail or race
-                # with other charges; failing closed (one call of budget lost
-                # on a token that has expired anyway) is preferred.
-                if not self._now() < verified.exp:
+                # check started before. Either way the call will not run, so
+                # its charge is given back. A refund is a second write that
+                # can fail; then the budget stays spent (fails closed).
+                try:
+                    late = not self._now() < verified.exp
+                except TokenError:
+                    self._refund_quietly(path)
+                    raise
+                if late:
+                    self._refund_quietly(path)
                     return Authorization(Decision(False, "expired during authorization"), verified)
                 return Authorization(Decision(True, "ok", index), verified)
             if charged.reason == "revoked":  # revoked between verify and charge
@@ -572,6 +580,29 @@ class Authority:
             if charged.reason != "exhausted":
                 refusal = "budget ledger has no record of this delegation path"
         return Authorization(Decision(False, refusal), verified)
+
+    def refund(self, authorization: Authorization) -> bool:
+        """Give back the budget `authorize` charged, for a call that never ran.
+
+        Only an allowed Authorization was charged; anything else returns False
+        and changes nothing. Counters never go below zero. Raises TokenError
+        "unavailable" if the store could not record the refund, in which case
+        the budget simply stays spent (which fails closed). The caller must
+        never refund a call whose tool started to run.
+        """
+        if type(authorization) is not Authorization:
+            raise ValueError("authorization must be an Authorization")
+        decision, verified = authorization.decision, authorization.verified
+        if not decision.allowed or type(decision.capability) is not int:
+            return False
+        if not 0 <= decision.capability < len(verified.der):
+            return False
+        return bool(self._ask_store("refund", verified.budget_path(decision.capability)))
+
+    def _refund_quietly(self, path: Any) -> None:
+        """Give back a charge made inside `authorize`. A failed refund is not raised."""
+        with contextlib.suppress(TokenError):
+            self._ask_store("refund", path)
 
     def revoke(self, jti: str) -> None:
         """Revoke a token id. The token and all its descendants stop verifying.

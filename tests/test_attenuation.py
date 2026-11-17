@@ -88,6 +88,7 @@ S = ["a", "b", "c"]
         C("in", ["c", "a"]),  # order does not matter
         C("in", ["a", "b", "c"]),  # the same set
         C("in", ["b", "b"]),
+        C("glob", "a"),  # no star: accepts exactly "a", a member (rule A)
     ],
 )
 def test_parent_in_accepts_member_or_subset(child):
@@ -104,7 +105,6 @@ def test_parent_in_accepts_member_or_subset(child):
         C("in", ["a", "d"]),  # overlaps but is not a subset
         C("in", ["a", "b", "c", "d"]),  # superset
         C("max", 1),
-        C("glob", "a"),
         C("glob", "*"),
         C("any"),
     ],
@@ -268,6 +268,72 @@ def test_parent_glob_rejects_patterns_that_match_more(parent, child):
 def test_parent_glob_rejects_max_and_any(child):
     assert not at_least_as_strict(C("glob", "reports/*"), child)
     assert not at_least_as_strict(C("glob", "*"), child)
+
+
+# --- rule A: a child glob with no star is the single string of its pattern ---
+# Such a child is finite (Constraint.finite_values), so it goes through the
+# same enumeration path as eq: accepted exactly when the parent accepts that
+# one string, whatever the parent's operator.
+
+
+@pytest.mark.parametrize(
+    ("parent", "child"),
+    [
+        (C("eq", "abc"), "abc"),
+        (C("eq", ""), ""),
+        (C("in", ["a", "b"]), "a"),
+        (C("glob", "*a"), "ba"),  # parent is not of the form P*
+        (C("glob", "a*b*c"), "aXbYc"),
+        (C("glob", "a*b*c"), "abc"),  # every star matches the empty string
+        (C("glob", "*.gz"), "x.tar.gz"),
+        (C("glob", "abc"), "abc"),
+        (C("glob", "reports/*"), "reports/q3.csv"),
+    ],
+)
+def test_rule_a_star_free_child_glob_accepted_when_parent_accepts_its_string(parent, child):
+    assert parent.holds(child)
+    assert at_least_as_strict(parent, C("glob", child))
+    assert covers(cap(parent), cap(C("glob", child)))
+
+
+@pytest.mark.parametrize(
+    ("parent", "child"),
+    [
+        (C("eq", "abc"), "abd"),
+        (C("eq", "abc"), ""),
+        (C("in", ["a", "b"]), "c"),
+        (C("glob", "*a"), "ab"),
+        (C("glob", "a*b*c"), "acb"),
+        (C("glob", "abc"), "abd"),
+        (C("max", 3), "1"),  # the child accepts the STRING "1", not a number
+        (C("eq", 1), "1"),
+        (C("in", [1, True]), "1"),
+    ],
+)
+def test_rule_a_star_free_child_glob_rejected_when_parent_rejects_its_string(parent, child):
+    assert not parent.holds(child)
+    assert not at_least_as_strict(parent, C("glob", child))
+    assert not covers(cap(parent), cap(C("glob", child)))
+
+
+@pytest.mark.parametrize(
+    ("parent", "child"),
+    [
+        (C("eq", "a"), "a*"),  # also accepts "ab"
+        (C("eq", "a*"), "a*"),  # the literal string "a*" is one of many matches
+        (C("in", ["a", "a*"]), "a*"),
+        (C("eq", ""), "*"),
+        (C("glob", "*a"), "b*a*"),
+        (C("max", 3), "1*"),
+    ],
+)
+def test_rule_a_does_not_apply_to_a_child_glob_with_a_star(parent, child):
+    assert C("glob", child).finite_values() is None
+    assert not at_least_as_strict(parent, C("glob", child))
+
+
+def test_rule_a_respects_the_argument_name():
+    assert not at_least_as_strict(C("eq", "abc"), C("glob", "abc", arg="y"))
 
 
 # --- parent `any` and child `any` -------------------------------------------
@@ -585,12 +651,12 @@ def test_incomplete_union_of_two_parent_glob_capabilities():
     assert not check_attenuation(parent, child).ok
 
 
-def test_incomplete_child_glob_without_star_under_parent_eq():
-    # INCOMPLETE BY DESIGN: glob "abc" has no star, so it accepts exactly the
-    # string "abc", the same set as eq "abc". Glob children are only compared
-    # with glob parents.
-    assert not at_least_as_strict(C("eq", "abc"), C("glob", "abc"))
-    assert not at_least_as_strict(C("in", ["abc", "abd"]), C("glob", "abc"))
+def test_child_glob_without_star_under_parent_eq_is_accepted():
+    # Formerly rejected (documented incompleteness), accepted since rule A:
+    # glob "abc" has no star, so it accepts exactly the string "abc", the same
+    # set as eq "abc", and is checked like eq "abc".
+    assert at_least_as_strict(C("eq", "abc"), C("glob", "abc"))
+    assert at_least_as_strict(C("in", ["abc", "abd"]), C("glob", "abc"))
 
 
 def test_incomplete_child_glob_with_longer_suffix_under_parent_suffix_glob():

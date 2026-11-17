@@ -122,9 +122,17 @@ class Constraint:
         return True  # any
 
     def finite_values(self) -> tuple[Any, ...] | None:
-        """The complete list of accepted values for eq/in, else None."""
+        """The complete list of accepted values, or None if there is no such list.
+
+        eq and in list their values. A glob whose pattern contains no "*" accepts
+        exactly one string, the pattern itself (glob_match compares for equality
+        when there is no star), so it is finite too. Every other constraint
+        (max, any, a glob with a star) returns None.
+        """
         if self.op == "eq":
             return (self.value,)
         if self.op == "in":
             return self.value
+        if self.op == "glob" and "*" not in self.value:
+            return (self.value,)
         return None

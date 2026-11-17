@@ -141,6 +141,7 @@ MUTANTS: dict[str, tuple[str, str]] = {
     "glob_prefix_reversed": ("grant", "prefix rule asks parent head to start with child head"),
     "glob_heads_only": ("grant", "prefix rule ignores what follows the parent's first star"),
     "in_any_common": ("grant", "finite child accepted if ANY of its values satisfies the parent"),
+    "star_free_glob_unchecked": ("grant", "star-free child glob accepted under every parent"),
     "child_any_accepted": ("grant", "child `any` accepted under every parent constraint"),
     "quantifiers_swapped": ("grant", "every child constraint under some parent constraint"),
     "tool_unchecked": ("grant", "parent capability for a different tool may cover"),
@@ -178,6 +179,8 @@ def make_checker(mutation: str | None = None) -> Checker:
             return True
         values = child.finite_values()
         if values is not None:
+            if mutation == "star_free_glob_unchecked" and child.op == "glob":
+                return True
             if mutation == "in_any_common":
                 return any(parent.holds(v) for v in values)
             return all(parent.holds(v) for v in values)

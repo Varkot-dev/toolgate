@@ -394,5 +394,8 @@ def test_finite_values():
     assert Constraint("x", "eq", "a").finite_values() == ("a",)
     assert Constraint("x", "in", ["a", 1]).finite_values() == ("a", 1)
     assert Constraint("x", "max", 5).finite_values() is None
-    assert Constraint("x", "glob", "a").finite_values() is None
+    assert Constraint("x", "glob", "a").finite_values() == ("a",)  # no star: one string
+    assert Constraint("x", "glob", "").finite_values() == ("",)
+    assert Constraint("x", "glob", "a*").finite_values() is None
+    assert Constraint("x", "glob", "*").finite_values() is None
     assert Constraint("x", "any").finite_values() is None

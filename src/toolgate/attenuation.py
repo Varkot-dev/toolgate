@@ -36,7 +36,8 @@ def at_least_as_strict(parent: Constraint, child: Constraint) -> bool:
         return True
     values = child.finite_values()
     if values is not None:
-        # eq / in: the child accepts a finite list, so test each value directly.
+        # eq / in / glob with no star: the child accepts a finite list, so test
+        # each value directly.
         return all(parent.holds(v) for v in values)
     if parent.op == "max" and child.op == "max":
         return child.value <= parent.value

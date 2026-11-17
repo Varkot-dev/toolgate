@@ -14,6 +14,7 @@ from toolgate.constraints import Constraint
 from toolgate.policy import (
     MAX_POLICY_BYTES,
     Policy,
+    PolicyContext,
     PolicyDecision,
     PolicyError,
     Rule,
@@ -752,3 +753,98 @@ def test_p5_example_policy_documents_the_two_layers() -> None:
         for value in ("evil@x.com", None, "", ["evil@x.com"]):
             call = Call("send_email", {"to": "a@example.com", extra: value})
             assert p.decide(call).effect != "allow"
+
+
+# -- C3: every effect x provenance condition kind x truth value -----------------------
+
+_T_ALICE, _T_BOB = "alice@northwind.example", "bob@northwind.example"
+
+
+class _Label:
+    """The two things policy reads from a label (PolicyContext's documented interface)."""
+
+    def __init__(self, sources, readers):
+        self.sources, self._readers = frozenset(sources), readers
+
+    def readable_by(self, principal):
+        return self._readers is None or principal in self._readers
+
+
+_TABLE_ARGS = {"to": _T_BOB, "body": "text"}
+
+# kind -> truth -> (the condition as written in a rule, the context that makes it so)
+_PROVENANCE_CASES = {
+    "source_in": (
+        {"to": {"source_in": ["user"]}},
+        {
+            True: PolicyContext("clean", {"to": _Label({"user"}, None)}),
+            False: PolicyContext("clean", {"to": _Label({"user", "untrusted"}, None)}),
+            None: PolicyContext("clean", {}),  # no label for the argument
+        },
+    ),
+    "readers_include": (
+        {"body": {"readers_include": "to"}},
+        {
+            True: PolicyContext("clean", {"body": _Label({"user"}, None)}),
+            False: PolicyContext("clean", {"body": _Label({"user"}, {_T_ALICE})}),
+            None: PolicyContext("clean", None),  # a layer that gives no labels
+        },
+    ),
+    "session": (
+        None,
+        {
+            True: PolicyContext("tainted", {}),
+            False: PolicyContext("clean", {}),
+            None: PolicyContext(None, {}),
+        },
+    ),
+}
+
+
+def _truth(kind, condition, context):
+    if kind == "session":
+        return {"tainted": True, "clean": False, None: None}[context.session]
+    r = Rule.from_dict(rule("r", "allow", when=condition))
+    (value,) = [evaluate(c, _TABLE_ARGS, context) for c in r.when]
+    return value
+
+
+@pytest.mark.parametrize("effect", ["allow", "deny", "approve"])
+@pytest.mark.parametrize("kind", sorted(_PROVENANCE_CASES))
+@pytest.mark.parametrize("truth", [True, False, None], ids=["TRUE", "FALSE", "UNKNOWN"])
+def test_provenance_condition_table_in_when(effect, kind, truth):
+    """allow matches only on TRUE; deny and approve match unless the condition is proven FALSE."""
+    condition, contexts = _PROVENANCE_CASES[kind]
+    context = contexts[truth]
+    assert _truth(kind, condition, context) is truth, "the case builds the truth it names"
+    extra = {"session": "tainted"} if kind == "session" else {"when": condition}
+    r = Rule.from_dict(rule("r", effect, **extra))
+    expected = truth is True if effect == "allow" else truth is not False
+    assert r.matches(Call("t", _TABLE_ARGS), context) is expected
+    decision = Policy((r,)).decide(Call("t", _TABLE_ARGS), context)
+    assert decision.effect == (effect if expected else "deny")
+    assert decision.rule_id == ("r" if expected else None)
+
+
+@pytest.mark.parametrize("effect", ["allow", "deny", "approve"])
+@pytest.mark.parametrize("kind", ["source_in", "readers_include"])
+@pytest.mark.parametrize("truth", [True, False, None], ids=["TRUE", "FALSE", "UNKNOWN"])
+def test_provenance_condition_table_in_unless(effect, kind, truth):
+    """The exception: an allow rule needs it proven FALSE, a restrictive one is lifted only on TRUE.
+
+    (`session` is a rule key, not an argument operator, so it has no `unless` form.)
+    """
+    condition, contexts = _PROVENANCE_CASES[kind]
+    context = contexts[truth]
+    assert _truth(kind, condition, context) is truth
+    r = Rule.from_dict(rule("r", effect, unless=condition))
+    expected = truth is False if effect == "allow" else truth is not True
+    assert r.matches(Call("t", _TABLE_ARGS), context) is expected
+
+
+@pytest.mark.parametrize("effect", ["allow", "deny", "approve"])
+def test_no_context_at_all_is_unknown_for_every_provenance_kind(effect):
+    for kind, (condition, _) in _PROVENANCE_CASES.items():
+        extra = {"session": "tainted"} if kind == "session" else {"when": condition}
+        r = Rule.from_dict(rule("r", effect, **extra))
+        assert r.matches(Call("t", _TABLE_ARGS), None) is (effect != "allow"), kind

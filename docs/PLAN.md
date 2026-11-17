@@ -297,3 +297,11 @@ Checked against upstream sources. The session's network could not reach modelcon
 ### 2026-11-17, dashboard
 
 One admin-only page, off by default. A browser signs in with the admin key once and gets a short-lived HttpOnly, SameSite=Strict session cookie (only its hash is stored); every state change needs a per-session CSRF token; the page sends a Content-Security-Policy with no inline script and vendors nothing from a CDN, because an admin page must not load third-party code. The "change this entry" demo never touches the real log: it edits a temporary copy, runs the real verifier on it, and shows the break next to the untouched log verifying ok.
+
+### 2026-11-17, verify once per call
+
+1. **Measured, then changed.** The first benchmark showed an allowed call verifying the token's Ed25519 signature three times (decision, charge, and the check just before the tool runs), which was most of the CPU cost. The later checks exist so that a revocation or expiry landing mid-call is seen, but only revocation and expiry can change; a token string's signature and claims cannot. The gateway now verifies once and later calls `Authority.recheck`, which reads the clock afresh and checks revocation of the token and every ancestor in one store call.
+2. **Why a forged record cannot pass the cheap check.** `recheck`, `authorize` and `refund` accept only the exact record objects that this Authority's `verify` produced (tracked by a weak reference plus a private copy of the verified fields, compared by identity). A hand-built record, a copy, another Authority's record, or a record bent with `object.__setattr__` is refused.
+3. **A small cache of signature-checked parses**, keyed by the exact token string. Revocation, registration and expiry are never cached; a revoked token is refused on the very next call.
+4. **Tool error text hidden by default.** `Gateway(tool_error_detail=False)` is now the default, matching the deployed server.
+5. **Benchmark honesty.** The cache makes repeated calls with one token much cheaper than a first call, so latency is reported separately for a reused token (warm) and a fresh token every call (cold). The first published figure (median 1.19 ms added per call) predates this change.

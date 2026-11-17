@@ -37,3 +37,26 @@ rules:
     unless:
       url: {readers_include: {literal: "public"}}
     reason: A URL is sent to its host; only public data may go into one.
+
+  # A file's readers come from its directory (src/toolgate/sandbox/labels.py),
+  # so writing is sending: the content goes to everyone who may later read
+  # that directory. Every label includes the user, so only reports/ (adds the
+  # organization) and public/ (adds everyone) can widen. Writing into a
+  # directory with fewer readers narrows and needs nothing.
+  - id: approve-write-widens-readers-org
+    effect: approve
+    tools: ["write_file"]
+    when:
+      path: {glob: "reports/*"}
+    unless:
+      content: {readers_include: {literal: "*@northwind.example"}}
+    reason: The file would be readable by the whole organization, and its content is not.
+
+  - id: approve-write-widens-readers-public
+    effect: approve
+    tools: ["write_file"]
+    when:
+      path: {glob: "public/*"}
+    unless:
+      content: {readers_include: {literal: "public"}}
+    reason: The file would be readable by anyone, and its content is not public.

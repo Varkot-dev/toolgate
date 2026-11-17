@@ -318,11 +318,10 @@ def _model(expr, handles, labels_by_handle, literal):
 @settings(max_examples=400, deadline=None)
 @given(
     st.lists(st.sampled_from(sorted(_STORE)), min_size=1, max_size=4),
-    st.integers(0, 4),
     _EXPR,
     st.booleans(),
 )
-def test_every_byte_the_writer_placed_carries_the_literal_label(results, read_at, expr, planner):
+def test_every_byte_the_writer_placed_carries_the_literal_label(results, expr, planner):
     """For random stores and expressions: label = join(referenced labels) + literal label
     iff the writer placed a byte (a literal, a key, or an arrangement of two or more parts).
     So in an agent session that has returned an untrusted result, any expression with a
@@ -330,8 +329,7 @@ def test_every_byte_the_writer_placed_carries_the_literal_label(results, read_at
     p = _store_layer()
     if planner:
         p.use_planner_literals("s")
-    handles = [stored(p, "s", tool, _RESULT) for tool in results[: read_at + 1]]
-    handles += [stored(p, "s", tool, _RESULT) for tool in results[read_at + 1 :]]
+    handles = [stored(p, "s", tool, _RESULT) for tool in results]
     labels_by_handle = {h: p.label("s", h) for h in handles}
     literal = p.session("s").literal_label()
     assert literal == (

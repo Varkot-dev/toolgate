@@ -9,9 +9,13 @@ import json
 from pathlib import Path
 
 import pytest
+from hypothesis import given, settings
+from hypothesis import strategies as st
 
 from toolgate.capability import Call
-from toolgate.policy import Policy
+from toolgate.policy import Policy, PolicyContext
+from toolgate.provenance import USER_LABEL, Label
+from toolgate.sandbox import labels as sandbox_labels
 from toolgate.sandbox.agents import (
     CAREFUL,
     DENIED,
@@ -52,7 +56,9 @@ from toolgate.sandbox.tasks import (
 )
 from toolgate.sandbox.world import (
     BOB,
+    FRANK,
     TOOLS,
+    USER,
     base_world,
     canonical_path,
     result_is_untrusted,
@@ -638,3 +644,68 @@ def test_tpl_wire_form_resolves_to_the_same_text():
         assert p.resolve_args("s", {"v": wire})[0]["v"] == tpl.resolve(results)
     assert Tpl("{b.content}").to_wire(handles, results) is None
     assert Tpl("{a.missing}").to_wire(handles, results) is None
+
+
+# -- lead L2: a write must not widen who may read the data -----------------------------
+
+_ORG = "*@northwind.example"
+_PEOPLE = [USER, BOB, FRANK, "x@partner.example", "public"]
+_VALUE_POLICY = sandbox_labels.policy(
+    Policy.from_file(POLICY_FILE), sandbox_labels.VALUE_POLICY_FILE
+)
+_DIRS = ["reports", "public", "notes", "drafts", "finance", "downloads", "reports/q4"]
+
+
+def _write(path: str, content: Label):
+    call = Call("write_file", {"path": path, "content": "text"})
+    return _VALUE_POLICY.decide(
+        call, PolicyContext("clean", {"path": USER_LABEL, "content": content})
+    )
+
+
+def _read_back(path: str) -> Label:
+    return sandbox_labels.declare("read_file", {"path": path}, {"content": "text"}, {})
+
+
+def test_file_readers_come_from_the_directory_so_a_write_can_widen_them():
+    """The gap at function level: the label calculus alone lets reports/ widen {user}."""
+    private = Label(frozenset({"tool:read_file"}), frozenset({USER}))
+    back = _read_back("reports/copy.txt")
+    assert not private.readable_by(BOB) and back.readable_by(BOB)
+    assert sandbox_labels.write_readers("reports/copy.txt") == (_ORG, USER)
+    assert sandbox_labels.write_readers("public/x.txt") == ("public",)
+    assert sandbox_labels.write_readers("drafts/x.txt") == (USER,)
+
+
+def test_writing_private_data_under_reports_needs_a_person():
+    private = Label(frozenset({"tool:read_file"}), frozenset({USER}))
+    decision = _write("reports/copy.txt", private)
+    assert (decision.effect, decision.rule_id) == ("approve", "approve-write-widens-readers-org")
+    org_data = Label(frozenset({"tool:read_file"}), frozenset({USER, _ORG}))
+    assert _write("reports/copy.txt", org_data).effect == "allow"
+    assert _write("drafts/copy.txt", private).effect == "allow", "narrowing is safe"
+    assert _write("public/x.txt", org_data).rule_id in (
+        "approve-publishing",
+        "approve-write-widens-readers-public",
+    )
+
+
+@settings(max_examples=300, deadline=None)
+@given(
+    st.sampled_from(_DIRS),
+    st.one_of(st.none(), st.sets(st.sampled_from([USER, BOB, FRANK, _ORG]), max_size=3)),
+)
+def test_a_write_the_policy_allows_never_widens_readers(directory, readers):
+    """Write, then read back: whoever may read the file could already read the content."""
+    content = Label(frozenset({"user"}), None if readers is None else frozenset(readers | {USER}))
+    path = f"{directory}/f.txt"
+    decision = _write(path, content)
+    back = _read_back(path)
+    covered = all(content.readable_by(p) for p in sandbox_labels.write_readers(path))
+    if decision.effect == "allow":
+        for who in _PEOPLE:
+            assert not back.readable_by(who) or content.readable_by(who), (path, who)
+    if not covered:
+        assert decision.effect != "allow"
+    if covered and directory not in ("public",):
+        assert decision.effect == "allow", "no over-blocking where nothing widens"

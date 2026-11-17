@@ -33,6 +33,27 @@ Initial labels (see toolgate.provenance for the rules that combine them)
                                     receipt echoes what was sent)
 
 The user's own address is the principal for "the user".
+
+Files and readers. A file's readers come from its directory, not from what
+was written into it, so a write can WIDEN readers: content readable only by
+the user, written under reports/, would be read back as readable by the whole
+organization. The write is therefore treated like a send: the directory's
+readers (`write_readers`) are the recipients, and
+config/sandbox_policy_values.yaml asks a person (approve) before a write
+whose content is not readable by every one of them. Writing to a directory
+with fewer readers narrows, which is safe and allowed. Every label here
+includes the user as a reader, so only reports/ (adds the organization) and
+public/ (adds everyone) can widen.
+
+What remains, stated plainly: labels do not persist with files. The check
+happens once, at write time, in the session that writes. A later read, in
+the same session or any other, gets the directory's label, so (1) a file
+narrower than its directory reads back with the directory's readers if it
+was written outside the gateway, (2) SOURCES are not carried at all:
+untrusted text written to notes/ reads back as {tool:read_file}, trusted,
+and (3) nothing records who wrote a file. Persisting labels per file (a
+label store keyed by canonical path, kept with the file) would close all
+three; it is not built.
 """
 
 from __future__ import annotations
@@ -75,6 +96,16 @@ def file_readers(path: str) -> frozenset[str] | None:
     if top == "reports":
         return frozenset({USER, ORG})
     return frozenset({USER})
+
+
+def write_readers(path: str) -> tuple[str, ...]:
+    """The principals a write to `path` sends its content to: the readers of a later read.
+
+    ("public",) for a directory readable by anyone. Used by tests to check that
+    config/sandbox_policy_values.yaml asks exactly where a write could widen.
+    """
+    readers = file_readers(path)
+    return ("public",) if readers is None else tuple(sorted(readers))
 
 
 def _meet(sets: list[frozenset[str]]) -> frozenset[str]:

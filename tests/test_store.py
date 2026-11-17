@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import sqlite3
 import threading
 
 import pytest
@@ -340,3 +341,188 @@ def test_memory_and_sqlite_agree_and_never_exceed_a_limit(ops):
             if usage is not None and usage[1] is not None:
                 assert usage[0] <= usage[1]
     sqlite.close()
+
+
+# -- a failed COMMIT must not wedge the connection (B1) ---------------------------
+
+
+def test_sqlite_recovers_after_commit_itself_fails(tmp_path):
+    path = str(tmp_path / "store.db")
+    s = SqliteStore(path, timeout=0.05)
+    s.register("t", [2])
+
+    # An outside connection reads and keeps its transaction open. The write
+    # below gets as far as COMMIT, which needs the reader gone and times out.
+    outside = sqlite3.connect(path, isolation_level=None)
+    outside.execute("BEGIN")
+    outside.execute("SELECT * FROM budget").fetchall()
+    with pytest.raises(sqlite3.OperationalError):
+        s.revoke("gone")
+    outside.execute("COMMIT")
+    outside.close()
+
+    # The failed write left nothing behind and the store works again.
+    assert not s.any_revoked(["gone"])
+    s.revoke("gone")
+    assert s.any_revoked(["gone"])
+    assert s.charge([("t", 0)])
+    assert s.usage("t", 0) == (1, 2)
+    s.close()
+
+
+# -- fan-out limit (B2a) ------------------------------------------------------------
+
+
+def test_add_child_counts_up_to_the_limit_and_stops(store):
+    store.register("p", [None])
+    assert [store.add_child("p", 3) for _ in range(5)] == [True, True, True, False, False]
+    # The counter is per parent.
+    store.register("q", [])
+    assert store.add_child("q", 1)
+    assert not store.add_child("q", 1)
+    assert not store.add_child("q", 0)
+
+
+def test_add_child_refuses_an_unregistered_parent(store):
+    assert not store.add_child("nobody", 10)
+    store.register("nobody", [])
+    assert store.add_child("nobody", 1)  # the refusals above counted nothing
+
+
+@pytest.mark.parametrize("bad", [-1, True, None, 1.0, "3"])
+def test_add_child_rejects_bad_arguments(store, bad):
+    store.register("p", [])
+    with pytest.raises(ValueError):
+        store.add_child("p", bad)
+    with pytest.raises(ValueError):
+        store.add_child("", 3)
+
+
+def _hammer_children(stores: list[Store], limit: int) -> int:
+    wins = [0] * THREADS
+    start = threading.Barrier(THREADS)
+
+    def worker(n: int) -> None:
+        store = stores[n % len(stores)]
+        start.wait()
+        for _ in range(ATTEMPTS):
+            if store.add_child("parent", limit):
+                wins[n] += 1
+
+    threads = [threading.Thread(target=worker, args=(n,)) for n in range(THREADS)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    return sum(wins)
+
+
+def test_concurrent_add_child_never_exceeds_the_limit_memory():
+    store = MemoryStore()
+    store.register("parent", [])
+    assert _hammer_children([store], 64) == 64
+    assert not store.add_child("parent", 64)
+
+
+def test_concurrent_add_child_never_exceeds_the_limit_sqlite(tmp_path):
+    path = str(tmp_path / "store.db")
+    stores = [SqliteStore(path), SqliteStore(path), SqliteStore(path)]
+    stores[0].register("parent", [])
+    assert _hammer_children(stores, 64) == 64
+    assert not stores[1].add_child("parent", 64)
+    for s in stores:
+        s.close()
+
+
+# -- pruning (B2b) ------------------------------------------------------------------
+
+
+def test_register_without_exp_still_works_and_is_never_pruned(store):
+    store.register("old-style", [1])
+    assert store.prune(10**12) == 0
+    assert store.is_registered("old-style")
+    assert store.usage("old-style", 0) == (0, 1)
+
+
+def test_prune_forgets_expired_tokens_and_only_those(store):
+    store.register("dead", [2, None], 100)
+    store.register("edge", [1], 150.0)
+    store.register("live", [5], 200)
+    store.register("empty", [], 100)
+    assert store.charge([("dead", 0), ("live", 0)])
+    assert store.add_child("dead", 1)
+    for jti in ("dead", "live", "never-registered"):
+        store.revoke(jti)
+
+    assert store.prune(99) == 0
+    assert store.is_registered("dead")
+    assert store.prune(150) == 3  # exp <= now: "edge" expires exactly now
+
+    for jti in ("dead", "edge", "empty"):
+        assert not store.is_registered(jti)
+    assert store.usage("dead", 0) is None and store.usage("dead", 1) is None
+    assert store.usage("edge", 0) is None
+    assert not store.any_revoked(["dead"])  # the revocation went with the token
+    assert not store.add_child("dead", 5)  # and so did its child counter
+    assert not store.charge([("dead", 0)])  # a forgotten entry is a refusal
+
+    assert store.is_registered("live")
+    assert store.usage("live", 0) == (1, 5)
+    assert store.any_revoked(["live"])
+    # No expiry is known for an id that was never registered, so it is kept.
+    assert store.any_revoked(["never-registered"])
+    assert store.prune(150) == 0
+
+    # A pruned id starts from nothing if it is ever registered again.
+    store.register("dead", [1], 300)
+    assert store.usage("dead", 0) == (0, 1)
+    assert store.add_child("dead", 1)
+
+
+@pytest.mark.parametrize("bad", [None, "now", True, float("nan"), float("inf")])
+def test_prune_and_register_reject_bad_times(store, bad):
+    with pytest.raises(ValueError):
+        store.prune(bad)
+    if bad is not None:
+        with pytest.raises(ValueError):
+            store.register("t", [1], bad)
+        assert not store.is_registered("t")
+
+
+def test_sqlite_prune_state_survives_reopening(tmp_path):
+    path = str(tmp_path / "store.db")
+    first = SqliteStore(path)
+    first.register("p", [1], 100)
+    assert first.add_child("p", 2)
+    first.close()
+
+    second = SqliteStore(path)
+    assert second.add_child("p", 2)
+    assert not second.add_child("p", 2)
+    assert second.prune(100) == 1
+    assert not second.is_registered("p")
+    second.close()
+
+
+def test_sqlite_opens_a_database_file_from_before_pruning(tmp_path):
+    path = str(tmp_path / "old.db")
+    old = sqlite3.connect(path, isolation_level=None)
+    old.executescript(
+        """
+        CREATE TABLE revoked (jti TEXT PRIMARY KEY) WITHOUT ROWID;
+        CREATE TABLE registered (jti TEXT PRIMARY KEY) WITHOUT ROWID;
+        CREATE TABLE budget (jti TEXT NOT NULL, idx INTEGER NOT NULL, lim INTEGER,
+            used INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (jti, idx)) WITHOUT ROWID;
+        INSERT INTO registered (jti) VALUES ('t');
+        INSERT INTO budget (jti, idx, lim, used) VALUES ('t', 0, 2, 1);
+        """
+    )
+    old.close()
+
+    s = SqliteStore(path)
+    assert s.usage("t", 0) == (1, 2)
+    assert s.add_child("t", 1) and not s.add_child("t", 1)
+    assert s.prune(10**12) == 0  # no exp was recorded for it
+    s.register("new", [1], 5)
+    assert s.prune(5) == 1
+    s.close()

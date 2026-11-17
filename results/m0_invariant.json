@@ -1,0 +1,176 @@
+{
+  "seed": 0,
+  "cases_requested": 20000,
+  "cases_generated": 20000,
+  "children_narrowed": 14363,
+  "children_random": 5637,
+  "children_accepted": 12688,
+  "children_accepted_narrowed": 12414,
+  "children_accepted_random": 274,
+  "children_accepted_with_at_least_one_capability": 9919,
+  "children_rejected": 7312,
+  "calls_allowed_by_accepted_child": 4993,
+  "non_vacuous_fraction": 0.2497,
+  "parent_also_allowed": 4993,
+  "violations": 0,
+  "violation_examples": [],
+  "accepted_constraint_pairs_by_rule": {
+    "parent any / child any": 1771,
+    "parent any / child eq": 302,
+    "parent any / child glob": 354,
+    "parent any / child in": 354,
+    "parent any / child max": 292,
+    "parent eq / child eq": 4023,
+    "parent eq / child in": 4,
+    "parent glob / child eq": 1245,
+    "parent glob / child glob (identical)": 2927,
+    "parent glob / child glob (longer prefix)": 933,
+    "parent glob / child in": 1181,
+    "parent in / child eq": 2167,
+    "parent in / child in": 4613,
+    "parent max / child eq": 1549,
+    "parent max / child in": 1467,
+    "parent max / child max": 3464
+  },
+  "mutants_tried": 11,
+  "mutants_killed": 11,
+  "mutant_search_budget": 20000,
+  "mutant_search_strategy": "scenarios(fault_one_in=1): every narrowed child has one fault",
+  "mutants": [
+    {
+      "mutant": "arg_names_unchecked",
+      "fault": "child may constrain arguments the parent never named",
+      "invariant": "grant",
+      "killed": true,
+      "counterexample": {
+        "parent": "[read()] expires_at=1",
+        "child": "[read(x eq '')] expires_at=1",
+        "call": "read({'x': ''})",
+        "now": "0"
+      }
+    },
+    {
+      "mutant": "child_any_accepted",
+      "fault": "child `any` accepted under every parent constraint",
+      "invariant": "grant",
+      "killed": true,
+      "counterexample": {
+        "parent": "[read(x in ('',))] expires_at=1",
+        "child": "[read(x any)] expires_at=1",
+        "call": "read({'x': None})",
+        "now": "0"
+      }
+    },
+    {
+      "mutant": "derivation_first",
+      "fault": "derivation always names parent capability 0",
+      "invariant": "derivation",
+      "killed": true,
+      "counterexample": {
+        "parent": "[send(); read()] expires_at=1",
+        "child": "[read()] expires_at=1",
+        "call": "read({})",
+        "now": "0"
+      }
+    },
+    {
+      "mutant": "expiry_unchecked",
+      "fault": "child may expire later than the parent",
+      "invariant": "grant",
+      "killed": true,
+      "counterexample": {
+        "parent": "[read()] expires_at=1",
+        "child": "[read()] expires_at=2",
+        "call": "read({})",
+        "now": "1"
+      }
+    },
+    {
+      "mutant": "glob_heads_only",
+      "fault": "prefix rule ignores what follows the parent's first star",
+      "invariant": "grant",
+      "killed": true,
+      "counterexample": {
+        "parent": "[read(z glob '')] expires_at=1",
+        "child": "[read(z glob '*')] expires_at=1",
+        "call": "read({'z': 'a'})",
+        "now": "0"
+      }
+    },
+    {
+      "mutant": "glob_prefix_reversed",
+      "fault": "prefix rule asks parent head to start with child head",
+      "invariant": "grant",
+      "killed": true,
+      "counterexample": {
+        "parent": "[read(y glob 'a*')] expires_at=1",
+        "child": "[read(y glob '*')] expires_at=1",
+        "call": "read({'y': ''})",
+        "now": "0"
+      }
+    },
+    {
+      "mutant": "in_any_common",
+      "fault": "finite child accepted if ANY of its values satisfies the parent",
+      "invariant": "grant",
+      "killed": true,
+      "counterexample": {
+        "parent": "[read(x eq 'a')] expires_at=1",
+        "child": "[read(x in ('a', ''))] expires_at=1",
+        "call": "read({'x': ''})",
+        "now": "0"
+      }
+    },
+    {
+      "mutant": "max_calls_unchecked",
+      "fault": "child budget may exceed the parent's",
+      "invariant": "derivation",
+      "killed": true,
+      "counterexample": {
+        "parent": "[read() max_calls=1] expires_at=1",
+        "child": "[read()] expires_at=1",
+        "call": "read({})",
+        "now": "0"
+      }
+    },
+    {
+      "mutant": "max_flipped",
+      "fault": "max under max accepts child ceiling >= parent ceiling",
+      "invariant": "grant",
+      "killed": true,
+      "counterexample": {
+        "parent": "[read(x max 0)] expires_at=1",
+        "child": "[read(x max 1)] expires_at=1",
+        "call": "read({'x': 1})",
+        "now": "0"
+      }
+    },
+    {
+      "mutant": "quantifiers_swapped",
+      "fault": "every child constraint under some parent constraint",
+      "invariant": "grant",
+      "killed": true,
+      "counterexample": {
+        "parent": "[read(x max 0, x eq '')] expires_at=1",
+        "child": "[read(x eq '')] expires_at=1",
+        "call": "read({'x': ''})",
+        "now": "0"
+      }
+    },
+    {
+      "mutant": "tool_unchecked",
+      "fault": "parent capability for a different tool may cover",
+      "invariant": "grant",
+      "killed": true,
+      "counterexample": {
+        "parent": "[read()] expires_at=1",
+        "child": "[send()] expires_at=1",
+        "call": "send({})",
+        "now": "0"
+      }
+    }
+  ],
+  "hypothesis_version": "6.170.15",
+  "python_version": "3.13.18",
+  "seconds": 55.3
+}

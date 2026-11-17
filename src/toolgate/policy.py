@@ -21,10 +21,34 @@ File format (YAML, version 1)
 
 `when` and `unless` reuse the constraint language of capabilities (eq, in,
 max, glob, any), so the project has one constraint language. Several operators
-on one argument are a conjunction. The per-argument operator mapping is where
-the provenance operators of plan section 3.7 (`source_in`, `readers_include`)
-will be added later; nothing here implements them, and until then they are
-rejected as unknown operators.
+on one argument are a conjunction.
+
+Provenance conditions (plan section 3.7, milestone M4b)
+-------------------------------------------------------
+
+Two more per-argument operators and one rule key read where the arguments
+CAME FROM rather than what they are. They are only ever evaluated against a
+`PolicyContext` handed in by trusted code (toolgate.provenance), never
+against anything the caller sends.
+
+    source_in: [user, "tool:search_contacts"]
+        every source in the argument's label is in the list
+    readers_include: to                    (the name of another argument)
+    readers_include: {literal: public}     (a fixed principal)
+        every destination principal (a string, or each string of a list) is
+        an allowed reader of the argument's value
+    session: tainted                       (rule key, not an argument operator)
+        the session has returned a result from a tool whose output is
+        untrusted (plan 3.7, level 1)
+
+They fit the three-valued logic like every other condition. A provenance
+condition is UNKNOWN when there is no context, when the argument has no
+label in it, when the argument is missing, or (readers_include) when the
+destination argument is missing or not a string or list of strings. So with
+no provenance layer configured, an allow rule that needs a provenance
+condition never fires, and a deny or approve rule with one always does: the
+missing layer fails closed. `session: tainted` is TRUE in a tainted session,
+FALSE in a clean one and UNKNOWN with no context.
 
 Decision
 --------
@@ -177,11 +201,14 @@ from toolgate.constraints import OPS, Constraint, glob_match
 
 ALLOW, DENY, APPROVE = "allow", "deny", "approve"
 EFFECTS: tuple[str, ...] = (ALLOW, DENY, APPROVE)
-OPERATORS: frozenset[str] = OPS  # M4b adds the provenance operators here
+PROVENANCE_OPS: frozenset[str] = frozenset({"source_in", "readers_include"})
+OPERATORS: frozenset[str] = OPS | PROVENANCE_OPS
+TAINTED, CLEAN = "tainted", "clean"
 MAX_POLICY_BYTES = 1_000_000
 
 _TOP_KEYS = frozenset({"version", "rules"})
-_RULE_KEYS = frozenset({"id", "effect", "tools", "when", "unless", "absent", "reason"})
+_RULE_KEYS = frozenset({"id", "effect", "tools", "when", "unless", "absent", "reason", "session"})
+_SOURCE = re.compile(r"user|untrusted|tool:[A-Za-z0-9_.:/-]{1,128}")
 _INT = re.compile(r"-?(0|[1-9][0-9]*)")
 _FLOAT = re.compile(r"-?(0|[1-9][0-9]*)\.[0-9]+")
 # Unquoted text that YAML 1.1 or YAML 1.2 (or a reader) could take for a number.
@@ -326,8 +353,107 @@ def _kind(value: Any) -> str | None:
     return None
 
 
-def evaluate(condition: Constraint, args: Mapping[str, Any]) -> bool | None:
+@dataclass(frozen=True)
+class PolicyContext:
+    """What a provenance layer knows about one call. Built by trusted code only.
+
+    session  "tainted", "clean", or None (unknown)
+    labels   argument name -> label, or None. A label needs `sources` (a
+             frozenset of strings) and `readable_by(principal) -> bool`;
+             toolgate.provenance.Label is the one used.
+    """
+
+    session: str | None = None
+    labels: Mapping[str, Any] | None = None
+
+
+@dataclass(frozen=True)
+class ProvenanceCondition:
+    """`source_in` or `readers_include` on one argument. See the module docstring.
+
+    For source_in, `value` is a tuple of source strings. For readers_include
+    it is ("arg", name) or ("literal", principal).
+    """
+
+    arg: str
+    op: str
+    value: Any
+
+    def __post_init__(self) -> None:
+        if type(self.arg) is not str or not self.arg:
+            raise ValueError("condition argument name must be a non-empty string")
+        if self.op == "source_in":
+            if type(self.value) not in (list, tuple) or not self.value:
+                raise ValueError("source_in needs a non-empty list of sources")
+            value = tuple(self.value)
+            for source in value:
+                if type(source) is not str or not _SOURCE.fullmatch(source):
+                    raise ValueError(
+                        f"source_in: {source!r} is not a source (user, untrusted, or tool:<name>)"
+                    )
+            object.__setattr__(self, "value", value)
+        elif self.op == "readers_include":
+            value = self.value
+            if type(value) is str and value:
+                value = ("arg", value)
+            elif type(value) is dict and set(value) == {"literal"}:
+                principal = value["literal"]
+                if type(principal) is not str or not principal:
+                    raise ValueError("readers_include literal must be a non-empty string")
+                value = ("literal", principal)
+            elif not (
+                type(value) is tuple
+                and len(value) == 2
+                and value[0] in ("arg", "literal")
+                and type(value[1]) is str
+                and value[1]
+            ):
+                raise ValueError("readers_include needs an argument name or {literal: <principal>}")
+            object.__setattr__(self, "value", value)
+        else:
+            raise ValueError(f"unknown provenance operator {self.op!r}")
+
+    def finite_values(self) -> None:
+        return None
+
+
+def _destinations(value: Any) -> tuple[str, ...] | None:
+    """The principals named by a destination value, or None if it names none clearly."""
+    if type(value) is str:
+        return (value,)
+    if type(value) in (list, tuple) and all(type(v) is str for v in value):
+        return tuple(value)
+    return None
+
+
+def _evaluate_provenance(
+    condition: ProvenanceCondition, args: Mapping[str, Any], context: PolicyContext | None
+) -> bool | None:
+    if condition.arg not in args or context is None or context.labels is None:
+        return None
+    label = context.labels.get(condition.arg)
+    if label is None:
+        return None
+    if condition.op == "source_in":
+        return all(source in condition.value for source in label.sources)
+    kind, name = condition.value
+    if kind == "literal":
+        principals: tuple[str, ...] | None = (name,)
+    else:
+        principals = _destinations(args[name]) if name in args else None
+    if principals is None:
+        return None
+    return all(label.readable_by(p) for p in principals)
+
+
+def evaluate(
+    condition: Constraint | ProvenanceCondition,
+    args: Mapping[str, Any],
+    context: PolicyContext | None = None,
+) -> bool | None:
     """Three-valued result of one condition: True, False, or None for UNKNOWN."""
+    if type(condition) is ProvenanceCondition:
+        return _evaluate_provenance(condition, args, context)
     if condition.arg not in args:
         return False if condition.op == "any" else None
     if condition.op == "any":
@@ -369,10 +495,10 @@ def _pattern_problem(pattern: str) -> str | None:
     return None
 
 
-def _conditions(value: Any, what: str) -> tuple[Constraint, ...]:
+def _conditions(value: Any, what: str) -> tuple[Constraint | ProvenanceCondition, ...]:
     if type(value) is not dict or not value:
         raise PolicyError(f"{what} must be a non-empty mapping of argument to operators")
-    out = []
+    out: list[Constraint | ProvenanceCondition] = []
     for arg, ops in value.items():
         if type(arg) is not str or not arg:
             raise PolicyError(f"{what}: argument names must be non-empty strings")
@@ -385,6 +511,12 @@ def _conditions(value: Any, what: str) -> tuple[Constraint, ...]:
                 if operand is not True:
                     raise PolicyError(f"{what}: write `any: true` on argument {arg!r}")
                 operand = None
+            if op in PROVENANCE_OPS:
+                try:
+                    out.append(ProvenanceCondition(arg, op, operand))
+                except ValueError as exc:
+                    raise PolicyError(f"{what}: argument {arg!r}: {exc}") from exc
+                continue
             try:
                 out.append(Constraint(arg, op, operand))
             except ValueError as exc:
@@ -399,10 +531,11 @@ class Rule:
     id: str
     effect: str
     tools: tuple[str, ...]
-    when: tuple[Constraint, ...] = ()
-    unless: tuple[Constraint, ...] = ()
+    when: tuple[Constraint | ProvenanceCondition, ...] = ()
+    unless: tuple[Constraint | ProvenanceCondition, ...] = ()
     absent: tuple[str, ...] = ()
     reason: str | None = None
+    session: str | None = None  # "tainted": an extra `when` condition (M4b)
 
     def __post_init__(self) -> None:
         if type(self.id) is not str or not self.id:
@@ -417,7 +550,7 @@ class Rule:
                 raise PolicyError(f"{what}: {problem}")
         for name in ("when", "unless"):
             value = tuple(getattr(self, name))
-            if not all(type(c) is Constraint for c in value):
+            if not all(type(c) in (Constraint, ProvenanceCondition) for c in value):
                 raise PolicyError(f"{what}: {name} must hold Constraint objects")
             object.__setattr__(self, name, value)
         if self.absent:
@@ -429,6 +562,8 @@ class Rule:
             object.__setattr__(self, "absent", ())
         if self.reason is not None and type(self.reason) is not str:
             raise PolicyError(f"{what}: reason must be a string")
+        if self.session is not None and (type(self.session) is not str or self.session != TAINTED):
+            raise PolicyError(f"{what}: session must be {TAINTED!r}")
 
     @classmethod
     def from_dict(cls, data: Any) -> Rule:
@@ -450,6 +585,8 @@ class Rule:
             raise PolicyError(f"{what}: absent must be a non-empty list of strings")
         if "reason" in data and type(data["reason"]) is not str:
             raise PolicyError(f"{what}: reason must be a string")
+        if "session" in data and data["session"] != TAINTED:
+            raise PolicyError(f"{what}: session must be {TAINTED!r}")
         return cls(
             id=rule_id,
             effect=data["effect"],
@@ -458,17 +595,21 @@ class Rule:
             unless=_conditions(data["unless"], f"{what}: unless") if "unless" in data else (),
             absent=_names(data["absent"], f"{what}: absent") if "absent" in data else (),
             reason=data.get("reason"),
+            session=data.get("session"),
         )
 
-    def matches(self, call: Call) -> bool:
+    def matches(self, call: Call, context: PolicyContext | None = None) -> bool:
         """Does this rule apply to the call? See the module docstring for the semantics."""
         if not any(glob_match(pattern, call.tool) for pattern in self.tools):
             return False
         args = call.args
         if any(name in args for name in self.absent):
             return False
-        when = [evaluate(c, args) for c in self.when]
-        unless = [evaluate(c, args) for c in self.unless]
+        when = [evaluate(c, args, context) for c in self.when]
+        if self.session is not None:
+            state = None if context is None else context.session
+            when.append(True if state == TAINTED else False if state == CLEAN else None)
+        unless = [evaluate(c, args, context) for c in self.unless]
         if self.effect == ALLOW:
             # Proven: every condition TRUE, and the exception proven not to apply.
             return all(v is True for v in when) and (not unless or any(v is False for v in unless))
@@ -591,13 +732,19 @@ class Policy:
             raise PolicyError(f"cannot read policy file: {exc}") from exc
         return cls.from_yaml(text)
 
-    def decide(self, call: Call) -> PolicyDecision:
-        """Deny beats approve beats allow; no matching rule means deny."""
+    def decide(self, call: Call, context: PolicyContext | None = None) -> PolicyDecision:
+        """Deny beats approve beats allow; no matching rule means deny.
+
+        `context` carries provenance (M4b); None means none is known, which
+        makes every provenance condition UNKNOWN.
+        """
         if type(call) is not Call:
             return PolicyDecision(DENY, None, "not a Call")
+        if context is not None and type(context) is not PolicyContext:
+            return PolicyDecision(DENY, None, "not a PolicyContext")
         first: dict[str, Rule] = {}
         for rule in self.rules:
-            if rule.effect not in first and rule.matches(call):
+            if rule.effect not in first and rule.matches(call, context):
                 first[rule.effect] = rule
                 if rule.effect == DENY:
                     break

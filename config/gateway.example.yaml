@@ -90,6 +90,22 @@ server:
   access_log: false           # uvicorn's access log. Off by default; when on, query
                               # strings are cut out of it
 
+# Operator dashboard at /dashboard: live decision feed, approval queue, and
+# the audit chain with a tamper demo that edits a temporary COPY of the log
+# (never the log itself). Off by default; when off, no /dashboard route exists.
+# Sign-in uses the same admin key as the admin API and exchanges it for an
+# HttpOnly, SameSite=Strict session cookie; the server keeps only a hash of
+# the session id. State-changing requests also need a per-session CSRF token.
+# Sessions are in memory and end on restart.
+dashboard:
+  enabled: false
+  session_ttl_seconds: 900    # absolute session lifetime; sign in again after it
+  secure_cookie: auto         # auto: Secure only when the request came over https.
+                              # Set true behind a TLS proxy: the app itself then
+                              # only sees plain http and auto would leave it off
+  feed_entries: 40            # how many recent audit entries the feed shows (1-500)
+  max_sessions: 16            # live sessions at once; the oldest is dropped past it
+
 # Tool registry: the name agents call -> "package.module:function". The
 # function receives the call's arguments as keyword arguments and may be sync
 # or async. Names may use letters, digits and _ . : / - (at most 128

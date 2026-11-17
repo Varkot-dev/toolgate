@@ -3,10 +3,14 @@
 Scripted agents, not a language model: an honest agent that performs exactly
 the user's task and a hijacked agent that also obeys every injected
 instruction it reads (toolgate.sandbox.agents). Each of the 26 tasks is run
-with both agents under four configurations: no gateway; gateway with the
-task's grant and an allow-all policy; grant plus config/sandbox_policy.yaml
-with a careful approver; the same with a rubber-stamp approver. The two
-provenance configurations are listed as "not implemented".
+with both agents under every configuration of toolgate.sandbox.runner: no
+gateway; grant only; grant plus canonicalization; grant plus
+config/sandbox_policy.yaml (careful and rubber-stamp approver); plus session
+labels; plus value labels with handles; plan-then-execute (each of the last
+three with both approvers).
+
+Scripted agents, a scripted planner and a scripted extractor: this measures
+the defence layers, not a model.
 
 Deterministic: fixed seed, fixed clock, counting ids. Running it twice writes
 the same bytes.
@@ -38,10 +42,14 @@ def main() -> None:
         print("  no mismatches")
     for m in result["mismatches"]:
         print(
-            f"  {m['configuration']:<24}{m['task']:<13}expected "
+            f"  {m['configuration']:<30}{m['task']:<13}expected "
             f"{m['expected_in_this_configuration']!r} (label {m['expected']!r}), "
             f"observed {m['observed']!r}"
         )
+
+    print("\nargs-04 (reports/../secrets traversal), stopped by:")
+    for key, layer in result["args_04_traversal"]["stopped_by"].items():
+        print(f"  {key:<30}{layer}")
 
     if not all(result["checks"].values()):
         raise SystemExit(f"suite sanity checks failed: {result['checks']}")

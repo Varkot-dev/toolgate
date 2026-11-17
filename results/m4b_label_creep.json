@@ -1,0 +1,372 @@
+{
+  "description": "Label creep in the sandbox: how much gets labeled untrusted, per step, and what it costs in approvals. scripted agents, not a language model.",
+  "definitions": {
+    "step": "the n-th call of a task that reached a final decision (1-based)",
+    "call untrusted": "session mode: the session was tainted before the call; value mode: some argument's label holds 'untrusted'",
+    "value": "each argument of a call and each result returned",
+    "value untrusted (session mode)": "created in a tainted session, or the result that tainted it",
+    "value user only": "its readers are exactly one principal (the user)",
+    "approvals": "requested by the honest agent's calls over all 26 tasks; config 2 is the baseline without provenance"
+  },
+  "seed": 0,
+  "configurations": {
+    "2-policy-careful": {
+      "label": "grant + policy, careful approver",
+      "measured": false,
+      "calls": 0,
+      "calls_untrusted": 0,
+      "values": 0,
+      "values_untrusted": 0,
+      "honest_approvals_total": 8,
+      "honest_approvals_by_rule": {},
+      "honest_calls_denied": 0,
+      "honest_tasks_completed": 26,
+      "by_step": []
+    },
+    "3-session-labels": {
+      "label": "plus session labels, careful approver",
+      "measured": true,
+      "calls": 86,
+      "calls_untrusted": 53,
+      "values": 210,
+      "values_untrusted": 166,
+      "honest_approvals_total": 27,
+      "honest_approvals_by_rule": {
+        "approve-acting-in-tainted-session": 19,
+        "approve-external-email": 5,
+        "approve-invites": 2,
+        "approve-publishing": 1
+      },
+      "honest_calls_denied": 0,
+      "honest_tasks_completed": 26,
+      "by_step": [
+        {
+          "step": 1,
+          "tasks": 26,
+          "calls_untrusted": 0,
+          "values": 43,
+          "values_untrusted": 19,
+          "values_user_only": 19,
+          "fraction_calls_untrusted": 0.0,
+          "fraction_values_untrusted": 0.4419,
+          "fraction_values_user_only": 0.4419
+        },
+        {
+          "step": 2,
+          "tasks": 25,
+          "calls_untrusted": 19,
+          "values": 65,
+          "values_untrusted": 45,
+          "values_user_only": 35,
+          "fraction_calls_untrusted": 0.76,
+          "fraction_values_untrusted": 0.6923,
+          "fraction_values_user_only": 0.5385
+        },
+        {
+          "step": 3,
+          "tasks": 16,
+          "calls_untrusted": 15,
+          "values": 42,
+          "values_untrusted": 42,
+          "values_user_only": 36,
+          "fraction_calls_untrusted": 0.9375,
+          "fraction_values_untrusted": 1.0,
+          "fraction_values_user_only": 0.8571
+        },
+        {
+          "step": 4,
+          "tasks": 11,
+          "calls_untrusted": 11,
+          "values": 34,
+          "values_untrusted": 34,
+          "values_user_only": 32,
+          "fraction_calls_untrusted": 1.0,
+          "fraction_values_untrusted": 1.0,
+          "fraction_values_user_only": 0.9412
+        },
+        {
+          "step": 5,
+          "tasks": 5,
+          "calls_untrusted": 5,
+          "values": 14,
+          "values_untrusted": 14,
+          "values_user_only": 12,
+          "fraction_calls_untrusted": 1.0,
+          "fraction_values_untrusted": 1.0,
+          "fraction_values_user_only": 0.8571
+        },
+        {
+          "step": 6,
+          "tasks": 3,
+          "calls_untrusted": 3,
+          "values": 12,
+          "values_untrusted": 12,
+          "values_user_only": 12,
+          "fraction_calls_untrusted": 1.0,
+          "fraction_values_untrusted": 1.0,
+          "fraction_values_user_only": 1.0
+        }
+      ]
+    },
+    "4-value-labels": {
+      "label": "plus value labels (agent passes handles), careful approver",
+      "measured": true,
+      "calls": 86,
+      "calls_untrusted": 51,
+      "values": 208,
+      "values_untrusted": 145,
+      "honest_approvals_total": 19,
+      "honest_approvals_by_rule": {
+        "approve-external-email": 5,
+        "approve-invites": 2,
+        "approve-publishing": 1,
+        "approve-recipient-not-from-user-or-contacts": 11
+      },
+      "honest_calls_denied": 2,
+      "honest_tasks_completed": 26,
+      "by_step": [
+        {
+          "step": 1,
+          "tasks": 26,
+          "calls_untrusted": 0,
+          "values": 43,
+          "values_untrusted": 19,
+          "values_user_only": 19,
+          "fraction_calls_untrusted": 0.0,
+          "fraction_values_untrusted": 0.4419,
+          "fraction_values_user_only": 0.4419
+        },
+        {
+          "step": 2,
+          "tasks": 25,
+          "calls_untrusted": 19,
+          "values": 64,
+          "values_untrusted": 43,
+          "values_user_only": 35,
+          "fraction_calls_untrusted": 0.76,
+          "fraction_values_untrusted": 0.6719,
+          "fraction_values_user_only": 0.5469
+        },
+        {
+          "step": 3,
+          "tasks": 16,
+          "calls_untrusted": 14,
+          "values": 41,
+          "values_untrusted": 33,
+          "values_user_only": 36,
+          "fraction_calls_untrusted": 0.875,
+          "fraction_values_untrusted": 0.8049,
+          "fraction_values_user_only": 0.878
+        },
+        {
+          "step": 4,
+          "tasks": 11,
+          "calls_untrusted": 10,
+          "values": 34,
+          "values_untrusted": 28,
+          "values_user_only": 32,
+          "fraction_calls_untrusted": 0.9091,
+          "fraction_values_untrusted": 0.8235,
+          "fraction_values_user_only": 0.9412
+        },
+        {
+          "step": 5,
+          "tasks": 5,
+          "calls_untrusted": 5,
+          "values": 14,
+          "values_untrusted": 12,
+          "values_user_only": 12,
+          "fraction_calls_untrusted": 1.0,
+          "fraction_values_untrusted": 0.8571,
+          "fraction_values_user_only": 0.8571
+        },
+        {
+          "step": 6,
+          "tasks": 3,
+          "calls_untrusted": 3,
+          "values": 12,
+          "values_untrusted": 10,
+          "values_user_only": 11,
+          "fraction_calls_untrusted": 1.0,
+          "fraction_values_untrusted": 0.8333,
+          "fraction_values_user_only": 0.9167
+        }
+      ]
+    },
+    "5-plan-execute": {
+      "label": "plan-then-execute, value labels, careful approver",
+      "measured": true,
+      "calls": 86,
+      "calls_untrusted": 39,
+      "values": 210,
+      "values_untrusted": 102,
+      "honest_approvals_total": 15,
+      "honest_approvals_by_rule": {
+        "approve-content-not-readable-by-recipient": 7,
+        "approve-external-email": 5,
+        "approve-invites": 2,
+        "approve-publishing": 1
+      },
+      "honest_calls_denied": 0,
+      "honest_tasks_completed": 26,
+      "by_step": [
+        {
+          "step": 1,
+          "tasks": 26,
+          "calls_untrusted": 0,
+          "values": 43,
+          "values_untrusted": 19,
+          "values_user_only": 19,
+          "fraction_calls_untrusted": 0.0,
+          "fraction_values_untrusted": 0.4419,
+          "fraction_values_user_only": 0.4419
+        },
+        {
+          "step": 2,
+          "tasks": 25,
+          "calls_untrusted": 18,
+          "values": 65,
+          "values_untrusted": 37,
+          "values_user_only": 25,
+          "fraction_calls_untrusted": 0.72,
+          "fraction_values_untrusted": 0.5692,
+          "fraction_values_user_only": 0.3846
+        },
+        {
+          "step": 3,
+          "tasks": 16,
+          "calls_untrusted": 8,
+          "values": 42,
+          "values_untrusted": 18,
+          "values_user_only": 12,
+          "fraction_calls_untrusted": 0.5,
+          "fraction_values_untrusted": 0.4286,
+          "fraction_values_user_only": 0.2857
+        },
+        {
+          "step": 4,
+          "tasks": 11,
+          "calls_untrusted": 8,
+          "values": 34,
+          "values_untrusted": 17,
+          "values_user_only": 12,
+          "fraction_calls_untrusted": 0.7273,
+          "fraction_values_untrusted": 0.5,
+          "fraction_values_user_only": 0.3529
+        },
+        {
+          "step": 5,
+          "tasks": 5,
+          "calls_untrusted": 3,
+          "values": 14,
+          "values_untrusted": 6,
+          "values_user_only": 3,
+          "fraction_calls_untrusted": 0.6,
+          "fraction_values_untrusted": 0.4286,
+          "fraction_values_user_only": 0.2143
+        },
+        {
+          "step": 6,
+          "tasks": 3,
+          "calls_untrusted": 2,
+          "values": 12,
+          "values_untrusted": 5,
+          "values_user_only": 6,
+          "fraction_calls_untrusted": 0.6667,
+          "fraction_values_untrusted": 0.4167,
+          "fraction_values_user_only": 0.5
+        }
+      ]
+    }
+  },
+  "protection_vs_approvals": [
+    {
+      "configuration": "0-no-gateway",
+      "label": "no gateway",
+      "attacks_succeeded": 18,
+      "attacks": 18,
+      "honest_approvals_mean_per_task": 0.0,
+      "honest_approvals_total": 0
+    },
+    {
+      "configuration": "1-grant-only",
+      "label": "grant, allow-all policy",
+      "attacks_succeeded": 10,
+      "attacks": 18,
+      "honest_approvals_mean_per_task": 0.0,
+      "honest_approvals_total": 0
+    },
+    {
+      "configuration": "1c-grant-canonical",
+      "label": "grant + canonicalization, allow-all policy",
+      "attacks_succeeded": 9,
+      "attacks": 18,
+      "honest_approvals_mean_per_task": 0.0,
+      "honest_approvals_total": 0
+    },
+    {
+      "configuration": "2-policy-careful",
+      "label": "grant + policy, careful approver",
+      "attacks_succeeded": 4,
+      "attacks": 18,
+      "honest_approvals_mean_per_task": 0.308,
+      "honest_approvals_total": 8
+    },
+    {
+      "configuration": "2-policy-rubber-stamp",
+      "label": "grant + policy, rubber-stamp approver",
+      "attacks_succeeded": 9,
+      "attacks": 18,
+      "honest_approvals_mean_per_task": 0.308,
+      "honest_approvals_total": 8
+    },
+    {
+      "configuration": "3-session-labels",
+      "label": "plus session labels, careful approver",
+      "attacks_succeeded": 0,
+      "attacks": 18,
+      "honest_approvals_mean_per_task": 1.038,
+      "honest_approvals_total": 27
+    },
+    {
+      "configuration": "3-session-labels-rubber-stamp",
+      "label": "plus session labels, rubber-stamp approver",
+      "attacks_succeeded": 8,
+      "attacks": 18,
+      "honest_approvals_mean_per_task": 1.038,
+      "honest_approvals_total": 27
+    },
+    {
+      "configuration": "4-value-labels",
+      "label": "plus value labels (agent passes handles), careful approver",
+      "attacks_succeeded": 0,
+      "attacks": 18,
+      "honest_approvals_mean_per_task": 0.731,
+      "honest_approvals_total": 19
+    },
+    {
+      "configuration": "4-value-labels-rubber-stamp",
+      "label": "plus value labels (agent passes handles), rubber-stamp approver",
+      "attacks_succeeded": 7,
+      "attacks": 18,
+      "honest_approvals_mean_per_task": 0.731,
+      "honest_approvals_total": 19
+    },
+    {
+      "configuration": "5-plan-execute",
+      "label": "plan-then-execute, value labels, careful approver",
+      "attacks_succeeded": 0,
+      "attacks": 18,
+      "honest_approvals_mean_per_task": 0.577,
+      "honest_approvals_total": 15
+    },
+    {
+      "configuration": "5-plan-execute-rubber-stamp",
+      "label": "plan-then-execute, value labels, rubber-stamp approver",
+      "attacks_succeeded": 4,
+      "attacks": 18,
+      "honest_approvals_mean_per_task": 0.577,
+      "honest_approvals_total": 15
+    }
+  ]
+}

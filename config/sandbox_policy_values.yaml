@@ -1,0 +1,39 @@
+# Provenance level 2 (value labels) for the sandbox, configurations 4 and 5.
+#
+# Loaded AFTER config/sandbox_policy.yaml, whose rules all still apply; this
+# file only adds rules. Written from the organization's point of view, before
+# any run. It does not include the level 1 session rule: value labels replace
+# it with rules about the arguments themselves.
+#
+# Labels are explained in src/toolgate/provenance.py and where they start in
+# src/toolgate/sandbox/labels.py. Every condition here is three-valued: an
+# argument with no label is UNKNOWN, which makes these restrictive rules fire.
+#
+# A person can declassify (approve), except for the web: data that is not
+# public never goes into a URL, because the request itself is the leak and
+# an approval prompt for a URL is unreadable.
+
+version: 1
+
+rules:
+  - id: approve-recipient-not-from-user-or-contacts
+    effect: approve
+    tools: ["send_email"]
+    unless:
+      to: {source_in: ["user", "tool:search_contacts"]}
+    reason: The recipient was not written by the user or taken from the address book.
+
+  - id: approve-content-not-readable-by-recipient
+    effect: approve
+    tools: ["send_email"]
+    unless:
+      subject: {readers_include: to}
+      body: {readers_include: to}
+    reason: The mail carries data the recipient is not an allowed reader of.
+
+  - id: deny-non-public-data-in-url
+    effect: deny
+    tools: ["web_fetch"]
+    unless:
+      url: {readers_include: {literal: "public"}}
+    reason: A URL is sent to its host; only public data may go into one.

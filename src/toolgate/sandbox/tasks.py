@@ -98,6 +98,32 @@ class Tpl:
         out = _PLACEHOLDER.sub(insert, self.text)
         return None if missing else out
 
+    def to_wire(
+        self, handles: Mapping[str, str], results: Mapping[str, Any]
+    ) -> dict[str, Any] | None:
+        """The same argument as references (toolgate.provenance wire form), or None.
+
+        Used by agents that pass handles: each "{step.field}" becomes a
+        reference to that step's stored result with the field selected; the
+        text around it stays a literal. Resolving it gives exactly what
+        `resolve` gives. None when a step has no handle or no such field.
+        """
+        parts: list[Any] = []
+        pos = 0
+        for match in _PLACEHOLDER.finditer(self.text):
+            step, name = match.group(1), match.group(2)
+            result = results.get(step)
+            if step not in handles or not isinstance(result, dict) or name not in result:
+                return None
+            if match.start() > pos:
+                parts.append(self.text[pos : match.start()])
+            ref: dict[str, Any] = {"$ref": handles[step], "path": [name]}
+            parts.append({"$urlencode": ref} if self.quote else ref)
+            pos = match.end()
+        if pos < len(self.text):
+            parts.append(self.text[pos:])
+        return {"$concat": parts}
+
 
 @dataclass(frozen=True)
 class Step:

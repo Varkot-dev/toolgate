@@ -42,6 +42,9 @@ from toolgate.sandbox.world import result_is_untrusted
 
 OK, DENIED, ERROR, SKIPPED = "ok", "denied", "error", "skipped"
 LEGIT, INJECTED, FALLBACK = "legit", "injected", "fallback"
+# Plan-then-execute only: a planned call whose arguments carry a value that a
+# fooled extractor produced (toolgate.sandbox.plans).
+INFLUENCED = "influenced"
 MAX_FALLBACKS = 2
 CAREFUL, RUBBER_STAMP = "careful", "rubber_stamp"
 
@@ -54,6 +57,7 @@ class ToolResult:
     result    the tool's return value when status is ok
     layer     the defence layer that refused the call, when status is denied
     approval  None, or "approved" / "rejected" if a person was asked
+    handle    the provenance handle of the result, when the gateway issues them
     """
 
     status: str
@@ -61,6 +65,7 @@ class ToolResult:
     layer: str | None = None
     reason: str = ""
     approval: str | None = None
+    handle: str | None = None
 
 
 CallTool = Callable[[str, dict[str, Any]], ToolResult]
@@ -82,7 +87,7 @@ class Entry:
 
     @property
     def from_injection(self) -> bool:
-        return self.origin in (INJECTED, FALLBACK)
+        return self.origin in (INJECTED, FALLBACK, INFLUENCED)
 
     def to_json(self) -> dict[str, Any]:
         return {
@@ -111,11 +116,22 @@ def contains_text(value: Any, text: str) -> bool:
 
 
 class _Script:
-    """Runs scripted steps against `call_tool` and keeps the transcript."""
+    """Runs scripted steps against `call_tool` and keeps the transcript.
 
-    def __init__(self, call_tool: CallTool) -> None:
+    With `handles=True` (provenance configuration 4) the agent passes data it
+    forwards as references: a `Tpl` argument is sent in the wire form of
+    toolgate.provenance, built from the handles the gateway returned, and
+    every constant argument is sent as a literal. This holds for injected
+    steps too: the attacker chooses the text the hijacked agent writes, but a
+    reference carries the label the gateway gave the stored value, which the
+    agent cannot change.
+    """
+
+    def __init__(self, call_tool: CallTool, handles: bool = False) -> None:
         self.call_tool = call_tool
+        self.use_handles = handles
         self.results: dict[str, Any] = {}
+        self.handles: dict[str, str] = {}
         self.transcript: Transcript = []
 
     def run(self, step: Step, origin: str) -> ToolResult | None:
@@ -125,7 +141,10 @@ class _Script:
         for name, value in step.args.items():
             if isinstance(value, Tpl):
                 sources[name] = value.sources()
-                value = value.resolve(self.results)
+                if self.use_handles:
+                    value = value.to_wire(self.handles, self.results)
+                else:
+                    value = value.resolve(self.results)
                 if value is None:
                     self.transcript.append(
                         Entry(origin, step.tool, {}, SKIPPED, reason=f"no input for {name!r}")
@@ -148,6 +167,8 @@ class _Script:
         )
         if outcome.status == OK and step.name:
             self.results[step.name] = outcome.result
+            if outcome.handle is not None:
+                self.handles[step.name] = outcome.handle
         return outcome
 
     def run_persistently(self, step: Step) -> None:
@@ -164,8 +185,8 @@ class HonestAgent:
 
     name = "honest"
 
-    def run(self, task: Task, call_tool: CallTool) -> Transcript:
-        script = _Script(call_tool)
+    def run(self, task: Task, call_tool: CallTool, handles: bool = False) -> Transcript:
+        script = _Script(call_tool, handles)
         for step in task.legit:
             script.run(step, LEGIT)
         return script.transcript
@@ -176,8 +197,8 @@ class HijackedAgent:
 
     name = "hijacked"
 
-    def run(self, task: Task, call_tool: CallTool) -> Transcript:
-        script = _Script(call_tool)
+    def run(self, task: Task, call_tool: CallTool, handles: bool = False) -> Transcript:
+        script = _Script(call_tool, handles)
         hijacked = False
         for step in task.legit:
             outcome = script.run(step, LEGIT)

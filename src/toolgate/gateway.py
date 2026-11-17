@@ -93,6 +93,26 @@ argument names.
   * Reasons are cut to 200 characters with a visible "...[truncated]" mark.
 
 Not in the log: requests that never present a token.
+
+Optional hooks (M4b), both off by default; with neither configured the
+pipeline above is unchanged.
+
+  canonicalizer  `canonicalizer(tool, args) -> (tool, args)`, e.g. a
+                 toolgate.canonical.Canonicalizer. Runs before step a, so the
+                 Call that is checked, stored for approval and run is built
+                 from the canonical form. A CanonicalError is a refusal at
+                 stage "canonical", logged as "canonical: <code>".
+  provenance     a toolgate.provenance.Provenance. Before step a, for a token
+                 that verifies, `prepare` resolves handle references in the
+                 arguments (refused at stage "provenance", logged as
+                 "provenance: <code>") and labels each argument; step c asks
+                 policy with `context(jti, labels)`; every final outcome is
+                 passed to `record`, which stores an allowed result and puts
+                 its handle in `CallOutcome.handle`. The labels of a parked
+                 call are kept with it, and the context is rebuilt from them
+                 (with the session state as it is then) when it is approved.
+                 Labels are computed by this process only; nothing a caller
+                 sends can set one.
 """
 
 from __future__ import annotations
@@ -109,7 +129,7 @@ import re
 import threading
 import time
 from collections.abc import Callable, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from types import MappingProxyType
 from typing import Any
 
@@ -124,9 +144,13 @@ from toolgate.approvals import (
     valid_name,
 )
 from toolgate.audit import AuditEntry, AuditLog, hash_args, loggable
+from toolgate.canonical import CODES as CANONICAL_CODES
+from toolgate.canonical import CanonicalError
 from toolgate.capability import DECISION_CODES, Call, Decision, Grant
 from toolgate.constraints import OPS
-from toolgate.policy import ALLOW, APPROVE, DENY, Policy
+from toolgate.policy import ALLOW, APPROVE, DENY, Policy, PolicyContext
+from toolgate.provenance import CODES as PROVENANCE_CODES
+from toolgate.provenance import ProvenanceError
 from toolgate.tokens import Authority, Authorization, EscalationError, TokenError, Verified
 
 ALLOWED, DENIED, PENDING, ERROR = "allowed", "denied", "pending", "error"
@@ -184,6 +208,8 @@ class CallOutcome:
                  "in_flight_limit", "tool_timeout"
     authenticated  False when the token presented did not verify; such a
                  caller is told nothing about the log (see server.py)
+    handle       with a provenance layer in value mode: the handle under
+                 which the result is stored, for later references
     """
 
     status: str
@@ -195,6 +221,7 @@ class CallOutcome:
     stage: str = ""
     code: str = ""
     authenticated: bool = True
+    handle: str | None = None
 
     @property
     def allowed(self) -> bool:
@@ -346,6 +373,8 @@ class Gateway:
         tool_error_detail: bool = True,
         unverified_audit_rate: int | float | None = DEFAULT_UNVERIFIED_AUDIT_RATE,
         unverified_audit_burst: int = DEFAULT_UNVERIFIED_AUDIT_BURST,
+        canonicalizer: Callable[[str, Any], tuple[str, Any]] | None = None,
+        provenance: Any = None,
     ) -> None:
         if type(policy) is not Policy:
             raise ValueError("policy must be a Policy")
@@ -365,6 +394,12 @@ class Gateway:
             _positive_number(unverified_audit_rate, "unverified_audit_rate")
         if type(unverified_audit_burst) is not int or unverified_audit_burst < 1:
             raise ValueError("unverified_audit_burst must be a positive integer")
+        if canonicalizer is not None and not callable(canonicalizer):
+            raise ValueError("canonicalizer must be callable")
+        if provenance is not None and not all(
+            callable(getattr(provenance, name, None)) for name in ("prepare", "context", "record")
+        ):
+            raise ValueError("provenance must have prepare, context and record")
         registry: dict[str, Callable[..., Any]] = {}
         for name, function in dict(tools).items():
             if loggable_tool(name) == INVALID_TOOL:
@@ -385,6 +420,10 @@ class Gateway:
         self.tool_error_detail = tool_error_detail
         self.unverified_audit_rate = unverified_audit_rate
         self.unverified_audit_burst = unverified_audit_burst
+        self.canonicalizer = canonicalizer
+        self.provenance = provenance
+        # approval id -> (session key, argument labels, handles used), for M4b
+        self._parked_labels: dict[str, tuple[str, Any, Any]] = {}
         # One lock for the small bookkeeping below. It is never held while a
         # tool runs; it is held across the write of a summary entry.
         self._state = threading.Lock()
@@ -444,6 +483,58 @@ class Gateway:
         token, the policy, the stores or the tool escapes.
         """
         self._sweep()
+        key: str | None = None
+        labels: Any = None
+        used: Any = None
+        if self.provenance is not None:
+            try:
+                key = self.authority.verify(token).jti
+            except Exception:
+                key = None  # step b refuses it; nothing is resolved for it
+            if key is not None:
+                try:
+                    args, labels, used = self.provenance.prepare(key, tool, args)
+                except ProvenanceError as exc:
+                    code = exc.code if exc.code in PROVENANCE_CODES else "bad_reference"
+                    return self._deny(
+                        self._attribute(token),
+                        loggable_tool(tool),
+                        {},
+                        "provenance",
+                        f"argument refused: {code}",
+                        log=code,
+                        code=code,
+                    )
+                except Exception:
+                    return self._deny(
+                        self._attribute(token),
+                        loggable_tool(tool),
+                        {},
+                        "unavailable",
+                        "provenance check failed",
+                    )
+        if self.canonicalizer is not None:
+            try:
+                tool, args = self.canonicalizer(tool, args)
+            except CanonicalError as exc:
+                code = exc.code if exc.code in CANONICAL_CODES else "refused"
+                return self._deny(
+                    self._attribute(token),
+                    loggable_tool(tool),
+                    {},
+                    "canonical",
+                    f"argument refused by canonicalization: {code}",
+                    log=code,
+                    code=code,
+                )
+            except Exception:
+                return self._deny(
+                    self._attribute(token),
+                    loggable_tool(tool),
+                    {},
+                    "canonical",
+                    "canonicalization failed",
+                )
         try:
             call = Call(tool, args)
             hash_args(call.args)  # also refuses strings that cannot be encoded
@@ -455,7 +546,11 @@ class Gateway:
                 self._attribute(token), loggable_tool(tool), {}, "call", "malformed call"
             )
         try:
-            return self._decide(token, call)
+            if key is None:
+                return self._decide(token, call)
+            context = self.provenance.context(key, labels)
+            outcome = self._decide(token, call, context=context, labels=(key, labels, used))
+            return self._provenance_record(key, call, outcome, labels, used)
         except Exception:
             # Nothing below is expected to raise. If something does, it is
             # still a refusal with an entry, not a traceback for the caller.
@@ -481,6 +576,8 @@ class Gateway:
         state = APPROVED if decision == "approve" else REJECTED
         record = self.approvals.resolve(approval_id, state, approver, self._clock())
         who = _Who(record.jti, record.actors)
+        with self._state:
+            parked = self._parked_labels.pop(record.id, None)
         if state == REJECTED:
             entry = self._append(
                 who, record.call.tool, record.call.args, "rejected", record.rule, approver
@@ -494,9 +591,15 @@ class Gateway:
                 stage="approval",
             )
             self._finish(record.id, outcome, False)
+            if parked is not None:
+                outcome = self._provenance_record(parked[0], record.call, outcome, *parked[1:])
             return outcome
         try:
-            outcome = self._decide(record.token, record.call, approval=record)
+            if parked is None:
+                outcome = self._decide(record.token, record.call, approval=record)
+            else:
+                context = self.provenance.context(parked[0], parked[1])
+                outcome = self._decide(record.token, record.call, approval=record, context=context)
         except BaseException:
             failed = CallOutcome(
                 DENIED, "internal error", approval_id=record.id, stage="unavailable"
@@ -504,7 +607,18 @@ class Gateway:
             self._finish(record.id, failed, True)
             raise
         self._finish(record.id, outcome, outcome.status == DENIED)
+        if parked is not None:
+            outcome = self._provenance_record(parked[0], record.call, outcome, *parked[1:])
         return outcome
+
+    def _provenance_record(
+        self, key: str, call: Call, outcome: CallOutcome, labels: Any, used: Any
+    ) -> CallOutcome:
+        """Hand a final (or pending) outcome to the provenance layer; attach the handle."""
+        handle = self.provenance.record(
+            key, call.tool, plain_args(call.args), outcome, labels, used
+        )
+        return outcome if handle is None else replace(outcome, handle=handle)
 
     # -- token lifecycle, audited -------------------------------------------
 
@@ -619,8 +733,19 @@ class Gateway:
         except Exception:  # attribution only, never a decision
             return _Who(token_fingerprint(token), (), False)
 
-    def _decide(self, token: str, call: Call, approval: Approval | None = None) -> CallOutcome:
-        """Steps b to e for a fresh call, or for a stored call being approved."""
+    def _decide(
+        self,
+        token: str,
+        call: Call,
+        approval: Approval | None = None,
+        context: PolicyContext | None = None,
+        labels: tuple[str, Any, Any] | None = None,
+    ) -> CallOutcome:
+        """Steps b to e for a fresh call, or for a stored call being approved.
+
+        `context` is the provenance context for policy (None without a
+        provenance layer); `labels` is kept with the call if it is parked.
+        """
         tool, args = call.tool, call.args
         approver = None if approval is None else approval.approver
         approval_id = None if approval is None else approval.id
@@ -684,7 +809,9 @@ class Gateway:
 
         # c. Operator policy.
         try:
-            ruling = self._policy.decide(call)
+            ruling = (
+                self._policy.decide(call) if context is None else self._policy.decide(call, context)
+            )
         except Exception:
             return deny("unavailable", "policy check failed")
         if ruling.effect == DENY:
@@ -692,7 +819,11 @@ class Gateway:
         if ruling.effect not in (ALLOW, APPROVE):
             return deny("policy", "unknown policy effect")
         if ruling.effect == APPROVE and approval is None:
-            return self._park(token, verified, call, ruling.rule_id or "", ruling.reason)
+            parked = self._park(token, verified, call, ruling.rule_id or "", ruling.reason)
+            if labels is not None and parked.status == PENDING and parked.approval_id:
+                with self._state:
+                    self._parked_labels[parked.approval_id] = labels
+            return parked
         rule = ruling.rule_id or f"policy: {ruling.effect}"
 
         # d. Everything that can refuse without spending budget goes first:

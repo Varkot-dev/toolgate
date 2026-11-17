@@ -752,6 +752,7 @@ _CONFIG_KEYS = {
     "limits",
     "server",
     "tools",
+    "dashboard",
 }
 
 
@@ -923,6 +924,12 @@ def build(
             "access_log",
         },
     )
+    dashboard = _section(
+        config,
+        "dashboard",
+        {"enabled", "session_ttl_seconds", "secure_cookie", "feed_entries", "max_sessions"},
+    )
+    dashboard_enabled = _setting(dashboard, "enabled", False, "flag")
     tools_cfg = config.get("tools", {})
     if type(tools_cfg) is not dict:
         raise ConfigError("`tools` must map a tool name to 'package.module:function'")
@@ -1009,6 +1016,11 @@ def build(
             max_body_bytes=limits.get("max_body_bytes", DEFAULT_MAX_BODY_BYTES),
             admin_threads=admin_threads,
         )
+        if dashboard_enabled:  # off by default: without it no /dashboard route exists
+            from toolgate.dashboard import mount_dashboard
+
+            options = {k: v for k, v in dashboard.items() if k != "enabled"}
+            mount_dashboard(app, gateway, admin_hash, admin_threads=admin_threads, **options)
     except Exception as exc:  # PolicyError, AuditError, sqlite3.Error, ValueError, ...
         for resource in opened:
             resource.close()

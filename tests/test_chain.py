@@ -15,14 +15,18 @@ Set TOOLGATE_EXAMPLES to change the number of Hypothesis cases (default 1000).
 from __future__ import annotations
 
 import base64
+import functools
+import hashlib
 import inspect
 import json
 import os
+import random
 from dataclasses import dataclass, replace
-from typing import Any
+from itertools import combinations
+from typing import Any, get_args
 
 import pytest
-from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey, Ed25519PublicKey
 from hypothesis import HealthCheck, find, given, settings
 from hypothesis import strategies as st
 
@@ -918,9 +922,10 @@ def test_seal_and_block_signatures_are_domain_separated() -> None:
     could be confused, a seal could be replayed as a block signature (or the
     other way round). The tags make that impossible; this checks they differ
     and that a block signature is not accepted as a seal."""
-    assert chain_module._TAG_KEY_BLOCK != chain_module._TAG_KEY_SEAL
-    assert not chain_module._TAG_KEY_BLOCK.startswith(chain_module._TAG_KEY_SEAL)
-    assert not chain_module._TAG_KEY_SEAL.startswith(chain_module._TAG_KEY_BLOCK)
+    for block_tag in (chain_module._TAG_KEY_ROOT, chain_module._TAG_KEY_CAVEAT):
+        assert block_tag != chain_module._TAG_KEY_SEAL
+        assert not block_tag.startswith(chain_module._TAG_KEY_SEAL)
+        assert not chain_module._TAG_KEY_SEAL.startswith(block_tag)
     authority = KeyAuthority(ROOT_KEY)
     parent = authority.issue("t", GRANT)
     child = attenuate(parent, ONLY_READ)
@@ -930,14 +935,17 @@ def test_seal_and_block_signatures_are_domain_separated() -> None:
         authority.verify(forged)
 
 
-def test_a_degenerate_next_key_gives_away_the_token_but_adds_no_authority() -> None:
-    """Key misuse by the holder, written down so nobody is surprised by it.
+def test_a_degenerate_next_key_is_refused() -> None:
+    """Key misuse by the holder, now refused outright.
 
     Ed25519 as implemented by OpenSSL accepts the identity point as a public
     key, and under that key the signature (identity, 0) verifies for every
     message. A holder who names it as "next" makes everything after their
-    block forgeable by anyone. That is the same as publishing their token: the
-    forger can only add caveats after it, and blocks before it are untouched.
+    block forgeable by anyone. This test used to record that as accepted
+    behaviour ("the same as publishing the token"). The security review showed
+    it is worse: a bearer can also DROP later caveats and forge the seal (see
+    test_small_order_next_key_truncation_exploit_is_refused), so a token
+    naming a small-order key no longer verifies at all.
     """
     authority = KeyAuthority(ROOT_KEY)
     parent = attenuate(authority.issue("t", GRANT), ONLY_READ)
@@ -950,17 +958,14 @@ def test_a_degenerate_next_key_gives_away_the_token_but_adds_no_authority() -> N
         parent.grant,
         (ONLY_READ, SOON),
         (*parent.next_keys, identity),
-        (*parent.signatures, signer.sign(chain_module._TAG_KEY_BLOCK + block)),
+        (*parent.signatures, signer.sign(chain_module._TAG_KEY_CAVEAT + block)),
         universal_signature,
         True,
     )
-    try:
-        verified = authority.verify(open_token)
-    except ChainError:
-        return  # a stricter Ed25519 implementation: nothing to show
-    assert verified.caveats == (ONLY_READ, SOON)
-    assert not authority.authorize(open_token, SEND_ANA, NOW).allowed  # ONLY_READ still binds
-    assert not authority.authorize(open_token, READ_Q3, NOW + 60).allowed  # so does SOON
+    with pytest.raises(ChainError, match="small-order"):
+        authority.verify(open_token)
+    assert not authority.authorize(open_token, READ_Q3, NOW).allowed
+    assert not authority.authorize(open_token, SEND_ANA, NOW).allowed
     # The forger still cannot get rid of the holder's own blocks.
     with pytest.raises(ChainError):
         authority.verify(replace(drop_block(open_token, 1), proof=universal_signature))
@@ -1256,3 +1261,544 @@ def test_share_of_monotonicity_cases_that_end_in_allow() -> None:
     count()
     assert total >= 300
     assert allowed / total > 0.05, f"only {allowed} of {total} cases ended in allow"
+
+
+# ---------------------------------------------------------------------------
+# Security review fixes
+# ---------------------------------------------------------------------------
+
+# --- 1. small-order Ed25519 public keys -------------------------------------
+#
+# Independent curve arithmetic, sharing nothing with the module: the curve is
+# -x^2 + y^2 = 1 + d x^2 y^2 over GF(p), p = 2^255 - 19, d = -121665/121666.
+
+ED_P = 2**255 - 19
+ED_D = -121665 * pow(121666, -1, ED_P) % ED_P
+ED_L = 2**252 + 27742317777372353535851937790883648493  # order of the prime subgroup
+ED_IDENTITY = (0, 1)
+Point = tuple[int, int]
+
+
+def ed_add(a: Point, b: Point) -> Point:
+    (x1, y1), (x2, y2) = a, b
+    t = ED_D * x1 * x2 * y1 * y2 % ED_P
+    x3 = (x1 * y2 + x2 * y1) * pow(1 + t, -1, ED_P) % ED_P
+    y3 = (y1 * y2 + x1 * x2) * pow(1 - t, -1, ED_P) % ED_P
+    return x3, y3
+
+
+def ed_mul(k: int, point: Point) -> Point:
+    result = ED_IDENTITY
+    while k:
+        if k & 1:
+            result = ed_add(result, point)
+        point = ed_add(point, point)
+        k >>= 1
+    return result
+
+
+def ed_decode(encoding: bytes) -> Point | None:
+    """Lenient decoding, as OpenSSL does it: y is reduced modulo p, and the sign
+    bit is tolerated when x is 0. None if no point has this y."""
+    n = int.from_bytes(encoding, "little")
+    sign, y = n >> 255, (n & (2**255 - 1)) % ED_P
+    x2 = (y * y - 1) * pow(ED_D * y * y + 1, -1, ED_P) % ED_P
+    x = pow(x2, (ED_P + 3) // 8, ED_P)
+    if x * x % ED_P != x2:
+        x = x * pow(2, (ED_P - 1) // 4, ED_P) % ED_P
+    if x * x % ED_P != x2:
+        return None
+    if x & 1 != sign:
+        x = (ED_P - x) % ED_P
+    return x, y
+
+
+def ed_encode(point: Point) -> bytes:
+    x, y = point
+    return (y | (x & 1) << 255).to_bytes(32, "little")
+
+
+def is_small_order(encoding: bytes) -> bool:
+    point = ed_decode(encoding)
+    return point is not None and ed_mul(8, point) == ED_IDENTITY
+
+
+@functools.cache
+def _torsion_points() -> frozenset[Point]:
+    """All points whose order divides 8, found without any hard-coded value:
+    L * P kills the prime-order part of a random point P and leaves its
+    small-order part."""
+    rng = random.Random(20261117)
+    found: set[Point] = set()
+    while len(found) < 8:
+        point = ed_decode(rng.randbytes(32))
+        if point is not None:
+            found.add(ed_mul(ED_L, point))
+    return frozenset(found)
+
+
+def _all_small_order_encodings() -> set[bytes]:
+    """Every 32-byte string that decodes to a small-order point: each y of a
+    torsion point, each way of writing it in 255 bits (y, and y + p if it
+    fits), with the sign bit clear and set."""
+    out = set()
+    for _, y in _torsion_points():
+        for y_field in (y, y + ED_P):
+            if y_field < 2**255:
+                out |= {(y_field | sign << 255).to_bytes(32, "little") for sign in (0, 1)}
+    return out
+
+
+SMALL_ORDER = sorted(_all_small_order_encodings())
+KEY_SAMPLE = KeyAuthority(ROOT_KEY).issue("t", GRANT)
+
+
+def module_rejects_as_root(encoding: bytes) -> bool:
+    """True if the module refuses `encoding` as a root public key for being
+    small-order. An ordinary wrong key gets as far as "bad signature"."""
+    with pytest.raises(ChainError) as info:
+        verify_public(KEY_SAMPLE, encoding)
+    return "small-order" in str(info.value)
+
+
+def module_rejects_as_next(encoding: bytes) -> bool:
+    """True if the module refuses a token whose block 0 names `encoding`."""
+    token = replace(KEY_SAMPLE, next_keys=(encoding,))
+    try:
+        token.serialize()
+    except ChainError as exc:
+        assert "small-order" in str(exc)
+        return True
+    return False
+
+
+def test_the_small_order_set_is_complete_and_exact() -> None:
+    """14 encodings: 8 canonical (one per point) and 6 non-canonical."""
+    assert len(_torsion_points()) == 8
+    assert {ed_mul(8, p) for p in _torsion_points()} == {ED_IDENTITY}
+    assert len(SMALL_ORDER) == 14
+    assert all(is_small_order(e) for e in SMALL_ORDER)
+    canonical = {ed_encode(p) for p in _torsion_points()}
+    assert len(canonical) == 8 and canonical < set(SMALL_ORDER)
+    assert set(SMALL_ORDER) == chain_module._SMALL_ORDER_KEYS
+    # Flipping any one bit of a small-order encoding leaves the set, unless it
+    # lands on another member: the set has no near misses the module forgot.
+    for encoding in SMALL_ORDER:
+        for bit in range(256):
+            flipped = (int.from_bytes(encoding, "little") ^ 1 << bit).to_bytes(32, "little")
+            assert is_small_order(flipped) == (flipped in chain_module._SMALL_ORDER_KEYS)
+
+
+@pytest.mark.parametrize("encoding", SMALL_ORDER, ids=lambda e: e.hex()[:8] + ".." + e.hex()[-2:])
+def test_small_order_keys_are_refused_everywhere_a_key_enters(encoding: bytes) -> None:
+    assert is_small_order(encoding)
+    assert module_rejects_as_root(encoding)
+    assert module_rejects_as_next(encoding)
+    assert "small-order" in authorize_public(KEY_SAMPLE, encoding, READ_Q3, NOW).reason
+    try:
+        key_object = Ed25519PublicKey.from_public_bytes(encoding)
+    except ValueError:
+        key_object = None  # a stricter Ed25519 library refuses it before we do
+    if key_object is not None:
+        with pytest.raises(ChainError, match="small-order"):
+            verify_public(KEY_SAMPLE, key_object)
+        assert not authorize_public(KEY_SAMPLE, key_object, READ_Q3, NOW).allowed
+    # As the next key of a later block, as the key a seal is checked with, and
+    # on the holder's side (attenuate, seal, parse).
+    token = attenuate(KeyAuthority(ROOT_KEY).issue("t", GRANT), ONLY_READ)
+    named = replace(token, next_keys=(token.next_keys[0], encoding))
+    for forged in (named, replace(named, proof=bytes(64), sealed=True)):
+        with pytest.raises(ChainError, match="small-order"):
+            KeyAuthority(ROOT_KEY).verify(forged)
+        with pytest.raises(ChainError, match="small-order"):
+            forged.serialize()
+    with pytest.raises(ChainError, match="small-order"):
+        attenuate(named, SOON)
+    with pytest.raises(ChainError, match="small-order"):
+        seal(named)
+    parts = token.serialize().split(".")
+    block = json.loads(base64.urlsafe_b64decode(parts[3] + "=" * (-len(parts[3]) % 4)))
+    block["next"] = _segment(encoding)
+    parts[3] = _segment(json.dumps(block, sort_keys=True, separators=(",", ":")).encode())
+    with pytest.raises(ChainError, match="small-order"):
+        KeyToken.parse(".".join(parts))
+    with pytest.raises(ChainError, match="small-order"):
+        chain_module._public_key(encoding, "seal")
+
+
+def test_a_key_is_refused_exactly_when_eight_times_it_is_the_identity() -> None:
+    """Rejected by the module iff 8 * P = identity, by this file's arithmetic.
+
+    3000 honestly generated public keys (fixed seed), 1000 random decodable
+    strings, and for good measure points of MIXED order (a real key plus a
+    small-order point): those are not small-order, 8 * P is not the identity,
+    and they must be accepted as keys like any other.
+    """
+    rng = random.Random(20261117)
+    keys = [
+        Ed25519PrivateKey.from_private_bytes(rng.randbytes(32)).public_key().public_bytes_raw()
+        for _ in range(3000)
+    ]
+    assert len(set(keys)) == 3000
+    strings: list[bytes] = []
+    while len(strings) < 1000:
+        candidate = rng.randbytes(32)
+        if ed_decode(candidate) is not None:
+            strings.append(candidate)
+    mixed = [
+        ed_encode(ed_add(ed_decode(key), torsion))
+        for key in keys[:25]
+        for torsion in sorted(_torsion_points() - {ED_IDENTITY})
+    ]
+    for encoding in keys:
+        assert not is_small_order(encoding)
+        assert not module_rejects_as_root(encoding)
+        assert not module_rejects_as_next(encoding)
+    for encoding in strings + mixed:
+        assert not is_small_order(encoding)
+        assert not module_rejects_as_next(encoding)
+        assert not module_rejects_as_root(encoding)
+    for encoding in SMALL_ORDER:
+        assert is_small_order(encoding)
+        assert module_rejects_as_root(encoding)
+        assert module_rejects_as_next(encoding)
+
+
+def test_small_order_next_key_truncation_exploit_is_refused() -> None:
+    """The reviewer's exploit, end to end.
+
+    A holder appends block 1 and names the identity point as its "next" key.
+    The chain is then extended with a caveat (block 2) and sealed. Under the
+    identity key the signature R = identity, S = 0 verifies for EVERY message
+    in OpenSSL, so before the fix any bearer could cut block 2 off, put that
+    fixed signature in as the seal, and be allowed what block 2 had denied.
+    Now the token is refused as soon as the identity key is read.
+    """
+    authority = KeyAuthority(ROOT_KEY)
+    issued = authority.issue("t", GRANT)
+    identity = bytes([1]) + bytes(31)
+    forged_signature = identity + bytes(32)  # R = identity, S = 0
+
+    # Block 1, honestly signed by the key block 0 named, naming the identity.
+    holder_key = Ed25519PrivateKey.from_private_bytes(issued.proof)
+    block_1 = chain_module._block_bytes(1, chain_module._caveat_obj(ONLY_READ), identity)
+    signature_1 = holder_key.sign(chain_module._TAG_KEY_CAVEAT + block_1)
+    # Block 2 narrows to reports/q3 and names a real key, which seals the token.
+    # Its signature must verify under the identity key: the fixed one does.
+    last_key = Ed25519PrivateKey.generate()
+    signatures = (*issued.signatures, signature_1, forged_signature)
+    full = KeyToken(
+        issued.identifier,
+        issued.grant,
+        (ONLY_READ, ONLY_Q3),
+        (*issued.next_keys, identity, last_key.public_key().public_bytes_raw()),
+        signatures,
+        last_key.sign(chain_module._seal_bytes(signatures)),
+        True,
+    )
+    # The bearer's forgery: drop block 2, seal with the fixed signature.
+    truncated = KeyToken(
+        issued.identifier,
+        issued.grant,
+        (ONLY_READ,),
+        (*issued.next_keys, identity),
+        (*issued.signatures, signature_1),
+        forged_signature,
+        True,
+    )
+    for token in (truncated, full):
+        with pytest.raises(ChainError, match="small-order"):
+            authority.verify(token)
+        with pytest.raises(ChainError, match="small-order"):
+            verify_public(token, authority.public_key)
+        for call in (READ_Q1, READ_Q3):  # READ_Q1 is what block 2 denied
+            decision = authority.authorize(token, call, NOW)
+            assert not decision.allowed
+            assert "small-order" in decision.reason
+
+
+# --- 2. surrogates and the round-trip invariant -----------------------------
+
+HIGH, LOW = chr(0xD83D), chr(0xDE00)
+PAIR = HIGH + LOW  # two code points
+ASTRAL = chr(0x1F600)  # the one character that pair stands for
+
+
+def _grant_with(tool: str = "read_file", arg: str = "path", value: Any = "a") -> Grant:
+    return Grant((Capability(tool, (Constraint(arg, "eq", value),)),), NOW + 3600)
+
+
+@pytest.mark.parametrize("bad", [PAIR, HIGH, LOW, "a" + HIGH + "b", LOW + HIGH])
+def test_strings_with_surrogates_are_refused_on_the_way_in(kit: Kit, bad: str) -> None:
+    assert len(PAIR) == 2 and len(ASTRAL) == 1 and PAIR != ASTRAL
+    for build in (
+        lambda: kit.issue(bad, GRANT),
+        lambda: kit.issue("t", _grant_with(tool=bad)),
+        lambda: kit.issue("t", _grant_with(arg=bad)),
+        lambda: kit.issue("t", _grant_with(value=bad)),
+        lambda: attenuate(kit.issue(), ToolsCaveat(("read_file", bad))),
+        lambda: attenuate(kit.issue(), ArgCaveat(bad, Constraint("path", "any"))),
+        lambda: attenuate(kit.issue(), ArgCaveat("read_file", Constraint(bad, "any"))),
+        lambda: attenuate(kit.issue(), ArgCaveat("read_file", Constraint("path", "eq", bad))),
+        lambda: attenuate(
+            kit.issue(), ArgCaveat("read_file", Constraint("path", "in", ("a", bad)))
+        ),
+        lambda: encode_caveat(ToolsCaveat((bad,))),
+    ):
+        with pytest.raises(ChainError, match="surrogate"):
+            build()
+
+
+def test_a_surrogate_pair_and_its_character_no_longer_share_an_encoding(kit: Kit) -> None:
+    """Before the fix both of these were accepted and signed as the same bytes,
+    so the object in hand (two code points) was not what the bytes said."""
+    astral = attenuate(kit.issue(), ToolsCaveat((ASTRAL,)))
+    assert kit.verify(astral.serialize()).caveats == (ToolsCaveat((ASTRAL,)),)
+    assert encode_caveat(ToolsCaveat((ASTRAL,))) == b'{"tools":["\\ud83d\\ude00"],"type":"tools"}'
+    with pytest.raises(ChainError, match="surrogate"):
+        attenuate(kit.issue(), ToolsCaveat((PAIR,)))
+    # The escaped pair in signed bytes is the astral character, never the pair.
+    decoded = decode_caveat(b'{"tools":["\\ud83d\\ude00"],"type":"tools"}')
+    assert decoded.tools == (ASTRAL,) and len(decoded.tools[0]) == 1
+
+
+@pytest.mark.parametrize("escape", ["\\ud83d", "\\ude00", "\\ude00\\ud83d", "x\\udfffy"])
+def test_lone_surrogates_are_refused_when_parsing(kit: Kit, escape: str) -> None:
+    with pytest.raises(ChainError, match="surrogate"):
+        decode_caveat(f'{{"tools":["{escape}"],"type":"tools"}}'.encode())
+    root = f'{{"grant":{{"capabilities":[],"expires_at":1}},"id":"{escape}"}}'.encode()
+    if kit.name == "hmac":
+        text = ".".join(["tgm1", _segment(root), _segment(bytes(32))])
+    else:
+        next_key = _segment(KEY_SAMPLE.next_keys[0])
+        block = b'{"body":' + root + b',"i":0,"next":"' + next_key.encode() + b'"}'
+        text = ".".join(["tgk1", _segment(block), _segment(bytes(64)), "k", _segment(bytes(32))])
+    with pytest.raises(ChainError, match="surrogate"):
+        kit.parse(text)
+    assert not kit.authorize(text, READ_Q3).allowed
+
+
+def test_issue_and_attenuate_only_hand_out_tokens_that_round_trip(kit: Kit) -> None:
+    """parse(serialize(token)) == token is checked before a token is returned.
+
+    The objects below serialize without complaint but come back different (a
+    list where the parsed form has a tuple), so the caller would hold an
+    object that is not what was signed.
+    """
+    caveat = ToolsCaveat(("read_file",))
+    object.__setattr__(caveat, "tools", ["read_file"])
+    assert encode_caveat(caveat) == encode_caveat(ONLY_READ) and caveat != ONLY_READ
+    with pytest.raises(ChainError, match="does not survive serialization"):
+        attenuate(kit.issue(), caveat)
+    grant = _grant_with()
+    object.__setattr__(grant, "capabilities", list(grant.capabilities))
+    with pytest.raises(ChainError, match="does not survive serialization"):
+        kit.issue("t", grant)
+    # Ordinary tokens are unaffected and equal to their parsed form.
+    token = chain(kit.issue(), ONLY_ANA, SOON)
+    assert kit.parse(token.serialize()) == token
+
+
+# --- 3. authorize never raises ----------------------------------------------
+
+
+def test_authorize_never_raises_on_objects_bent_out_of_shape(kit: Kit) -> None:
+    """object.__setattr__ can put anything anywhere. These used to escape as
+    TypeError from a function documented as never raising; now they are denies."""
+    broken_grant = chain(kit.issue("t", _grant_with()), ONLY_READ)
+    object.__setattr__(broken_grant.grant, "capabilities", None)
+    with pytest.raises(TypeError):  # verify may raise; authorize may not
+        kit.verify(broken_grant)
+    decisions = [kit.authorize(broken_grant, READ_Q3)]
+    if kit.name == "ed25519":
+        decisions.append(authorize_public(broken_grant, kit.authority.public_key, READ_Q3, NOW))
+    for decision in decisions:
+        assert type(decision) is Decision and not decision.allowed
+        assert decision.reason == "invalid token: unexpected TypeError"
+
+    broken_call = Call("read_file", {"path": "reports/q3/a.txt"})
+    object.__setattr__(broken_call, "args", None)
+    decision = kit.authorize(kit.issue(), broken_call)
+    assert type(decision) is Decision and not decision.allowed
+    # A ChainError is still reported as before.
+    assert kit.authorize("junk", READ_Q3).reason.startswith("invalid token: not a tg")
+
+
+# --- 4. size limit at the point of narrowing ----------------------------------
+
+
+def test_attenuate_fails_itself_when_the_result_would_be_too_long(kit: Kit) -> None:
+    huge = ToolsCaveat(tuple(f"tool-{i:06d}" for i in range(4000)))
+    token = kit.issue()
+    with pytest.raises(ChainError, match="too long"):
+        attenuate(token, huge)  # no .serialize(): the narrowing itself must fail
+    # Whatever attenuate does return can always be serialized and verified.
+    big = ToolsCaveat(("read_file", *(f"tool-{i:06d}" for i in range(700))))
+    for _ in range(MAX_CAVEATS):
+        try:
+            token = attenuate(token, big)
+        except ChainError as exc:
+            assert "too long" in str(exc)
+            break
+        assert len(token.serialize()) <= MAX_TOKEN_CHARS
+    else:
+        pytest.fail("the size limit was never reached")
+    assert token.caveats and kit.authorize(token, READ_Q3).allowed
+
+
+# --- 5. every caveat type can only deny or abstain ---------------------------
+
+
+def caveat_classes() -> list[type]:
+    """Every class defined in the chain module that has a `check` method.
+
+    Found by inspection, not listed, so a caveat type added later is covered
+    by the property below without anyone remembering to add it.
+    """
+    return [
+        obj
+        for _, obj in inspect.getmembers(chain_module, inspect.isclass)
+        if obj.__module__ == chain_module.__name__ and callable(getattr(obj, "check", None))
+    ]
+
+
+ODD_CLOCKS = (float("nan"), float("inf"), float("-inf"), None, "0", True, -1, 10**12)
+_CAVEAT_STRATEGIES: dict[type, st.SearchStrategy[Any]] = {
+    ToolsCaveat: st.lists(st.sampled_from(TOOLS), unique=True).map(lambda t: ToolsCaveat(tuple(t))),
+    ArgCaveat: st.builds(ArgCaveat, st.sampled_from(TOOLS), constraints()),
+    ExpiryCaveat: st.sampled_from((*EXPIRIES, 0, -5, 1e12)).map(ExpiryCaveat),
+}
+
+
+def caveats_of(kind: type) -> st.SearchStrategy[Any]:
+    """Instances of one caveat class. A class this file has never heard of is
+    built from its type hints, so it is still exercised."""
+    known = _CAVEAT_STRATEGIES.get(kind)
+    return st.builds(kind) if known is None else known
+
+
+def test_caveat_discovery_finds_every_caveat_type() -> None:
+    found = caveat_classes()
+    assert set(found) == set(get_args(chain_module.Caveat))
+    assert {ToolsCaveat, ArgCaveat, ExpiryCaveat} <= set(found)
+
+
+@pytest.mark.parametrize("kind", caveat_classes(), ids=lambda k: k.__name__)
+@settings(max_examples=EXAMPLES, deadline=None)
+@given(data=st.data())
+def test_a_caveat_check_can_only_deny_or_abstain(kind: type, data: st.DataObject) -> None:
+    """Monotonicity, pinned per caveat type.
+
+    check returns None (no objection) or a non-empty reason string (deny).
+    Nothing it returns is ever read as "allow": with the caveat attached, the
+    decision is the base grant's own when the caveat abstains and a deny when
+    it objects. So a call the base grant denies stays denied.
+    """
+    grant = data.draw(grants())
+    call = data.draw(calls_for(grant))
+    now = data.draw(st.one_of(times(grant), times(grant), st.sampled_from(ODD_CLOCKS)))
+    caveat = data.draw(caveats_of(kind))
+    assert type(caveat) is kind
+
+    verdict = caveat.check(call, now)
+    assert verdict is None or (type(verdict) is str and verdict)
+
+    base = chain_module._decide(grant, (), call, now)
+    narrowed = chain_module._decide(grant, (caveat,), call, now)
+    assert base.allowed == grant.allows(call, now)
+    if verdict is None:
+        assert narrowed == base
+    else:
+        assert not narrowed.allowed
+    assert base.allowed or not narrowed.allowed
+    assert Verified("t", grant, (caveat,)).decide(call, now) == narrowed
+
+
+def test_the_deny_or_abstain_property_sees_both_outcomes() -> None:
+    """Each caveat type must be able to abstain on an allowed call and to deny one."""
+    for kind in caveat_classes():
+        for want_deny in (False, True):
+
+            def hit(case: tuple, want_deny: bool = want_deny) -> bool:
+                grant, call, now, caveat = case
+                return grant.allows(call, now) and (
+                    (caveat.check(call, now) is not None) == want_deny
+                )
+
+            find(
+                grants().flatmap(
+                    lambda g, kind=kind: st.tuples(
+                        st.just(g), calls_for(g), times(g), caveats_of(kind)
+                    )
+                ),
+                hit,
+            )
+
+
+# --- 6. domain separation of root and caveat blocks --------------------------
+
+
+def test_root_and_caveat_blocks_are_signed_under_different_tags() -> None:
+    """Block 0 and the caveat blocks no longer rely on the index inside the
+    block alone: a signature made for one role is not accepted in the other."""
+    tags = (
+        chain_module._TAG_KEY_ROOT,
+        chain_module._TAG_KEY_CAVEAT,
+        chain_module._TAG_KEY_SEAL,
+        chain_module._TAG_HMAC_ROOT,
+        chain_module._TAG_HMAC_CAVEAT,
+    )
+    for a, b in combinations(tags, 2):
+        assert a != b and not a.startswith(b) and not b.startswith(a)
+
+    authority = KeyAuthority(ROOT_KEY)
+    root_key = Ed25519PrivateKey.from_private_bytes(ROOT_KEY)
+    issued = authority.issue("t", GRANT)
+    block_0 = chain_module._block_bytes(0, chain_module._root_obj("t", GRANT), issued.next_keys[0])
+    # The same block 0, signed by the real root key but under the caveat tag.
+    wrong_role = replace(
+        issued, signatures=(root_key.sign(chain_module._TAG_KEY_CAVEAT + block_0),)
+    )
+    with pytest.raises(ChainError, match="block 0: bad signature"):
+        authority.verify(wrong_role)
+    right_role = replace(issued, signatures=(root_key.sign(chain_module._TAG_KEY_ROOT + block_0),))
+    assert authority.verify(right_role).identifier == "t"
+
+    # A caveat block signed by the right key but under the root tag.
+    child = attenuate(issued, ONLY_READ)
+    holder_key = Ed25519PrivateKey.from_private_bytes(issued.proof)
+    block_1 = chain_module._block_bytes(1, chain_module._caveat_obj(ONLY_READ), child.next_keys[1])
+    wrong_role = replace(
+        child,
+        signatures=(child.signatures[0], holder_key.sign(chain_module._TAG_KEY_ROOT + block_1)),
+    )
+    with pytest.raises(ChainError, match="block 1: bad signature"):
+        authority.verify(wrong_role)
+    assert authority.verify(child).caveats == (ONLY_READ,)
+
+
+def test_hmac_token_bytes_are_pinned() -> None:
+    """Known answer for construction 1 (fixed key, fixed grant). The Ed25519
+    tags changed in the security review; these bytes must not."""
+    token = chain(HmacAuthority(ROOT_KEY).issue("tok-1", GRANT), ONLY_ANA, ONLY_READ, ONLY_Q3, SOON)
+    digest = hashlib.sha256(token.serialize().encode()).hexdigest()
+    assert digest == "f5bda05c01bd1659f665ce9d09f046157e1a9bf522c3ea110223a11876aeb9ca"
+
+
+# --- 7. a documented limit, shown --------------------------------------------
+
+
+def test_a_long_hmac_root_key_is_equivalent_to_its_sha256_digest() -> None:
+    """Why a SHA-256 fingerprint of the root key must never be published:
+    HMAC-SHA256 hashes any key longer than 64 bytes first, so the digest IS a
+    working root key."""
+    long_key = bytes(range(65))
+    digest = hashlib.sha256(long_key).digest()
+    token = attenuate(HmacAuthority(long_key).issue("t", GRANT), ONLY_READ)
+    assert HmacAuthority(digest).verify(token).caveats == (ONLY_READ,)
+    assert HmacAuthority(digest).issue("t", GRANT) == HmacAuthority(long_key).issue("t", GRANT)
+    exactly_64 = bytes(range(64))
+    with pytest.raises(ChainError):
+        HmacAuthority(hashlib.sha256(exactly_64).digest()).verify(
+            HmacAuthority(exactly_64).issue("t", GRANT)
+        )

@@ -28,6 +28,9 @@ Construction 2, Ed25519 chain (Biscuit style)
     block 0 = {"body": {"grant", "id"}, "i": 0, "next": pk1}  signed by the root key
     block N = {"body": caveat N,        "i": N, "next": pkN+1} signed by skN
 
+    What is signed is a tag followed by the block: ROOT_TAG for block 0,
+    CAVEAT_TAG for every later block, and a third tag for the seal.
+
     The token carries skLAST, the private key matching the last block's
     "next" key. Appending signs a new block with it, names a fresh key pair
     and carries the new private key instead; the old one is dropped. Verifying
@@ -57,6 +60,23 @@ Limits, stated plainly
   * A token object is never trusted. Every verify serializes it, rebuilds all
     of it from those bytes with exact type checks, and decides on the rebuilt
     copy only.
+  * An HMAC root key longer than 64 bytes is equivalent to its SHA-256 digest:
+    HMAC-SHA256 first replaces a key longer than its 64-byte block with the
+    hash of that key, so the 32-byte digest issues and verifies the same
+    tokens as the long key. A SHA-256 fingerprint of the root key must
+    therefore never be published or logged. Fingerprinting a root key at all
+    is best avoided.
+  * Small-order Ed25519 public keys are rejected everywhere a public key is
+    read: the root public key, every block's "next" key and the key that
+    checks the proof or seal. Ed25519 as implemented by OpenSSL accepts them,
+    and a signature that needs no private key then verifies under them: for
+    every message under the identity point, and for a fraction of messages
+    under the points of order 2, 4 and 8. A block naming such a key would let
+    any bearer drop every later caveat and forge the seal.
+  * No string in a token may contain a surrogate code point (U+D800 to
+    U+DFFF). A surrogate pair and the single character it stands for have the
+    same ASCII JSON escape, so allowing them would give two different objects
+    one signed encoding.
 """
 
 from __future__ import annotations
@@ -66,6 +86,7 @@ import hashlib
 import hmac
 import json
 import math
+import re
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -88,7 +109,8 @@ KEY_PREFIX = "tgk1"
 # never be accepted for another, even if a key were reused.
 _TAG_HMAC_ROOT = b"toolgate.chain.hmac.v1.root\n"
 _TAG_HMAC_CAVEAT = b"toolgate.chain.hmac.v1.caveat\n"
-_TAG_KEY_BLOCK = b"toolgate.chain.ed25519.v1.block\n"
+_TAG_KEY_ROOT = b"toolgate.chain.ed25519.v1.root\n"
+_TAG_KEY_CAVEAT = b"toolgate.chain.ed25519.v1.caveat\n"
 _TAG_KEY_SEAL = b"toolgate.chain.ed25519.v1.seal\n"
 
 _SIG_LEN = 64  # Ed25519 signature
@@ -105,14 +127,30 @@ class ChainError(ValueError):
 # ---------------------------------------------------------------------------
 
 
+_SURROGATE = re.compile("[\ud800-\udfff]")
+
+
 def _canonical(obj: Any) -> bytes:
-    """The one byte string for a JSON value: sorted keys, no whitespace, ASCII only."""
+    """The one byte string for a JSON value: sorted keys, no whitespace, ASCII only.
+
+    Strings holding a surrogate code point are refused. With ASCII escaping the
+    two-code-point string "\\ud83d\\ude00" and the one-character string
+    U+1F600 are written identically, so without this check two different
+    objects would share one encoding and the signed bytes would not say which
+    one was meant. The check reads the unescaped dump, where a surrogate is
+    still a surrogate; object keys are covered because they are in it too.
+    """
     try:
+        raw = json.dumps(
+            obj, sort_keys=True, separators=(",", ":"), ensure_ascii=False, allow_nan=False
+        )
         text = json.dumps(
             obj, sort_keys=True, separators=(",", ":"), ensure_ascii=True, allow_nan=False
         )
     except (TypeError, ValueError, RecursionError) as exc:
         raise ChainError(f"value cannot be encoded: {exc}") from None
+    if _SURROGATE.search(raw):
+        raise ChainError("strings must not contain surrogate code points")
     return text.encode("ascii")
 
 
@@ -491,7 +529,9 @@ class HmacAuthority:
     def issue(self, identifier: str, grant: Grant) -> HmacToken:
         """sig0 = HMAC(root_key, tag + canonical(identifier, grant))."""
         root = _canonical(_root_obj(identifier, grant))
-        return HmacToken(identifier, grant, (), _mac(self._root_key, _TAG_HMAC_ROOT + root))
+        return _round_trip(
+            HmacToken(identifier, grant, (), _mac(self._root_key, _TAG_HMAC_ROOT + root))
+        )
 
     def verify(self, token: HmacToken | str) -> Verified:
         """Recompute the chain from the root key. Raises ChainError on any mismatch."""
@@ -507,11 +547,27 @@ class HmacAuthority:
 
     def authorize(self, token: HmacToken | str, call: Call, now: float) -> Decision:
         """Verify, then base grant, then every caveat. Never raises: any failure is a deny."""
-        try:
-            verified = self.verify(token)
-        except ChainError as exc:
-            return Decision(False, f"invalid token: {exc}")
+        return _authorize(lambda: self.verify(token), call, now)
+
+
+def _authorize(verify: Any, call: Any, now: Any) -> Decision:
+    """Run `verify`, then decide. Any exception at all is a deny (fail closed).
+
+    ChainError is the expected failure. Anything else means an object was bent
+    into a shape the checks did not foresee (for example through
+    object.__setattr__); the answer is still no, and the exception type is
+    named so the cause can be found.
+    """
+    try:
+        verified = verify()
+    except ChainError as exc:
+        return Decision(False, f"invalid token: {exc}")
+    except Exception as exc:
+        return Decision(False, f"invalid token: unexpected {type(exc).__name__}")
+    try:
         return verified.decide(call, now)
+    except Exception as exc:
+        return Decision(False, f"decision failed: unexpected {type(exc).__name__}")
 
 
 def _reparse(token: Any, kind: type) -> Any:
@@ -523,9 +579,63 @@ def _reparse(token: Any, kind: type) -> Any:
     return kind.parse(token.serialize())
 
 
+def _round_trip(token: Any) -> Any:
+    """Return `token` only if its string form parses back to an equal object.
+
+    Run on every token before it is handed out, so the object a caller holds
+    and the bytes that were signed always mean the same thing. It also makes
+    an oversized result fail here, where it is made, not at a later serialize.
+    """
+    if type(token).parse(token.serialize()) != token:
+        raise ChainError("token does not survive serialization unchanged")
+    return token
+
+
 # ---------------------------------------------------------------------------
 # Construction 2: Ed25519 chain
 # ---------------------------------------------------------------------------
+
+
+# Small-order public keys.
+#
+# Ed25519 points form a group of order 8 * L (L prime). Exactly 8 points have
+# an order dividing 8: order 1 (0, 1); order 2 (0, -1); order 4 (+-sqrt(-1), 0);
+# order 8, four points (+-x8, +-y8). A key is encoded as y in the low 255 bits,
+# little-endian, and the parity of x in the top bit. So the 8 points use only
+# five y values modulo p = 2^255 - 19:
+#
+#     0, 1, p - 1, y8, p - y8
+#
+# A lenient decoder (OpenSSL is one) reduces y modulo p, so y and y + p are
+# the same point whenever y + p < 2^255, that is whenever y < 19. Of the five
+# values only 0 and 1 are that small, which adds two more spellings, p and
+# p + 1. That makes seven 255-bit y fields. Each is listed with the sign bit
+# clear and set: for x != 0 the two are the point and its negative, both of
+# small order; for x = 0 (y = 1 and y = p - 1 and their aliases) the set bit
+# is a non-canonical spelling of the same point. 7 * 2 = 14 encodings, 8 of
+# them canonical and 6 not. Nothing else decodes to a small-order point,
+# because decoding is determined by (y mod p, sign bit). The test file checks
+# this set against 8 * P computed with its own curve arithmetic.
+_P = 2**255 - 19
+_Y_ORDER_8 = int.from_bytes(
+    bytes.fromhex("26e8958fc2b227b045c3f489f2ef98f0d5dfac05d3c63339b13802886d53fc05"), "little"
+)
+_SMALL_ORDER_Y = (0, 1, _P - 1, _Y_ORDER_8, _P - _Y_ORDER_8, _P, _P + 1)
+_SMALL_ORDER_KEYS = frozenset(
+    (y | sign << 255).to_bytes(_KEY_LEN, "little") for y in _SMALL_ORDER_Y for sign in (0, 1)
+)
+
+
+def _check_public_bytes(raw: bytes, what: str) -> bytes:
+    """Refuse the 14 encodings of small-order points. See the note above."""
+    if raw in _SMALL_ORDER_KEYS:
+        raise ChainError(f"{what} is a small-order public key")
+    return raw
+
+
+def _block_tag(index: int) -> bytes:
+    """Block 0 and the caveat blocks are signed under different tags."""
+    return _TAG_KEY_ROOT if index == 0 else _TAG_KEY_CAVEAT
 
 
 def _block_bytes(index: int, body: dict[str, Any], next_key: bytes) -> bytes:
@@ -542,16 +652,16 @@ def _seal_bytes(signatures: tuple[bytes, ...]) -> bytes:
     return _TAG_KEY_SEAL + _canonical({"blocks": len(signatures), "digest": digest})
 
 
-def _public_key(raw: bytes) -> Ed25519PublicKey:
+def _public_key(raw: bytes, what: str) -> Ed25519PublicKey:
     try:
-        return Ed25519PublicKey.from_public_bytes(raw)
+        return Ed25519PublicKey.from_public_bytes(_check_public_bytes(raw, f"{what} key"))
     except ValueError as exc:
         raise ChainError(f"bad public key: {exc}") from None
 
 
 def _check_signature(public: bytes, signature: bytes, message: bytes, what: str) -> None:
     try:
-        _public_key(public).verify(signature, message)
+        _public_key(public, what).verify(signature, message)
     except InvalidSignature:
         raise ChainError(f"{what}: bad signature") from None
 
@@ -584,6 +694,8 @@ class KeyToken:
                 raise ChainError(f"{name} must have one entry per block")
             if not all(type(b) is bytes and len(b) == size for b in items):
                 raise ChainError(f"{name} entries must be {size} bytes")
+        for index, key in enumerate(self.next_keys):
+            _check_public_bytes(key, f"block {index}: next key")
         if type(self.sealed) is not bool or type(self.proof) is not bytes:
             raise ChainError("bad proof")
         if len(self.proof) != (_SIG_LEN if self.sealed else _KEY_LEN):
@@ -633,7 +745,9 @@ def _verify_key_token(token: KeyToken | str, root_public: bytes) -> Verified:
     fresh: KeyToken = _reparse(token, KeyToken)
     signer = root_public
     for index, block in enumerate(fresh._blocks()):
-        _check_signature(signer, fresh.signatures[index], _TAG_KEY_BLOCK + block, f"block {index}")
+        _check_signature(
+            signer, fresh.signatures[index], _block_tag(index) + block, f"block {index}"
+        )
         signer = fresh.next_keys[index]
     # The chain is intact up to the last block. Now prove nothing was cut off
     # the end: only the real last key can produce this proof.
@@ -648,9 +762,9 @@ def _verify_key_token(token: KeyToken | str, root_public: bytes) -> Verified:
 
 def _raw_public(key: Any) -> bytes:
     if isinstance(key, Ed25519PublicKey):
-        return key.public_bytes_raw()
+        return _check_public_bytes(key.public_bytes_raw(), "root public key")
     if type(key) is bytes and len(key) == _KEY_LEN:
-        return key
+        return _check_public_bytes(key, "root public key")
     raise ChainError("root public key must be an Ed25519PublicKey or its 32 raw bytes")
 
 
@@ -668,11 +782,7 @@ def authorize_public(
     token: KeyToken | str, root_public_key: Ed25519PublicKey | bytes, call: Call, now: float
 ) -> Decision:
     """verify_public, then base grant, then every caveat. Never raises: failure is a deny."""
-    try:
-        verified = verify_public(token, root_public_key)
-    except ChainError as exc:
-        return Decision(False, f"invalid token: {exc}")
-    return verified.decide(call, now)
+    return _authorize(lambda: verify_public(token, root_public_key), call, now)
 
 
 class KeyAuthority:
@@ -683,6 +793,7 @@ class KeyAuthority:
             root_private_key = Ed25519PrivateKey.from_private_bytes(root_private_key)
         if not isinstance(root_private_key, Ed25519PrivateKey):
             raise ChainError("root key must be an Ed25519PrivateKey or its 32 raw bytes")
+        _check_public_bytes(root_private_key.public_key().public_bytes_raw(), "root public key")
         self._root = root_private_key
 
     @property
@@ -695,8 +806,10 @@ class KeyAuthority:
         first = Ed25519PrivateKey.generate()
         next_key = first.public_key().public_bytes_raw()
         block = _block_bytes(0, _root_obj(identifier, grant), next_key)
-        signature = self._root.sign(_TAG_KEY_BLOCK + block)
-        return KeyToken(identifier, grant, (), (next_key,), (signature,), first.private_bytes_raw())
+        signature = self._root.sign(_block_tag(0) + block)
+        return _round_trip(
+            KeyToken(identifier, grant, (), (next_key,), (signature,), first.private_bytes_raw())
+        )
 
     def verify(self, token: KeyToken | str) -> Verified:
         return verify_public(token, self.public_key)
@@ -747,6 +860,9 @@ def attenuate(token: HmacToken | KeyToken, caveat: Caveat) -> HmacToken | KeyTok
     Ed25519 chain: the carried private key signs a block holding the caveat,
     its position and a fresh public key; the new token carries the fresh
     private key and no trace of the old one.
+
+    Raises ChainError here, at the point of narrowing, if the result would be
+    too long to serialize or would not parse back to the same token.
     """
     if type(token) not in (HmacToken, KeyToken):
         raise ChainError("expected an HmacToken or a KeyToken")
@@ -758,16 +874,18 @@ def attenuate(token: HmacToken | KeyToken, caveat: Caveat) -> HmacToken | KeyTok
         if type(token.signature) is not bytes or len(token.signature) != _MAC_LEN:
             raise ChainError("signature must be 32 bytes")
         signature = _mac(token.signature, _TAG_HMAC_CAVEAT + encoded)
-        return HmacToken(token.identifier, token.grant, caveats, signature)
+        return _round_trip(HmacToken(token.identifier, token.grant, caveats, signature))
     signer = _last_key(token)
     fresh = Ed25519PrivateKey.generate()
     next_key = fresh.public_key().public_bytes_raw()
     block = _block_bytes(len(caveats), _caveat_obj(caveat), next_key)
-    return KeyToken(
-        token.identifier,
-        token.grant,
-        caveats,
-        (*token.next_keys, next_key),
-        (*token.signatures, signer.sign(_TAG_KEY_BLOCK + block)),
-        fresh.private_bytes_raw(),
+    return _round_trip(
+        KeyToken(
+            token.identifier,
+            token.grant,
+            caveats,
+            (*token.next_keys, next_key),
+            (*token.signatures, signer.sign(_block_tag(len(caveats)) + block)),
+            fresh.private_bytes_raw(),
+        )
     )

@@ -8,7 +8,9 @@
 # the latency benchmark and its figure, whose numbers vary run to run.
 # m0b_completeness.py and bench_latency.py take a few minutes each.
 # fig_dashboard.py needs a headless Chromium driven by Playwright (Python
-# package, or the Node.js package found through NODE_PATH).
+# package, or the Node.js package found through NODE_PATH). fig_hero.py and
+# fig_delegation_tree.py render HTML pages from scripts/design/ with the
+# Node.js Playwright (NODE_PATH, default /opt/node-tools/node_modules).
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -22,7 +24,7 @@ run() {
 
 # M0: capability model and the security invariant
 run scripts/m0_invariant.py --cases 20000 --seed 0     # results/m0_invariant.json
-run scripts/fig_delegation_tree.py                       # results/m0_delegation_tree.json, assets/delegation_tree.*
+run scripts/fig_delegation_tree.py                       # results/m0_delegation_tree.json, assets/delegation_tree.png
 
 # M0b: solver proofs and the completeness gap
 run scripts/m0b_prove_rules.py                           # results/m0b_rules.json
@@ -44,7 +46,7 @@ run scripts/fig_label_creep.py                           # results/m4b_label_cre
 run scripts/fig_provenance_graph.py                      # results/m4b_provenance_graph.json, assets/provenance_graph.*
 
 # M6: hero animation, latency, dashboard screenshots
-run scripts/fig_hero.py                                  # results/m6_hero.json, assets/hero.svg, hero.gif, hero_poster.png
+run scripts/fig_hero.py                                  # results/m6_hero.json, assets/hero.gif, hero_poster.png
 run scripts/bench_latency.py                             # results/m6_latency.json (minutes, varies run to run)
 run scripts/fig_latency.py                               # assets/latency.* (reads the JSON above)
 run scripts/fig_dashboard.py                             # assets/dashboard.png, assets/dashboard_tamper.png

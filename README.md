@@ -1,9 +1,9 @@
 # toolgate
 
 <p align="center">
-  <img src="assets/hero.svg" width="900" alt="One sub-agent token makes two calls through the gateway: read_file is allowed and runs, delete_file is denied by policy, and both decisions appear as hash-chained audit entries">
+  <img src="assets/hero.gif" width="800" alt="One sub-agent token makes two calls through the gateway: read_file is allowed and runs, delete_file is denied by policy, and both decisions appear as hash-chained audit entries">
 </p>
-<p align="center"><sub>Animated SVG. Also as <a href="assets/hero.gif">GIF</a> and as a <a href="assets/hero_poster.png">still image</a>. Drawn from one real run recorded in <a href="results/m6_hero.json">results/m6_hero.json</a>.</sub></p>
+<p align="center"><sub>Also as a <a href="assets/hero_poster.png">still image</a>. Drawn from one real run recorded in <a href="results/m6_hero.json">results/m6_hero.json</a>.</sub></p>
 
 toolgate is an authorization gateway that sits between an LLM agent and its tools and checks every tool call against a short-lived, narrowly scoped grant and an operator policy, outside the model. An agent can hand a sub-agent a weaker token but never a stronger one, sensitive calls wait for a person, and every decision is written to a hash-chained audit log before anything runs. The model does not decide what it is allowed to do.
 
@@ -253,7 +253,7 @@ bash scripts/reproduce_all.sh      # several minutes; the dashboard step needs C
 | `scripts/m5_scripted_eval.py` | `results/m5_scripted.json` |
 | `scripts/fig_label_creep.py` | `results/m4b_label_creep.json`, `assets/label_creep.*` |
 | `scripts/fig_provenance_graph.py` | `results/m4b_provenance_graph.json`, `assets/provenance_graph.*` |
-| `scripts/fig_hero.py` | `results/m6_hero.json`, `assets/hero.svg`, `hero.gif`, `hero_poster.png` |
+| `scripts/fig_hero.py` | `results/m6_hero.json`, `assets/hero.gif`, `assets/hero_poster.png` |
 | `scripts/bench_latency.py` (a few minutes) | `results/m6_latency.json` |
 | `scripts/fig_latency.py` | `assets/latency.*` |
 | `scripts/fig_dashboard.py` | `assets/dashboard.png`, `assets/dashboard_tamper.png` |

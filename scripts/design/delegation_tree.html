@@ -5,166 +5,126 @@
 <!--BASE-->
 <link rel="stylesheet" href="system.css">
 <style>
-  .tree { margin-top: 28px; display: grid; gap: 0; }
+  .tree { margin-top: 40px; display: grid; }
   .row { display: flex; justify-content: center; }
-  .row.top .card { width: 664px; }
-  .row.kids { gap: 20px; justify-content: space-between; }
+  .row.top .card { width: 640px; }
+  .row.kids { gap: 12px; justify-content: space-between; }
   .row.kids .card { width: 232px; }
-  .gap1 { height: 84px; }
-  .gap2 { height: 132px; }
-  .who { display: grid; gap: 3px; }
-  .who .sub { display: flex; align-items: center; gap: 6px; }
-  .who .sub svg { width: 16px; height: 16px; stroke-width: 2.2; }
+  .gap1 { height: 80px; }
+  .gap2 { height: 112px; }
   .chips { margin-top: 14px; display: flex; flex-wrap: wrap; gap: 8px; }
-  .chips .pill { color: var(--ink); }
-  .chips .pill svg { color: var(--accent); }
-  .chips .pill.no svg { color: var(--no-ink); }
-  .reject .name { color: var(--ink); }
   .verdict {
     position: absolute; transform: translate(-50%, -50%);
-    display: inline-flex; align-items: center; gap: 8px;
-    height: 36px; padding: 0 14px 0 4px; border-radius: 999px;
-    background: var(--card); box-shadow: var(--shadow-soft);
-    font-weight: 700; white-space: nowrap;
+    display: inline-flex; align-items: center; gap: 6px;
+    height: 32px; padding: 0 12px 0 10px; border-radius: 999px;
+    background: var(--card); border: 1px solid var(--line);
+    white-space: nowrap;
   }
+  .verdict svg { width: 16px; height: 16px; stroke-width: 2.5; }
   .verdict.ok { color: var(--ok-ink); }
+  .verdict.ok svg { color: var(--ok); }
   .verdict.no { color: var(--no-ink); }
-  .verdict .dot { border: 0; box-shadow: none; width: 28px; height: 28px; }
+  .verdict.no svg { color: var(--no); }
 </style>
 </head>
 <body>
 <div class="stage" id="stage">
   <div class="title" id="title"></div>
-  <div class="subtitle" id="subtitle"></div>
   <div class="tree" id="tree"></div>
   <svg class="wires" id="wires"></svg>
 </div>
 <template id="i-user">{{icon:user}}</template>
 <template id="i-bot">{{icon:bot}}</template>
 <template id="i-shield-x">{{icon:shield-x}}</template>
-<template id="i-clock">{{icon:clock}}</template>
-<template id="i-file-text">{{icon:file-text}}</template>
-<template id="i-mail">{{icon:mail}}</template>
-<template id="i-calendar">{{icon:calendar}}</template>
 <template id="i-check">{{icon:check}}</template>
 <template id="i-x">{{icon:x}}</template>
+<template id="i-clock">{{icon:clock}}</template>
 <script>
 /*DATA*/
 const D = window.DATA;
-const ic = (n) => document.getElementById("i-" + n).innerHTML;
+const $ = (id) => document.getElementById(id);
+const ic = (n) => $("i-" + n).innerHTML;
 const el = (tag, cls, html) => {
   const e = document.createElement(tag);
   if (cls) e.className = cls;
   if (html !== undefined) e.innerHTML = html;
   return e;
 };
-const esc = (s) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;");
+const esc = (s) => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;");
+const NS = "http://www.w3.org/2000/svg";
 
 function card(node) {
   const c = el("div", "card" + (node.rejected ? " reject" : ""));
   c.id = "n-" + node.key;
-  const badgeCls = node.rejected ? "badge no" : node.role === "user" ? "badge user" : "badge";
-  const badgeIcon = node.rejected ? "shield-x" : node.role === "user" ? "user" : "bot";
-  const head = el("div", "head");
-  head.append(el("div", badgeCls, ic(badgeIcon)));
-  const who = el("div", "who");
-  who.append(el("div", "name", esc(node.name)));
-  who.append(el("div", "sub", ic("clock") + `<span>${esc(node.note)}</span>`));
-  head.append(who);
+  const icon = node.rejected ? "shield-x" : node.role === "user" ? "user" : "bot";
+  const head = el("div", "head", ic(icon));
+  if (node.rejected) head.firstChild.classList.add("no");
+  head.append(el("div", "name", esc(node.name)));
+  head.append(el("div", "meta", ic("clock") + `<span>${esc(node.note)}</span>`));
   c.append(head);
   const chips = el("div", "chips");
-  for (const chip of node.chips) {
-    chips.append(el("span", "pill" + (node.rejected ? " no" : ""), ic(chip.icon) + `<span>${esc(chip.text)}</span>`));
-  }
+  for (const chip of node.chips) chips.append(el("span", "pill" + (node.rejected ? " no" : ""), esc(chip.text)));
   c.append(chips);
   return c;
 }
 
 function rel(node) {
-  const s = document.getElementById("stage").getBoundingClientRect();
+  const s = $("stage").getBoundingClientRect();
   const r = node.getBoundingClientRect();
   return { l: r.left - s.left, r: r.right - s.left, t: r.top - s.top, b: r.bottom - s.top,
            cx: (r.left + r.right) / 2 - s.left };
 }
-
-const NS = "http://www.w3.org/2000/svg";
-function path(d, color, dashed) {
+function path(d, color, dashed, width) {
   const p = document.createElementNS(NS, "path");
   p.setAttribute("d", d);
   p.style.stroke = color;
-  p.setAttribute("stroke-width", "2.5");
-  if (dashed) p.setAttribute("stroke-dasharray", "2 7");
-  return p;
+  p.setAttribute("stroke-width", width || 2);
+  if (dashed) p.setAttribute("stroke-dasharray", "4 5");
+  $("wires").append(p);
 }
-function head(x, y, color) {
-  const p = document.createElementNS(NS, "path");
-  p.setAttribute("d", `M ${x - 6} ${y - 8} L ${x} ${y} L ${x + 6} ${y - 8}`);
-  p.style.stroke = color;
-  p.setAttribute("stroke-width", "2.5");
-  return p;
-}
-// Down from (x0, y0), across at height ym, down to (x1, y1), with rounded elbows.
-function elbow(x0, y0, x1, y1, ym) {
-  if (Math.abs(x1 - x0) < 1) return `M ${x0} ${y0} L ${x1} ${y1}`;
-  const r = 14, s = Math.sign(x1 - x0);
-  return `M ${x0} ${y0} L ${x0} ${ym - r} Q ${x0} ${ym} ${x0 + s * r} ${ym} ` +
-         `L ${x1 - s * r} ${ym} Q ${x1} ${ym} ${x1} ${ym + r} L ${x1} ${y1}`;
-}
+const head = (x, y, color) => path(`M ${x - 5} ${y - 6} L ${x} ${y} L ${x + 5} ${y - 6}`, color);
 
 window.figure = {
   async init() {
-    document.getElementById("title").textContent = D.title;
-    document.getElementById("subtitle").textContent = D.subtitle;
-    const tree = document.getElementById("tree");
+    $("title").textContent = D.title;
     const rows = [["top", ["user"]], ["gap1"], ["top", ["orchestrator"]], ["gap2"],
                   ["kids", ["research", "mailer", "wider"]]];
     for (const [kind, keys] of rows) {
       const row = el("div", kind.startsWith("gap") ? kind : "row " + kind);
       for (const k of keys || []) row.append(card(D.nodes[k]));
-      tree.append(row);
+      $("tree").append(row);
     }
-    const wires = document.getElementById("wires");
-    const stage = document.getElementById("stage");
-    // Structure in accent; each delegation's own drop carries the checker's verdict.
-    const fanout = D.edges.filter((e) => e.parent === "orchestrator");
-    const o = rel(document.getElementById("n-orchestrator"));
-    const busY = o.b + 30;
-    const xs = fanout.map((e) => rel(document.getElementById("n-" + e.child)).cx);
-    const r = 16;
-    wires.append(path(`M ${o.cx} ${o.b} L ${o.cx} ${busY}`, "var(--accent)"));
-    wires.append(path(`M ${Math.min(...xs)} ${busY + r} Q ${Math.min(...xs)} ${busY} ${Math.min(...xs) + r} ${busY} ` +
-      `L ${Math.max(...xs) - r} ${busY} Q ${Math.max(...xs)} ${busY} ${Math.max(...xs)} ${busY + r}`, "var(--accent)"));
-    const knot = document.createElementNS(NS, "circle");
-    knot.setAttribute("cx", o.cx); knot.setAttribute("cy", busY); knot.setAttribute("r", 5);
-    knot.style.fill = "var(--accent)";
-    wires.append(knot);
+    // Neutral structure; each delegation's own drop carries the checker's verdict.
+    const o = rel($("n-orchestrator"));
+    const busY = o.b + 28, r = 12;
+    const xs = D.edges.filter((e) => e.parent === "orchestrator").map((e) => rel($("n-" + e.child)).cx);
+    const lo = Math.min(...xs), hi = Math.max(...xs);
+    path(`M ${o.cx} ${o.b} L ${o.cx} ${busY}`, "var(--wire)");
+    path(`M ${lo} ${busY + r} Q ${lo} ${busY} ${lo + r} ${busY} L ${hi - r} ${busY} Q ${hi} ${busY} ${hi} ${busY + r}`, "var(--wire)");
     for (const e of D.edges) {
-      const a = rel(document.getElementById("n-" + e.parent));
-      const b = rel(document.getElementById("n-" + e.child));
+      const a = rel($("n-" + e.parent));
+      const b = rel($("n-" + e.child));
       const color = e.ok ? "var(--ok)" : "var(--no)";
-      const y0 = e.parent === "orchestrator" ? busY + (Math.abs(b.cx - o.cx) < 1 ? 0 : r) : a.b;
-      const y1 = b.t - 6;
-      wires.append(path(`M ${b.cx} ${y0} L ${b.cx} ${y1}`, color, !e.ok));
-      wires.append(head(b.cx, y1, color));
-      const v = el("div", "verdict " + (e.ok ? "ok" : "no"),
-        `<span class="dot ${e.ok ? "ok" : "no"}">${ic(e.ok ? "check" : "x")}</span><span>${esc(e.label)}</span>`);
+      const fan = e.parent === "orchestrator";
+      const y0 = fan ? busY + (Math.abs(b.cx - o.cx) < 1 ? 0 : r) : a.b;
+      const y1 = b.t - 5;
+      path(`M ${b.cx} ${y0} L ${b.cx} ${y1}`, color, !e.ok);
+      head(b.cx, y1, color);
+      const v = el("div", "verdict " + (e.ok ? "ok" : "no"), `${ic(e.ok ? "check" : "x")}<span>${esc(e.label)}</span>`);
       v.style.left = b.cx + "px";
-      const top = e.parent === "orchestrator" ? busY + r : a.b;
-      v.style.top = (top + b.t) / 2 - 2 + "px";
-      stage.append(v);
+      v.style.top = ((fan ? busY + r : a.b) + b.t) / 2 - 2 + "px";
+      $("stage").append(v);
     }
   },
   frame() {},
   problems() {
     const out = [];
-    for (const e of document.querySelectorAll(".card, .pill")) {
-      if (e.scrollWidth > e.clientWidth + 0.5) out.push("overflow: " + e.textContent.trim());
-    }
     for (const c of document.querySelectorAll(".card")) {
+      if (c.scrollWidth > c.clientWidth + 0.5) out.push("overflow: " + c.textContent.trim());
       const r = c.getBoundingClientRect();
-      for (const p of c.querySelectorAll(".pill, .name")) {
+      for (const p of c.querySelectorAll(".pill, .name, .meta")) {
         const q = p.getBoundingClientRect();
-        if (q.right > r.right - 12 || q.left < r.left) out.push("pill outside card: " + p.textContent);
+        if (q.right > r.right - 12 || q.left < r.left) out.push("outside card: " + p.textContent);
       }
     }
     return out;

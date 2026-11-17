@@ -171,7 +171,6 @@ TIMELINE: dict[str, Any] = {
     "fade": [8.45, 8.95],
     "poster": FINAL,
 }
-ICON = {"read_file": "file-text", "delete_file": "trash-2"}
 
 
 def short(actor: str) -> str:
@@ -189,7 +188,7 @@ def view(data: dict[str, Any]) -> dict[str, Any]:
         raise SystemExit(f"unexpected outcomes {calls}")
     granted = {c["tool"] for c in token["capabilities"]}
     if not {c["tool"] for c in calls} <= granted or calls[1]["stage"] != "policy":
-        raise SystemExit("the subtitle no longer matches the run")
+        raise SystemExit("the run no longer shows a granted call denied by policy")
     if not data["audit_verify"]["ok"]:
         raise SystemExit("the audit chain did not verify")
 
@@ -197,13 +196,10 @@ def view(data: dict[str, Any]) -> dict[str, Any]:
     log_at = {c["audit_seq"]: t["log"] for c, t in zip(calls, TIMELINE["calls"], strict=True)}
     return {
         "title": "Every tool call is checked before it runs",
-        "subtitle": "The token allows both calls. Policy still blocks the delete.",
         "agent": short(token["actors"][0]),
         "calls": [
             {
                 "tool": c["tool"],
-                "icon": ICON[c["tool"]],
-                "target": Path(c["args"]["path"]).name,
                 "ok": c["status"] == "allowed",
                 "verdict": c["status"].capitalize(),
                 "rule": c["rule"],
@@ -245,7 +241,9 @@ def write_gif(frames: list[Image.Image], target: Path) -> tuple[int, int]:
         sheet.paste(im, (0, h * i))
     # Max coverage keeps every hue close (small coral and green areas too), where
     # median cut spends the palette on the large soft background.
-    palette = sheet.quantize(colors=256, method=Image.Quantize.MAXCOVERAGE, dither=Image.Dither.NONE)
+    palette = sheet.quantize(
+        colors=256, method=Image.Quantize.MAXCOVERAGE, dither=Image.Dither.NONE
+    )
     # Dither against the shared palette so soft gradients and shadows do not band,
     # then keep the previous frame's pixels wherever the source did not change, so
     # dither noise never spreads into still areas and each frame stores only what moved.

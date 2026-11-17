@@ -42,7 +42,7 @@ const { chromium } = require("playwright");
     await page.goto("file://" + job.html);
     const info = await page.evaluate(async (sq) => {
       if (sq) document.documentElement.classList.add("square");
-      const faces = ["500 16px Jakarta", "700 18px Jakarta", "800 30px Jakarta", "500 16px Mono"];
+      const faces = ["500 16px Jakarta", "700 18px Jakarta", "500 16px Mono"];
       await Promise.all(faces.map((f) => document.fonts.load(f)));
       const missing = faces.filter((f) => !document.fonts.check(f));
       await window.figure.init();

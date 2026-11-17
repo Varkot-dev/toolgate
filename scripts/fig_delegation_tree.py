@@ -95,8 +95,12 @@ def chip_text(cap: Capability) -> str:
 
 # ---------------------------------------------------------------- the page
 
-NAMES = {"user": "user", "orchestrator": "orchestrator", "research": "researcher", "mailer": "mailer"}
-ICON = {"read_file": "file-text", "send_email": "mail", "search_calendar": "calendar"}
+NAMES = {
+    "user": "user",
+    "orchestrator": "orchestrator",
+    "research": "researcher",
+    "mailer": "mailer",
+}
 
 
 def node_view(key: str, name: str, g: Grant, rejected: bool = False) -> dict:
@@ -107,7 +111,7 @@ def node_view(key: str, name: str, g: Grant, rejected: bool = False) -> dict:
         "role": "user" if key == "user" else "agent",
         "rejected": rejected,
         "note": f"{minutes} min",
-        "chips": [{"text": chip_text(c), "icon": ICON[c.tool]} for c in g.capabilities],
+        "chips": [{"text": chip_text(c)} for c in g.capabilities],
     }
 
 
@@ -143,14 +147,15 @@ def main() -> None:
     # 3. Draw, from the same grants the checker just judged.
     view = {
         "title": "Each hand-off can only narrow authority",
-        "subtitle": "Every delegation is checked. Asking for more than the parent holds fails.",
         "nodes": {k: node_view(k, NAMES[k], GRANTS[k]) for k in GRANTS}
         | {"wider": node_view("wider", "researcher", REJECTED, rejected=True)},
         "edges": [
             {"parent": p, "child": c, "ok": r.ok, "label": "narrower"}
             for (p, c), r in results.items()
         ]
-        + [{"parent": "orchestrator", "child": "wider", "ok": denied.ok, "label": "wider, refused"}],
+        + [
+            {"parent": "orchestrator", "child": "wider", "ok": denied.ok, "label": "wider, refused"}
+        ],
     }
     style.ASSETS.mkdir(exist_ok=True)
     png = style.ASSETS / "delegation_tree.png"

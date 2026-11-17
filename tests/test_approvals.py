@@ -32,7 +32,7 @@ from toolgate.approvals import (  # noqa: E402
     valid_name,
 )
 from toolgate.audit import canonical_json, hash_args, verify  # noqa: E402
-from toolgate.capability import Call  # noqa: E402
+from toolgate.capability import Call, Capability, Grant  # noqa: E402
 from toolgate.gateway import CallOutcome  # noqa: E402
 from toolgate.policy import Policy  # noqa: E402
 from toolgate.tokens import TokenError  # noqa: E402
@@ -747,3 +747,235 @@ def test_read_budget_untouched_by_the_whole_approval_story(env: Env) -> None:
     env.gateway.resolve_approval(approval_id, "reject", "alice")
     assert env.used(token, READ) == 0 and env.used(token, SEND) == 0
     assert env.total_tool_calls() == 0
+
+
+# ====================================================================================
+# Findings from the security reviews. Each test below failed before its fix.
+# ====================================================================================
+
+# --------------------------------------- 2. an expiry entry survives an audit outage
+
+
+def test_expiry_entry_lost_to_an_audit_outage_is_written_by_a_later_sweep(env: Env) -> None:
+    token = env.mint(ttl=900)
+    first = park(env, token)
+    second = park(env, token, {"to": "y@evil.test", "body": "b"})
+    env.clock.now += 300
+    env.audit.fail = True
+    assert env.gateway.list_pending() == []  # this sweep expires both and cannot log either
+    assert env.gateway.approvals.get(first).state == EXPIRED  # type: ignore[union-attr]
+    assert [e["decision"] for e in env.entries()] == ["approve", "approve"]
+    env.gateway.list_pending()  # still failing: nothing is dropped in the meantime
+    env.audit.fail = False
+    env.gateway.list_pending()
+    expiries = [e for e in env.entries() if e["rule"] == "approval: expired"]
+    assert len(expiries) == 2
+    assert {e["args_hash"] for e in expiries} == {
+        env.gateway.approvals.get(i).args_hash  # type: ignore[union-attr]
+        for i in (first, second)
+    }
+    for _ in range(3):  # and each is written exactly once
+        env.gateway.list_pending()
+        env.gateway.handle_call(token, "read_file", {"path": "nope"})
+    assert len([e for e in env.entries() if e["rule"] == "approval: expired"]) == 2
+    assert env.spies["send_email"].calls == [] and env.used(token, SEND) == 0
+    assert verify(env.audit_path).ok
+
+
+# ----------------------------------------------------- 5. strict decisions, finish
+
+
+class Chameleon:
+    """Compares equal to everything, like a decision that is whatever you want it to be."""
+
+    def __eq__(self, other: object) -> bool:
+        return True
+
+    def __hash__(self) -> int:
+        return hash("approve")
+
+
+class LoudStr(str):
+    """A str subclass: still not the exact string."""
+
+    def __eq__(self, other: object) -> bool:
+        return True
+
+    __hash__ = str.__hash__
+
+
+@pytest.mark.parametrize(
+    "decision", [Chameleon(), LoudStr("reject"), LoudStr("anything"), b"approve", ["approve"], 1]
+)
+def test_resolve_takes_only_the_exact_strings_approve_and_reject(env: Env, decision: Any) -> None:
+    token = env.mint()
+    approval_id = park(env, token)
+    with pytest.raises(ValueError):
+        env.gateway.resolve_approval(approval_id, decision, "alice")
+    assert env.gateway.approvals.get(approval_id).state == PENDING  # type: ignore[union-attr]
+    assert env.spies["send_email"].calls == [] and env.used(token, SEND) == 0
+    assert len(env.entries()) == 1
+
+
+class FlakyQueue(ApprovalQueue):
+    """A real queue whose `finish` can be made to fail, as a persistent one could."""
+
+    failures = 0
+
+    def finish(self, approval_id: str, outcome: Any, *, denied: bool = False) -> Approval:
+        if self.failures:
+            self.failures -= 1
+            raise OSError("queue storage is down (injected)")
+        return super().finish(approval_id, outcome, denied=denied)
+
+
+@pytest.mark.parametrize("decision", ["approve", "reject"])
+def test_finish_failing_after_the_decision_leaves_no_stuck_record(
+    tmp_path: Path, decision: str
+) -> None:
+    env = Env(tmp_path, retention=100)
+    env.queue = FlakyQueue(retention=100)
+    env.rebuild()
+    token = env.mint()
+    approval_id = park(env, token)
+    env.queue.failures = 2
+    outcome = env.gateway.resolve_approval(approval_id, decision, "alice")  # must not raise
+    expected = "allowed" if decision == "approve" else "denied"
+    assert outcome.status == expected
+    assert len(env.spies["send_email"].calls) == (1 if decision == "approve" else 0)
+    assert env.queue.get(approval_id).outcome is None  # type: ignore[union-attr]
+    env.gateway.list_pending()  # one more failure: the outcome is kept, not dropped
+    assert env.queue.get(approval_id).outcome is None  # type: ignore[union-attr]
+    env.gateway.list_pending()  # the queue is back: the outcome is stored
+    record = env.queue.get(approval_id)
+    assert record is not None and record.outcome.status == expected
+    # So the record can be evicted once its retention is over, and the call ran once at most.
+    env.clock.now += 101
+    env.gateway.list_pending()
+    assert env.queue.get(approval_id) is None
+    assert len(env.spies["send_email"].calls) == (1 if decision == "approve" else 0)
+    assert env.used(token, SEND) == (1 if decision == "approve" else 0)
+
+
+# ------------------------------------- 6. snapshots do not share the stored call
+
+
+def test_a_snapshot_altered_by_force_cannot_change_what_is_released(env: Env) -> None:
+    token = env.mint()
+    approval_id = park(env, token)
+    snapshots = [
+        env.queue.get(approval_id),
+        env.queue.pending(env.clock.now)[0],
+        env.gateway.list_pending()[0],
+        env.gateway.get_approval(approval_id, token),
+    ]
+    for snapshot in snapshots:
+        assert snapshot is not None
+        assert snapshot.call.args == EXTERNAL and snapshot.call.tool == "send_email"
+        # The Call object itself is attacked, not the snapshot's reference to it.
+        object.__setattr__(snapshot.call, "tool", "delete_file")
+        object.__setattr__(snapshot.call, "args", {"to": "attacker@evil.test", "body": "x"})
+    stored = env.queue.get(approval_id)
+    assert stored is not None
+    assert (stored.call.tool, dict(stored.call.args)) == ("send_email", EXTERNAL)
+    assert len({id(s.call) for s in snapshots if s is not None}) == 4  # each its own copy
+    outcome = env.gateway.resolve_approval(approval_id, "approve", "alice")
+    assert outcome.status == "allowed"
+    assert env.spies["send_email"].calls == [EXTERNAL]
+    assert env.spies["delete_file"].calls == []
+
+
+def test_the_call_handed_to_create_is_not_the_one_the_queue_keeps() -> None:
+    queue = ApprovalQueue()
+    call = Call("send_email", {"to": "x0@evil.test", "cc": ["a", {"b": 1}]})
+    record, _ = queue.create(
+        token="t", jti="tok", sub="s", actors=("a",), call=call, rule="r", reason="", now=T0
+    )
+    object.__setattr__(call, "tool", "delete_file")
+    object.__setattr__(record.call, "tool", "delete_file")
+    kept = queue.get(record.id)
+    assert kept is not None and kept.call == Call(
+        "send_email", {"to": "x0@evil.test", "cc": ["a", {"b": 1}]}
+    )
+    assert kept.args_hash == hash_args(kept.call.args)
+    with pytest.raises(TypeError):
+        kept.call.args["cc"][1]["b"] = 2  # copies are as read-only as the original
+
+
+# ------------------------------------------ 7. one agent cannot fill the whole queue
+
+
+def test_children_of_one_root_cannot_block_another_roots_request(tmp_path: Path) -> None:
+    env = Env(tmp_path, max_pending_per_token=5, max_pending_per_root=10, max_pending=30)
+    mail = {"tool": "send_email", "args": {"to": {"any": True}, "body": {"any": True}}}
+    greedy = env.authority.mint(
+        "user:mallory", Grant((Capability.from_dict(mail),), T0 + 600), "a", 600
+    )
+    children = [env.child(greedy, [mail], f"agent:child-{i}") for i in range(20)]
+    outcomes = [
+        env.gateway.handle_call(child, "send_email", {"to": f"v{i}-{n}@evil.test", "body": "b"})
+        for i, child in enumerate(children)
+        for n in range(5)
+    ]
+    parked = [o for o in outcomes if o.status == "pending"]
+    refused = [o for o in outcomes if o.status == "denied"]
+    assert len(parked) == 10 and len(refused) == 90  # 100 attempts, the root's 10 slots
+    assert {o.stage for o in refused} == {"approvals"}
+    assert all("root limit" in o.reason for o in refused)
+    assert env.entries()[-1]["rule"] == "approvals: too many pending approvals (root limit)"
+    assert env.queue.pending_count(env.clock.now) == 10  # 20 left of the global 30
+    # A different user's root token still gets its request parked.
+    victim = env.mint()
+    assert env.gateway.handle_call(victim, "send_email", EXTERNAL).status == "pending"
+    assert env.spies["send_email"].calls == []
+    stored = env.gateway.list_pending()
+    assert {r.root for r in stored} == {env.jti(greedy), env.jti(victim)}
+
+
+def test_caps_per_root_and_per_principal() -> None:
+    queue = ApprovalQueue(
+        max_pending_per_token=2, max_pending_per_root=3, max_pending_per_sub=5, max_pending=100
+    )
+
+    def add(jti: str, root: str, sub: str, n: int, now: float = T0) -> Approval:
+        return queue.create(
+            token=f"token-of-{jti}",
+            jti=jti,
+            sub=sub,
+            actors=("agent:a",),
+            call=Call("send_email", {"to": f"x{n}@evil.test"}),
+            rule="r",
+            reason="",
+            now=now,
+            root=root,
+        )[0]
+
+    add("c1", "root-a", "user:alice", 0)
+    add("c1", "root-a", "user:alice", 1)
+    with pytest.raises(QueueFull) as info:
+        add("c1", "root-a", "user:alice", 2)
+    assert info.value.scope == "token"
+    assert add("c2", "root-a", "user:alice", 0).root == "root-a"
+    with pytest.raises(QueueFull) as info:
+        add("c3", "root-a", "user:alice", 0)  # a fresh child of the same root
+    assert info.value.scope == "root"
+    add("d1", "root-b", "user:alice", 0)  # the same person's second root token
+    add("d1", "root-b", "user:alice", 1)
+    with pytest.raises(QueueFull) as info:
+        add("d2", "root-b", "user:alice", 0)
+    assert info.value.scope == "sub"
+    add("e1", "root-c", "user:bob", 0)  # somebody else is unaffected
+    assert queue.pending_count(T0) == 6
+    # Expired records stop counting, and a root token counts under its own id by default.
+    assert add("c3", "root-a", "user:alice", 0, now=T0 + 300).state == PENDING
+    record, _ = queue.create(
+        token="t", jti="lone", sub="s", actors=(), call=Call("x", {}), rule="r", reason="", now=T0
+    )
+    assert record.root == "lone"
+    for options in ({"max_pending_per_root": 0}, {"max_pending_per_sub": 1.5}):
+        with pytest.raises(ValueError):
+            ApprovalQueue(**options)  # type: ignore[arg-type]
+    # Left unset, the wider caps are never tighter than the cap inside them.
+    wide = ApprovalQueue(max_pending_per_token=50)
+    assert (wide.max_pending_per_root, wide.max_pending_per_sub) == (50, 50)
+    assert (ApprovalQueue().max_pending_per_root, ApprovalQueue().max_pending_per_sub) == (10, 20)

@@ -26,9 +26,15 @@ it separate means a polling agent never reads "approved" for a call that did
 not run.
 
 Limits that stop an agent flooding the queue: at most `max_pending_per_token`
-pending records per token id and `max_pending` in total. A request identical
-to one that is already pending (same request_hash) does not create a second
-record; it returns the existing one.
+pending records per token id, `max_pending_per_root` per ROOT token (the first
+id of the delegation chain, so an agent cannot multiply its share by
+exchanging child tokens), `max_pending_per_sub` per principal and
+`max_pending` in total. A request identical to one that is already pending
+(same request_hash) does not create a second record; it returns the existing
+one.
+
+Every record the queue hands out is a snapshot with its own copy of the call,
+so nothing done to a snapshot, even by force, reaches the stored record.
 
 Time is passed in by the caller (seconds since the epoch), never read here,
 so the queue is deterministic under test. State is in memory and is lost on
@@ -45,6 +51,7 @@ import secrets
 import threading
 from collections.abc import Callable
 from dataclasses import dataclass, replace
+from types import MappingProxyType
 from typing import Any
 
 from toolgate.audit import canonical_json, hash_args
@@ -74,7 +81,10 @@ class ApprovalError(Exception):
 
 
 class QueueFull(Exception):
-    """A cap on pending approvals was reached. `scope` is "token" or "global"."""
+    """A cap on pending approvals was reached.
+
+    `scope` is "token", "root", "sub" or "global".
+    """
 
     def __init__(self, scope: str) -> None:
         super().__init__(f"too many pending approvals ({scope} limit)")
@@ -106,6 +116,7 @@ class Approval:
     approver: str | None = None
     resolved_at: float | None = None
     outcome: Any = None  # the gateway's CallOutcome once the story has ended
+    root: str = ""  # id of the root token of the chain; the jti itself for a root
 
 
 def request_hash(jti: str, tool: str, args_hash: str) -> str:
@@ -137,6 +148,35 @@ def _is_time(value: Any) -> bool:
     return type(value) is int or (type(value) is float and math.isfinite(value))
 
 
+def _copy_args(value: Any) -> Any:
+    """A separate read-only copy of a Call's (already validated) arguments."""
+    if type(value) is MappingProxyType:
+        return MappingProxyType({k: _copy_args(v) for k, v in value.items()})
+    if type(value) is tuple:
+        return tuple(_copy_args(v) for v in value)
+    return value
+
+
+def _snapshot_call(call: Call) -> Call:
+    """A Call equal to `call` that shares no object with it. Never raises."""
+    copy = object.__new__(Call)
+    object.__setattr__(copy, "tool", call.tool)
+    object.__setattr__(copy, "args", _copy_args(call.args))
+    return copy
+
+
+def _snapshot(record: Approval) -> Approval:
+    """A copy of `record` that shares no mutable object with it.
+
+    `dataclasses.replace` alone would hand out the stored Call itself, and a
+    frozen dataclass does not stop `object.__setattr__`: whoever held a
+    snapshot could then rewrite the call that is waiting to be approved. The
+    copy is built without re-running Call's validation, so it never raises.
+    """
+    call = record.call
+    return replace(record, call=_snapshot_call(call) if type(call) is Call else call)
+
+
 def _positive_int(value: Any, what: str) -> int:
     if type(value) is not int or value < 1:
         raise ValueError(f"{what} must be a positive integer")
@@ -154,6 +194,8 @@ class ApprovalQueue:
         max_pending: int = 100,
         retention: int | float = 3600,
         new_id: Callable[[], str] | None = None,
+        max_pending_per_root: int | None = None,
+        max_pending_per_sub: int | None = None,
     ) -> None:
         if not _is_time(ttl) or ttl <= 0:
             raise ValueError("ttl must be a positive number of seconds")
@@ -163,6 +205,15 @@ class ApprovalQueue:
         self.retention = retention
         self.max_pending_per_token = _positive_int(max_pending_per_token, "max_pending_per_token")
         self.max_pending = _positive_int(max_pending, "max_pending")
+        # Left unset, the wider caps are 10 per root and 20 per principal, and
+        # never tighter than the cap inside them, so a queue built with only
+        # the older options keeps behaving as it did for a single token.
+        if max_pending_per_root is None:
+            max_pending_per_root = max(10, self.max_pending_per_token)
+        self.max_pending_per_root = _positive_int(max_pending_per_root, "max_pending_per_root")
+        if max_pending_per_sub is None:
+            max_pending_per_sub = max(20, self.max_pending_per_root)
+        self.max_pending_per_sub = _positive_int(max_pending_per_sub, "max_pending_per_sub")
         # 32 random bytes: an id cannot be guessed, and knowing one tells
         # nothing about the next.
         self._new_id = new_id if new_id is not None else (lambda: secrets.token_urlsafe(32))
@@ -182,12 +233,15 @@ class ApprovalQueue:
         rule: str,
         reason: str,
         now: float,
+        root: str | None = None,
     ) -> tuple[Approval, bool]:
         """Park one call. Returns (record, created).
 
         `created` is False when an identical request (same token id, tool and
         arguments) was already pending; the existing record is returned and
-        nothing is added. Raises QueueFull over either cap.
+        nothing is added. Raises QueueFull over any cap. `root` is the id of
+        the root token of the delegation chain (default: `jti`, which is right
+        for a root token).
         """
         if type(call) is not Call:
             raise ValueError("call must be a Call")
@@ -195,6 +249,10 @@ class ApprovalQueue:
             raise ValueError("token must be a non-empty string")
         if not _is_time(now):
             raise ValueError("invalid time")
+        if root is None:
+            root = jti
+        if type(root) is not str or not root:
+            raise ValueError("root must be a non-empty string")
         args_hash = hash_args(call.args)
         digest = request_hash(jti, call.tool, args_hash)
         with self._lock:
@@ -203,9 +261,14 @@ class ApprovalQueue:
                 if record.request_hash == digest and hmac.compare_digest(
                     record.token.encode(), token.encode()
                 ):
-                    return replace(record), False
+                    return _snapshot(record), False
             if sum(1 for r in pending if r.jti == jti) >= self.max_pending_per_token:
                 raise QueueFull("token")
+            # A record made before `root` existed counts under its own jti.
+            if sum(1 for r in pending if (r.root or r.jti) == root) >= self.max_pending_per_root:
+                raise QueueFull("root")
+            if sum(1 for r in pending if r.sub == sub) >= self.max_pending_per_sub:
+                raise QueueFull("sub")
             if len(pending) >= self.max_pending:
                 raise QueueFull("global")
             approval_id = self._new_id()
@@ -217,16 +280,17 @@ class ApprovalQueue:
                 jti=jti,
                 sub=sub,
                 actors=tuple(actors),
-                call=call,
+                call=_snapshot_call(call),
                 args_hash=args_hash,
                 request_hash=digest,
                 rule=rule,
                 reason=reason,
                 created_at=now,
                 expires_at=now + self.ttl,
+                root=root,
             )
             self._records[approval_id] = record
-            return replace(record), True
+            return _snapshot(record), True
 
     def resolve(self, approval_id: str, state: str, approver: str, now: float) -> Approval:
         """Move a pending record to `approved` or `rejected`. Single use.
@@ -251,7 +315,7 @@ class ApprovalQueue:
                 raise ApprovalError("not_pending", f"the approval is already {record.state}")
             record = replace(record, state=state, approver=approver, resolved_at=now)
             self._records[approval_id] = record
-            return replace(record)
+            return _snapshot(record)
 
     def finish(self, approval_id: str, outcome: Any, *, denied: bool = False) -> Approval:
         """Record how a resolved approval ended. `denied` moves approved -> denied."""
@@ -264,7 +328,7 @@ class ApprovalQueue:
             state = DENIED if denied and record.state == APPROVED else record.state
             record = replace(record, state=state, outcome=outcome)
             self._records[approval_id] = record
-            return replace(record)
+            return _snapshot(record)
 
     def discard(self, approval_id: str) -> None:
         """Forget a record that is still pending (used when it could not be audited)."""
@@ -288,7 +352,7 @@ class ApprovalQueue:
                     if now >= record.expires_at:
                         record = replace(record, state=EXPIRED, resolved_at=now)
                         self._records[approval_id] = record
-                        newly.append(replace(record))
+                        newly.append(_snapshot(record))
                 elif (
                     record.resolved_at is not None
                     and now >= record.resolved_at + self.retention
@@ -304,12 +368,12 @@ class ApprovalQueue:
     def get(self, approval_id: str) -> Approval | None:
         with self._lock:
             record = self._records.get(approval_id) if type(approval_id) is str else None
-            return None if record is None else replace(record)
+            return None if record is None else _snapshot(record)
 
     def pending(self, now: float) -> list[Approval]:
         """Records a person can still decide, oldest first."""
         with self._lock:
-            live = [replace(r) for r in self._records.values() if self._live(r, now)]
+            live = [_snapshot(r) for r in self._records.values() if self._live(r, now)]
         return sorted(live, key=lambda r: (r.created_at, r.id))
 
     def pending_count(self, now: float, jti: str | None = None) -> int:

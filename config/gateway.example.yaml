@@ -1,0 +1,72 @@
+# Example gateway configuration.
+#
+#   python -m toolgate.server --config config/gateway.example.yaml
+#
+# No secret is ever written in this file. The two secrets are read from the
+# environment variables NAMED here, and the server refuses to start if either
+# is missing or malformed.
+#
+#   signing key   base64 of 32 random bytes (an Ed25519 seed):
+#                   export TOOLGATE_SIGNING_KEY="$(openssl rand -base64 32)"
+#   admin key     a long random string that only the operator holds. The
+#                 server is given its SHA-256, never the key itself:
+#                   ADMIN_KEY="$(openssl rand -base64 32 | tr '+/' '-_' | tr -d '=')"
+#                   export TOOLGATE_ADMIN_KEY_SHA256="$(printf %s "$ADMIN_KEY" | sha256sum | cut -d' ' -f1)"
+#                 A plain SHA-256 is only safe because the key is long and
+#                 random. Do not use a password here. The key may contain
+#                 only letters, digits and . _ ~ + / = - so that it fits in
+#                 an Authorization header unchanged.
+#
+# Relative paths are resolved against the directory this file is in.
+# Unknown keys are an error, here and in every section.
+
+issuer: "https://gateway.example"     # `iss` of every token this gateway signs
+audience: "toolgate"                  # `aud`: tokens for another gateway are refused
+
+signing_key_env: TOOLGATE_SIGNING_KEY
+admin_key_hash_env: TOOLGATE_ADMIN_KEY_SHA256
+
+# Operator policy (deny beats approve beats allow, default deny). Read once at
+# startup; restart the server to load a changed policy.
+policy_file: "policy.example.yaml"
+
+# Hash-chained audit log, one JSON entry per decision. One writer per file.
+# Check it offline with:  python -m toolgate.audit verify <path> --head <hash>
+audit_log: "audit.jsonl"
+
+# Revocations and call budgets.
+#   memory   lost on restart: every token issued before the restart then
+#            fails as unknown_token (fails closed)
+#   sqlite   kept in a file; needs `path`
+store:
+  kind: memory
+  # kind: sqlite
+  # path: "toolgate.sqlite"
+
+tokens:
+  max_ttl_seconds: 900    # ceiling for `expires_in` on /token and /token/exchange
+  max_depth: 4            # how many times a token can be delegated onward
+  max_children: 64        # how many child tokens one token may ever hand out
+
+approvals:
+  ttl_seconds: 300            # a pending approval nobody decides expires after this
+  max_pending_per_token: 5    # one agent cannot flood the queue...
+  max_pending: 100            # ...and all agents together cannot either
+  retention_seconds: 3600     # how long a decided approval stays readable by its agent
+
+limits:
+  max_body_bytes: 65536       # request bodies above this are refused with 413
+  max_output_bytes: 65536     # a larger tool result is withheld (502), never cut short
+
+server:
+  host: "127.0.0.1"           # there is no TLS here: put a TLS proxy in front
+  port: 8000                  # before listening on anything but loopback
+
+# Tool registry: the name agents call -> "package.module:function". The
+# function receives the call's arguments as keyword arguments and may be sync
+# or async. Names may use letters, digits and _ . : / - (at most 128
+# characters). A tool that is not listed here cannot be called, whatever a
+# token or the policy says. Listing a tool imports and runs that module, so
+# this file must be writable only by the operator.
+tools:
+  echo: "toolgate.server:echo"   # example tool that returns its arguments

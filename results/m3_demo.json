@@ -1,0 +1,404 @@
+{
+  "description": "M3 gateway story: scripted, in-process HTTP, fixed clock and ids",
+  "config": {
+    "issuer": "https://gateway.example",
+    "audience": "toolgate-demo",
+    "start_unix": 1794873600,
+    "policy_file": "config/policy.example.yaml",
+    "policy_sha256": "8fce9026e625da739489f944929b4b0045fb3f188bd244fdcca30ae359429052",
+    "key_seed": "toolgate m3 demo key, not a secret",
+    "user_capabilities": [
+      {
+        "tool": "read_file",
+        "args": {
+          "path": {
+            "glob": "reports/*"
+          }
+        },
+        "max_calls": 5
+      },
+      {
+        "tool": "send_email",
+        "args": {
+          "to": {
+            "any": true
+          },
+          "subject": {
+            "any": true
+          },
+          "body": {
+            "any": true
+          }
+        },
+        "max_calls": 2
+      },
+      {
+        "tool": "delete_file",
+        "args": {
+          "path": {
+            "any": true
+          }
+        },
+        "max_calls": 1
+      }
+    ],
+    "child_capabilities": [
+      {
+        "tool": "read_file",
+        "args": {
+          "path": {
+            "glob": "reports/q3/*"
+          }
+        },
+        "max_calls": 3
+      },
+      {
+        "tool": "send_email",
+        "args": {
+          "to": {
+            "any": true
+          },
+          "subject": {
+            "any": true
+          },
+          "body": {
+            "any": true
+          }
+        },
+        "max_calls": 1
+      },
+      {
+        "tool": "delete_file",
+        "args": {
+          "path": {
+            "any": true
+          }
+        },
+        "max_calls": 1
+      }
+    ],
+    "approval_ttl_seconds": 300
+  },
+  "steps": [
+    {
+      "step": 1,
+      "who": "admin",
+      "request": "POST /token",
+      "summary": "mint a root token for user:alice, held by agent:orchestrator (3 capabilities)",
+      "http_status": 200,
+      "outcome": "ok",
+      "reason": null,
+      "rule": null,
+      "audit_seq": null
+    },
+    {
+      "step": 2,
+      "who": "orchestrator",
+      "request": "POST /token/exchange",
+      "summary": "exchange for a WIDER child (read_file on any path): must be refused",
+      "http_status": 403,
+      "outcome": "escalation",
+      "reason": "child capability 0 (read_file) is not covered by any parent capability",
+      "rule": null,
+      "audit_seq": null
+    },
+    {
+      "step": 3,
+      "who": "orchestrator",
+      "request": "POST /token/exchange",
+      "summary": "exchange for a narrower child (reports/q3/* only, smaller budgets)",
+      "http_status": 200,
+      "outcome": "ok",
+      "reason": null,
+      "rule": null,
+      "audit_seq": null
+    },
+    {
+      "step": 4,
+      "who": "agent",
+      "request": "POST /call",
+      "summary": "read_file reports/q3/summary.txt: inside the grant, allowed by policy",
+      "http_status": 200,
+      "outcome": "allowed",
+      "reason": "ok",
+      "rule": "allow-file-reads",
+      "audit_seq": 0
+    },
+    {
+      "step": 5,
+      "who": "agent",
+      "request": "POST /call",
+      "summary": "read_file reports/q2/summary.txt: outside the child's grant",
+      "http_status": 403,
+      "outcome": "denied",
+      "reason": "argument 'path' fails glob",
+      "rule": null,
+      "audit_seq": 1
+    },
+    {
+      "step": 6,
+      "who": "agent",
+      "request": "POST /call",
+      "summary": "delete_file reports/q3/summary.txt: granted, but operator policy denies",
+      "http_status": 403,
+      "outcome": "denied",
+      "reason": "Agents never delete files, whatever the user delegated.",
+      "rule": "deny-file-delete",
+      "audit_seq": 2
+    },
+    {
+      "step": 7,
+      "who": "agent",
+      "request": "POST /call",
+      "summary": "send_email to an outside address: policy asks for a person",
+      "http_status": 202,
+      "outcome": "pending",
+      "reason": "Mail to recipients outside example.com needs approval.",
+      "rule": "approve-external-email",
+      "audit_seq": 3
+    },
+    {
+      "step": 8,
+      "who": "agent",
+      "request": "GET /approvals/apr-1",
+      "summary": "poll the approval: still pending, nothing has run",
+      "http_status": 200,
+      "outcome": "pending",
+      "reason": null,
+      "rule": "approve-external-email",
+      "audit_seq": null
+    },
+    {
+      "step": 9,
+      "who": "agent",
+      "request": "POST /approvals/apr-1",
+      "summary": "try to approve its own request with its token: not an admin credential",
+      "http_status": 401,
+      "outcome": "unauthorized",
+      "reason": null,
+      "rule": null,
+      "audit_seq": null
+    },
+    {
+      "step": 10,
+      "who": "admin",
+      "request": "GET /approvals",
+      "summary": "list pending approvals: tool, actors and the arguments",
+      "http_status": 200,
+      "outcome": "ok",
+      "reason": null,
+      "rule": null,
+      "audit_seq": null,
+      "shown_to_approver": {
+        "tool": "send_email",
+        "args": {
+          "to": "partner@other.example",
+          "subject": "Q3 summary",
+          "body": "Revenue is up 4%."
+        },
+        "sub": "user:alice",
+        "actors": [
+          "agent:researcher",
+          "agent:orchestrator"
+        ],
+        "args_hash": "163cd1669861f014a10d09a8d72aad3118f9da387b5d62e776cef7f524c616d9"
+      }
+    },
+    {
+      "step": 11,
+      "who": "admin",
+      "request": "POST /approvals/apr-1",
+      "summary": "approve: checks re-run, then the stored call runs",
+      "http_status": 200,
+      "outcome": "allowed",
+      "reason": "ok",
+      "rule": "approve-external-email",
+      "audit_seq": 4
+    },
+    {
+      "step": 12,
+      "who": "admin",
+      "request": "POST /approvals/apr-1",
+      "summary": "approve the same id again: single use",
+      "http_status": 409,
+      "outcome": "not_pending",
+      "reason": "the approval is already approved",
+      "rule": null,
+      "audit_seq": null
+    },
+    {
+      "step": 13,
+      "who": "agent",
+      "request": "GET /approvals/apr-1",
+      "summary": "poll the approval: approved, with the result",
+      "http_status": 200,
+      "outcome": "allowed",
+      "reason": "ok",
+      "rule": "approve-external-email",
+      "audit_seq": 4,
+      "result": {
+        "sent_to": "partner@other.example",
+        "subject": "Q3 summary"
+      }
+    },
+    {
+      "step": 14,
+      "who": "admin",
+      "request": "POST /token/revoke",
+      "summary": "revoke the PARENT token tok-1",
+      "http_status": 200,
+      "outcome": "ok",
+      "reason": null,
+      "rule": null,
+      "audit_seq": null
+    },
+    {
+      "step": 15,
+      "who": "agent",
+      "request": "POST /call",
+      "summary": "read_file again with the child token: its ancestor is revoked",
+      "http_status": 401,
+      "outcome": "denied",
+      "reason": "revoked",
+      "rule": null,
+      "audit_seq": 5
+    },
+    {
+      "step": 16,
+      "who": "admin",
+      "request": "GET /audit/verify",
+      "summary": "replay the audit log's hash chain",
+      "http_status": 200,
+      "outcome": "ok",
+      "reason": null,
+      "rule": null,
+      "audit_seq": null,
+      "verify": {
+        "ok": true,
+        "entries": 6,
+        "first_bad_index": null,
+        "problem": null,
+        "head": {
+          "seq": 5,
+          "hash": "d489af4f17247499c0e242b4d9fec0fd94f22dde1963c171f33e1926f0ac4fd2"
+        }
+      }
+    }
+  ],
+  "audit_log": [
+    {
+      "actors": [
+        "agent:researcher",
+        "agent:orchestrator"
+      ],
+      "approver": null,
+      "args_hash": "4f4c77bcae9dd32088e8422401dbd7e26cb8b6da14caa4aa6f3f09bf20aaea5c",
+      "decision": "allow",
+      "hash": "643b50742aae484b3c14739a82b227589446d7f5062fc366264d1eb3f82c15ea",
+      "jti": "tok-2",
+      "prev": "9fbdce0679c190589bbae3f428600ba32cf75a2fc29c42ac125d6eb02e097ee5",
+      "rule": "allow-file-reads",
+      "seq": 0,
+      "time": 1794873600000000000,
+      "tool": "read_file"
+    },
+    {
+      "actors": [
+        "agent:researcher",
+        "agent:orchestrator"
+      ],
+      "approver": null,
+      "args_hash": "7dad1cbcb6883bb081e0df901929fe451e8cb8233f294d270a06a63a67123899",
+      "decision": "deny",
+      "hash": "23f5b9c784f82c99c37a7059bcee4a1671d4ea09c2f1e688366e8d3a82fc4c6f",
+      "jti": "tok-2",
+      "prev": "643b50742aae484b3c14739a82b227589446d7f5062fc366264d1eb3f82c15ea",
+      "rule": "grant: argument 'path' fails glob",
+      "seq": 1,
+      "time": 1794873600001000000,
+      "tool": "read_file"
+    },
+    {
+      "actors": [
+        "agent:researcher",
+        "agent:orchestrator"
+      ],
+      "approver": null,
+      "args_hash": "4f4c77bcae9dd32088e8422401dbd7e26cb8b6da14caa4aa6f3f09bf20aaea5c",
+      "decision": "deny",
+      "hash": "eb9b3a7c872c8194ccc970226a0d2bf1ca635277b1495ea57a87a80aec4ebf54",
+      "jti": "tok-2",
+      "prev": "23f5b9c784f82c99c37a7059bcee4a1671d4ea09c2f1e688366e8d3a82fc4c6f",
+      "rule": "deny-file-delete",
+      "seq": 2,
+      "time": 1794873600002000000,
+      "tool": "delete_file"
+    },
+    {
+      "actors": [
+        "agent:researcher",
+        "agent:orchestrator"
+      ],
+      "approver": null,
+      "args_hash": "163cd1669861f014a10d09a8d72aad3118f9da387b5d62e776cef7f524c616d9",
+      "decision": "approve",
+      "hash": "9c7861e3b3d56687543c4bb4374352bd4e6f1686dcc011cd4558b2fba37bd61f",
+      "jti": "tok-2",
+      "prev": "eb9b3a7c872c8194ccc970226a0d2bf1ca635277b1495ea57a87a80aec4ebf54",
+      "rule": "approve-external-email",
+      "seq": 3,
+      "time": 1794873600003000000,
+      "tool": "send_email"
+    },
+    {
+      "actors": [
+        "agent:researcher",
+        "agent:orchestrator"
+      ],
+      "approver": "alice@example.com",
+      "args_hash": "163cd1669861f014a10d09a8d72aad3118f9da387b5d62e776cef7f524c616d9",
+      "decision": "approved",
+      "hash": "57df3346336a8fb989e7d8694ca16dad7f35767ca9e8810b64a4230f951bfd56",
+      "jti": "tok-2",
+      "prev": "9c7861e3b3d56687543c4bb4374352bd4e6f1686dcc011cd4558b2fba37bd61f",
+      "rule": "approve-external-email",
+      "seq": 4,
+      "time": 1794873600004000000,
+      "tool": "send_email"
+    },
+    {
+      "actors": [],
+      "approver": null,
+      "args_hash": "4f4c77bcae9dd32088e8422401dbd7e26cb8b6da14caa4aa6f3f09bf20aaea5c",
+      "decision": "deny",
+      "hash": "d489af4f17247499c0e242b4d9fec0fd94f22dde1963c171f33e1926f0ac4fd2",
+      "jti": "unverified:41170490019d165f",
+      "prev": "57df3346336a8fb989e7d8694ca16dad7f35767ca9e8810b64a4230f951bfd56",
+      "rule": "token: revoked",
+      "seq": 5,
+      "time": 1794873600005000000,
+      "tool": "read_file"
+    }
+  ],
+  "audit_verify": {
+    "ok": true,
+    "entries": 6,
+    "first_bad_index": null,
+    "problem": null,
+    "head_seq": 5,
+    "head_hash": "d489af4f17247499c0e242b4d9fec0fd94f22dde1963c171f33e1926f0ac4fd2"
+  },
+  "tool_executions": {
+    "read_file": 1,
+    "send_email": 1,
+    "delete_file": 0
+  },
+  "checks": {
+    "audit_verifies": true,
+    "one_entry_per_decision": true,
+    "email_not_sent_before_approval": true,
+    "email_sent_exactly_once": true,
+    "file_read_exactly_once": true,
+    "nothing_deleted": true
+  }
+}

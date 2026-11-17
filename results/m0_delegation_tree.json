@@ -1,0 +1,177 @@
+{
+  "now": 1800000000,
+  "grants": {
+    "user": {
+      "capabilities": [
+        {
+          "tool": "read_file",
+          "args": {
+            "path": {
+              "glob": "reports/*"
+            }
+          }
+        },
+        {
+          "tool": "send_email",
+          "args": {
+            "to": {
+              "in": [
+                "ana@x.com",
+                "ben@x.com",
+                "cy@x.com"
+              ]
+            },
+            "subject": {
+              "any": true
+            },
+            "body": {
+              "any": true
+            }
+          },
+          "max_calls": 5
+        },
+        {
+          "tool": "search_calendar",
+          "args": {
+            "days": {
+              "max": 30
+            },
+            "query": {
+              "any": true
+            }
+          }
+        }
+      ],
+      "expires_at": 1800003600
+    },
+    "orchestrator": {
+      "capabilities": [
+        {
+          "tool": "read_file",
+          "args": {
+            "path": {
+              "glob": "reports/*"
+            }
+          }
+        },
+        {
+          "tool": "send_email",
+          "args": {
+            "to": {
+              "in": [
+                "ana@x.com",
+                "ben@x.com"
+              ]
+            },
+            "subject": {
+              "any": true
+            },
+            "body": {
+              "any": true
+            }
+          },
+          "max_calls": 3
+        },
+        {
+          "tool": "search_calendar",
+          "args": {
+            "days": {
+              "max": 7
+            },
+            "query": {
+              "any": true
+            }
+          }
+        }
+      ],
+      "expires_at": 1800001800
+    },
+    "research": {
+      "capabilities": [
+        {
+          "tool": "read_file",
+          "args": {
+            "path": {
+              "glob": "reports/q3/*"
+            }
+          }
+        }
+      ],
+      "expires_at": 1800000600
+    },
+    "mailer": {
+      "capabilities": [
+        {
+          "tool": "send_email",
+          "args": {
+            "to": {
+              "eq": "ana@x.com"
+            },
+            "subject": {
+              "any": true
+            },
+            "body": {
+              "any": true
+            }
+          },
+          "max_calls": 1
+        }
+      ],
+      "expires_at": 1800000300
+    }
+  },
+  "rejected_request": {
+    "name": "research (wider request)",
+    "grant": {
+      "capabilities": [
+        {
+          "tool": "read_file",
+          "args": {
+            "path": {
+              "glob": "*"
+            }
+          }
+        }
+      ],
+      "expires_at": 1800000600
+    }
+  },
+  "edges": [
+    {
+      "parent": "user",
+      "child": "orchestrator",
+      "ok": true,
+      "reason": "ok",
+      "derivation": [
+        0,
+        1,
+        2
+      ]
+    },
+    {
+      "parent": "orchestrator",
+      "child": "research",
+      "ok": true,
+      "reason": "ok",
+      "derivation": [
+        0
+      ]
+    },
+    {
+      "parent": "orchestrator",
+      "child": "mailer",
+      "ok": true,
+      "reason": "ok",
+      "derivation": [
+        1
+      ]
+    },
+    {
+      "parent": "orchestrator",
+      "child": "research (wider request)",
+      "ok": false,
+      "reason": "child capability 0 (read_file) is not covered by any parent capability",
+      "derivation": []
+    }
+  ]
+}

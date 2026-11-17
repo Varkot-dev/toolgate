@@ -1,0 +1,557 @@
+{
+  "description": "M1 token scenario: scripted, fixed clock, fixed key, no network",
+  "config": {
+    "issuer": "https://gateway.example",
+    "audience": "toolgate-demo",
+    "algorithm": "EdDSA (Ed25519)",
+    "key_seed": "toolgate m1 demo key, not a secret",
+    "public_key_hex": "d1a6560b5c7d16c323389e2fc2c7ed103060543315c88f20d4fa7354c3f8dd5f",
+    "start_unix": 1794873600,
+    "max_depth": 4,
+    "max_ttl_seconds": 900
+  },
+  "steps": [
+    {
+      "step": 1,
+      "t": 0,
+      "action": "mint",
+      "who": "orchestrator",
+      "what": "root token tok-1 for user:alice, 2 capabilities, ttl 600s",
+      "outcome": "issued",
+      "reason": "expires at t=600"
+    },
+    {
+      "step": 2,
+      "t": 0,
+      "action": "exchange",
+      "who": "orchestrator",
+      "what": "for researcher: read reports/q3/*, 3 calls",
+      "outcome": "issued",
+      "reason": "token tok-2, chain ['tok-1'], expires at t=300"
+    },
+    {
+      "step": 3,
+      "t": 0,
+      "action": "exchange",
+      "who": "orchestrator",
+      "what": "for summarizer: read reports/*, 3 calls",
+      "outcome": "issued",
+      "reason": "token tok-3, chain ['tok-1'], expires at t=300"
+    },
+    {
+      "step": 4,
+      "t": 0,
+      "action": "exchange",
+      "who": "orchestrator",
+      "what": "for rogue: read *, 3 calls (wider pattern)",
+      "outcome": "refused",
+      "reason": "child capability 0 (read_file) is not covered by any parent capability"
+    },
+    {
+      "step": 5,
+      "t": 0,
+      "action": "exchange",
+      "who": "orchestrator",
+      "what": "for rogue: read reports/*, 50 calls (budget)",
+      "outcome": "refused",
+      "reason": "child capability 0 (read_file) is not covered by any parent capability"
+    },
+    {
+      "step": 6,
+      "t": 0,
+      "action": "exchange",
+      "who": "researcher",
+      "what": "for rogue: send_email (a tool the researcher was never given)",
+      "outcome": "refused",
+      "reason": "child capability 0 (send_email) is not covered by any parent capability"
+    },
+    {
+      "step": 7,
+      "t": 0,
+      "action": "exchange",
+      "who": "researcher",
+      "what": "for rogue: read reports/* (wider than its own)",
+      "outcome": "refused",
+      "reason": "child capability 0 (read_file) is not covered by any parent capability"
+    },
+    {
+      "step": 8,
+      "t": 0,
+      "action": "exchange",
+      "who": "orchestrator",
+      "what": "for long-lived: ttl of 1,000,000s",
+      "outcome": "issued",
+      "reason": "token tok-4, chain ['tok-1'], expires at t=600"
+    },
+    {
+      "step": 9,
+      "t": 0,
+      "action": "call",
+      "who": "researcher",
+      "what": "read_file(path='reports/q2/revenue.csv')",
+      "outcome": "denied",
+      "reason": "argument 'path' fails glob"
+    },
+    {
+      "step": 10,
+      "t": 0,
+      "action": "call",
+      "who": "researcher",
+      "what": "read_file(path='reports/q3/revenue.csv', mode='rw')",
+      "outcome": "denied",
+      "reason": "argument 'mode' is not permitted"
+    },
+    {
+      "step": 11,
+      "t": 0,
+      "action": "call",
+      "who": "researcher",
+      "what": "send_email(to='bob@corp.example', amount=5)",
+      "outcome": "denied",
+      "reason": "no capability for tool 'send_email'"
+    },
+    {
+      "step": 12,
+      "t": 0,
+      "action": "call",
+      "who": "researcher",
+      "what": "read_file(path='reports/q3/revenue.csv')",
+      "outcome": "allowed",
+      "reason": "ok"
+    },
+    {
+      "step": 13,
+      "t": 0,
+      "action": "call",
+      "who": "summarizer",
+      "what": "read_file(path='reports/q2/revenue.csv')",
+      "outcome": "allowed",
+      "reason": "ok"
+    },
+    {
+      "step": 14,
+      "t": 0,
+      "action": "call",
+      "who": "researcher",
+      "what": "read_file(path='reports/q3/costs.csv')",
+      "outcome": "allowed",
+      "reason": "ok"
+    },
+    {
+      "step": 15,
+      "t": 0,
+      "action": "call",
+      "who": "summarizer",
+      "what": "read_file(path='reports/q3/revenue.csv')",
+      "outcome": "denied",
+      "reason": "budget exhausted"
+    },
+    {
+      "step": 16,
+      "t": 0,
+      "action": "call",
+      "who": "orchestrator",
+      "what": "read_file(path='reports/q1/revenue.csv')",
+      "outcome": "denied",
+      "reason": "budget exhausted"
+    },
+    {
+      "step": 17,
+      "t": 0,
+      "action": "call",
+      "who": "orchestrator",
+      "what": "send_email(to='bob@corp.example', amount=40)",
+      "outcome": "allowed",
+      "reason": "ok"
+    },
+    {
+      "step": 18,
+      "t": 0,
+      "action": "call",
+      "who": "orchestrator",
+      "what": "send_email(to='bob@corp.example', amount=400)",
+      "outcome": "denied",
+      "reason": "argument 'amount' fails max"
+    },
+    {
+      "step": 19,
+      "t": 0,
+      "action": "call",
+      "who": "summarizer (payload edited)",
+      "what": "read_file(path='secrets/key.pem')",
+      "outcome": "token refused",
+      "reason": "bad_signature"
+    },
+    {
+      "step": 20,
+      "t": 0,
+      "action": "exchange",
+      "who": "orchestrator",
+      "what": "for scratch: send, ttl 30s",
+      "outcome": "issued",
+      "reason": "token tok-5, chain ['tok-1'], expires at t=30"
+    },
+    {
+      "step": 21,
+      "t": 0,
+      "action": "call",
+      "who": "scratch",
+      "what": "send_email(to='bob@corp.example', amount=1)",
+      "outcome": "allowed",
+      "reason": "ok"
+    },
+    {
+      "step": 22,
+      "t": 30,
+      "action": "call",
+      "who": "scratch",
+      "what": "send_email(to='bob@corp.example', amount=1)",
+      "outcome": "token refused",
+      "reason": "expired"
+    },
+    {
+      "step": 23,
+      "t": 30,
+      "action": "call",
+      "who": "orchestrator",
+      "what": "send_email(to='carol@corp.example', amount=1)",
+      "outcome": "allowed",
+      "reason": "ok"
+    },
+    {
+      "step": 24,
+      "t": 30,
+      "action": "exchange",
+      "who": "researcher",
+      "what": "for intern: depth 2 token",
+      "outcome": "issued",
+      "reason": "token tok-6, chain ['tok-1', 'tok-2'], expires at t=90"
+    },
+    {
+      "step": 25,
+      "t": 30,
+      "action": "revoke",
+      "who": "gateway operator",
+      "what": "token tok-1 (orchestrator)",
+      "outcome": "revoked",
+      "reason": ""
+    },
+    {
+      "step": 26,
+      "t": 30,
+      "action": "call",
+      "who": "orchestrator",
+      "what": "read_file(path='reports/q3/public/summary.txt')",
+      "outcome": "token refused",
+      "reason": "revoked"
+    },
+    {
+      "step": 27,
+      "t": 30,
+      "action": "call",
+      "who": "researcher",
+      "what": "read_file(path='reports/q3/public/summary.txt')",
+      "outcome": "token refused",
+      "reason": "revoked"
+    },
+    {
+      "step": 28,
+      "t": 30,
+      "action": "call",
+      "who": "summarizer",
+      "what": "read_file(path='reports/q3/public/summary.txt')",
+      "outcome": "token refused",
+      "reason": "revoked"
+    },
+    {
+      "step": 29,
+      "t": 30,
+      "action": "call",
+      "who": "intern",
+      "what": "read_file(path='reports/q3/public/summary.txt')",
+      "outcome": "token refused",
+      "reason": "revoked"
+    },
+    {
+      "step": 30,
+      "t": 30,
+      "action": "exchange",
+      "who": "researcher",
+      "what": "for late: after the revocation",
+      "outcome": "refused",
+      "reason": "revoked"
+    }
+  ],
+  "ledger_after_calls": {
+    "orchestrator": {
+      "jti": "tok-1",
+      "capabilities": [
+        {
+          "tool": "read_file",
+          "used": 3,
+          "limit": 3
+        },
+        {
+          "tool": "send_email",
+          "used": 1,
+          "limit": null
+        }
+      ]
+    },
+    "researcher": {
+      "jti": "tok-2",
+      "capabilities": [
+        {
+          "tool": "read_file",
+          "used": 2,
+          "limit": 3
+        }
+      ]
+    },
+    "summarizer": {
+      "jti": "tok-3",
+      "capabilities": [
+        {
+          "tool": "read_file",
+          "used": 1,
+          "limit": 3
+        }
+      ]
+    },
+    "long-lived": {
+      "jti": "tok-4",
+      "capabilities": [
+        {
+          "tool": "read_file",
+          "used": 0,
+          "limit": 1
+        }
+      ]
+    }
+  },
+  "tokens": {
+    "orchestrator": {
+      "iss": "https://gateway.example",
+      "aud": "toolgate-demo",
+      "sub": "user:alice",
+      "act": {
+        "sub": "orchestrator"
+      },
+      "iat": 1794873600,
+      "exp": 1794874200,
+      "jti": "tok-1",
+      "caps": [
+        {
+          "tool": "read_file",
+          "args": {
+            "path": {
+              "glob": "reports/*"
+            }
+          },
+          "max_calls": 3
+        },
+        {
+          "tool": "send_email",
+          "args": {
+            "to": {
+              "in": [
+                "bob@corp.example",
+                "carol@corp.example"
+              ]
+            },
+            "amount": {
+              "max": 100
+            }
+          }
+        }
+      ],
+      "chain": [],
+      "der": [
+        [],
+        []
+      ]
+    },
+    "researcher": {
+      "iss": "https://gateway.example",
+      "aud": "toolgate-demo",
+      "sub": "user:alice",
+      "act": {
+        "sub": "researcher",
+        "act": {
+          "sub": "orchestrator"
+        }
+      },
+      "iat": 1794873600,
+      "exp": 1794873900,
+      "jti": "tok-2",
+      "caps": [
+        {
+          "tool": "read_file",
+          "args": {
+            "path": {
+              "glob": "reports/q3/*"
+            }
+          },
+          "max_calls": 3
+        }
+      ],
+      "chain": [
+        "tok-1"
+      ],
+      "der": [
+        [
+          0
+        ]
+      ]
+    },
+    "summarizer": {
+      "iss": "https://gateway.example",
+      "aud": "toolgate-demo",
+      "sub": "user:alice",
+      "act": {
+        "sub": "summarizer",
+        "act": {
+          "sub": "orchestrator"
+        }
+      },
+      "iat": 1794873600,
+      "exp": 1794873900,
+      "jti": "tok-3",
+      "caps": [
+        {
+          "tool": "read_file",
+          "args": {
+            "path": {
+              "glob": "reports/*"
+            }
+          },
+          "max_calls": 3
+        }
+      ],
+      "chain": [
+        "tok-1"
+      ],
+      "der": [
+        [
+          0
+        ]
+      ]
+    },
+    "long-lived": {
+      "iss": "https://gateway.example",
+      "aud": "toolgate-demo",
+      "sub": "user:alice",
+      "act": {
+        "sub": "long-lived",
+        "act": {
+          "sub": "orchestrator"
+        }
+      },
+      "iat": 1794873600,
+      "exp": 1794874200,
+      "jti": "tok-4",
+      "caps": [
+        {
+          "tool": "read_file",
+          "args": {
+            "path": {
+              "glob": "reports/*"
+            }
+          },
+          "max_calls": 1
+        }
+      ],
+      "chain": [
+        "tok-1"
+      ],
+      "der": [
+        [
+          0
+        ]
+      ]
+    },
+    "scratch": {
+      "iss": "https://gateway.example",
+      "aud": "toolgate-demo",
+      "sub": "user:alice",
+      "act": {
+        "sub": "scratch",
+        "act": {
+          "sub": "orchestrator"
+        }
+      },
+      "iat": 1794873600,
+      "exp": 1794873630,
+      "jti": "tok-5",
+      "caps": [
+        {
+          "tool": "send_email",
+          "args": {
+            "to": {
+              "in": [
+                "bob@corp.example"
+              ]
+            },
+            "amount": {
+              "max": 1
+            }
+          }
+        }
+      ],
+      "chain": [
+        "tok-1"
+      ],
+      "der": [
+        [
+          1
+        ]
+      ]
+    },
+    "intern": {
+      "iss": "https://gateway.example",
+      "aud": "toolgate-demo",
+      "sub": "user:alice",
+      "act": {
+        "sub": "intern",
+        "act": {
+          "sub": "researcher",
+          "act": {
+            "sub": "orchestrator"
+          }
+        }
+      },
+      "iat": 1794873630,
+      "exp": 1794873690,
+      "jti": "tok-6",
+      "caps": [
+        {
+          "tool": "read_file",
+          "args": {
+            "path": {
+              "glob": "reports/q3/public/*"
+            }
+          },
+          "max_calls": 1
+        }
+      ],
+      "chain": [
+        "tok-1",
+        "tok-2"
+      ],
+      "der": [
+        [
+          0,
+          0
+        ]
+      ]
+    }
+  },
+  "summary": {
+    "steps": 30,
+    "tokens_issued": 6,
+    "exchanges_refused": 5,
+    "calls_allowed": 6,
+    "calls_denied": 6,
+    "calls_with_token_refused": 6
+  }
+}

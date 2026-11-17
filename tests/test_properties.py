@@ -22,7 +22,7 @@ import pytest
 from hypothesis import HealthCheck, Phase, find, given, settings
 from hypothesis.errors import NoSuchExample
 
-from strategies import Scenario, chains, grants, scenarios
+from strategies import RawCall, Scenario, chains, grants, raw_calls, scenarios
 from toolgate import (
     AttenuationResult,
     Call,
@@ -130,6 +130,25 @@ def test_transitive_soundness(c) -> None:
         assert c.grandparent.allows(c.call, c.now)
 
 
+@PROPERTY
+@given(raw_calls())
+def test_call_refuses_exactly_the_unrecordable_values(raw: RawCall) -> None:
+    # Non-finite floats, surrogate strings and huge ints used to be ordinary
+    # call values in the scenarios. Now no Call can hold them, so they are
+    # generated raw here and Call must refuse them, and nothing else.
+    if raw.unrecordable:
+        with pytest.raises(ValueError):
+            Call(raw.tool, raw.args)
+        for name in raw.unrecordable:  # each bad value is refused on its own too
+            with pytest.raises(ValueError):
+                Call(raw.tool, {name: raw.args[name]})
+        rest = {k: v for k, v in raw.args.items() if k not in raw.unrecordable}
+        assert Call(raw.tool, rest).tool == raw.tool
+    else:
+        call = Call(raw.tool, raw.args)
+        assert set(call.args) == set(raw.args)
+
+
 # ---------------------------------------------------------------------------
 # Mutation testing
 # ---------------------------------------------------------------------------
@@ -142,6 +161,7 @@ MUTANTS: dict[str, tuple[str, str]] = {
     "glob_heads_only": ("grant", "prefix rule ignores what follows the parent's first star"),
     "in_any_common": ("grant", "finite child accepted if ANY of its values satisfies the parent"),
     "star_free_glob_unchecked": ("grant", "star-free child glob accepted under every parent"),
+    "any_glob_as_literal": ("grant", "every child glob, starred or not, checked as one literal"),
     "child_any_accepted": ("grant", "child `any` accepted under every parent constraint"),
     "quantifiers_swapped": ("grant", "every child constraint under some parent constraint"),
     "tool_unchecked": ("grant", "parent capability for a different tool may cover"),
@@ -178,6 +198,8 @@ def make_checker(mutation: str | None = None) -> Checker:
         if mutation == "child_any_accepted" and child.op == "any":
             return True
         values = child.finite_values()
+        if mutation == "any_glob_as_literal" and child.op == "glob":
+            values = (child.value,)
         if values is not None:
             if mutation == "star_free_glob_unchecked" and child.op == "glob":
                 return True

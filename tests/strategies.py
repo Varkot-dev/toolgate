@@ -46,10 +46,30 @@ _all_patterns = _words(TEXT_ALPHABET + "*", 3)
 _prefix_patterns = tuple(p for p in _all_patterns if p.endswith("*") and "*" not in p[:-1])
 PATTERNS = _all_patterns + _prefix_patterns * 4
 NUMBERS: tuple[int | float, ...] = (0, 1, 2, 3, 4, 5, 6, -1, -2, -3, 0.5, 2.0, 2.5, 3.0, -1.5)
-SCALARS: tuple[Any, ...] = TEXTS + NUMBERS * 2 + (False, True) * 3
-# Values a call may carry that no constraint can be built from. They must be denied
-# (or accepted only by `any`), and the checker must stay sound in their presence.
-ODD_VALUES: tuple[Any, ...] = (None, float("nan"), float("inf"), [1], {"x": 1}, 10**9, "*")
+# Strings with a "*" used as plain VALUES (eq, in, call arguments), where the
+# star is an ordinary character. Without them a checker that confuses the
+# string "a*" with the pattern "a*" is never caught.
+STAR_TEXTS: tuple[str, ...] = ("*", "a*", "*a", "a*b", "/*", "**")
+SCALARS: tuple[Any, ...] = TEXTS + STAR_TEXTS * 2 + NUMBERS * 2 + (False, True) * 3
+# Values a call may carry that are unusual for a constraint: non-scalars, a big
+# number, a bare star. They must be denied unless a constraint really accepts
+# them, and the checker must stay sound in their presence.
+ODD_VALUES: tuple[Any, ...] = (None, [1], {"x": 1}, 10**9, "*")
+# Raw values that Call refuses to carry, because the audit log could not record
+# them. They used to be in ODD_VALUES; raw_calls() still generates them and
+# test_properties.py asserts that Call construction refuses each one.
+UNRECORDABLE_VALUES: tuple[Any, ...] = (
+    float("nan"),
+    float("inf"),
+    float("-inf"),
+    "\ud800",
+    "a\udfff",
+    2**4096,
+    -(2**4096),
+    [float("nan")],
+    {"x": "\udc00"},
+    {"x": [1, {"y": float("inf")}]},
+)
 EXPIRIES: tuple[int | float, ...] = (1, 2, 3, 4, 5, 6, 2.5, 100)
 
 _OPS = ("eq", "in", "in", "max", "max", "glob", "glob", "any")
@@ -190,6 +210,13 @@ def _looser(draw: Draw, c: Constraint) -> Constraint:
         return Constraint(arg, "any")
     if kind == 1 or c.op == "any":
         return _constraint(draw, arg)
+    if kind in (2, 3) and c.op in ("eq", "in"):
+        # read an allowed string as a pattern: eq "a*" becomes glob "a*". Safe
+        # when the string has no star, an escalation when it has one.
+        texts = [v for v in c.finite_values() if type(v) is str]
+        starred = [v for v in texts if "*" in v]
+        if texts:
+            return Constraint(arg, "glob", _pick(draw, starred or texts))
     if c.op == "eq":
         return Constraint(arg, "in", (c.value, _pick(draw, SCALARS)))
     if c.op == "in":
@@ -341,6 +368,30 @@ def _call_for(draw: Draw, grant: Grant, focus: int | None = None) -> Call:
 def random_calls(draw: Draw) -> Call:
     """A call unrelated to any grant."""
     return _random_call(draw)
+
+
+class RawCall(NamedTuple):
+    tool: str
+    args: dict[str, Any]
+    unrecordable: tuple[str, ...]  # the arguments holding a value Call must refuse
+
+
+@st.composite
+def raw_calls(draw: Draw) -> RawCall:
+    """A tool name and an argument dict, NOT yet a Call, with the full value pool.
+
+    About one value in four comes from UNRECORDABLE_VALUES, so roughly half the
+    results cannot be made into a Call. `unrecordable` names the arguments at fault.
+    """
+    args: dict[str, Any] = {}
+    bad = []
+    for name in _pick(draw, _ARG_SETS):
+        if _chance(draw, 4):
+            args[name] = _pick(draw, UNRECORDABLE_VALUES)
+            bad.append(name)
+        else:
+            args[name] = _call_value(draw)
+    return RawCall(_pick(draw, TOOLS), args, tuple(bad))
 
 
 @st.composite

@@ -66,9 +66,18 @@ def show_scenario(s: Scenario) -> dict[str, Any]:
 
 
 def rule_fired(parent_op: str, child_op: str, parent_value: Any, child_value: Any) -> str:
-    """Name the attenuation-table row that accepted this constraint pair."""
-    if parent_op == "glob" and child_op == "glob":
-        child_op = "glob (identical)" if parent_value == child_value else "glob (longer prefix)"
+    """Name the attenuation-table row that accepted this constraint pair.
+
+    The order follows at_least_as_strict: a parent `any` accepts before the
+    child is looked at, then a star-free child glob is checked as the single
+    string it accepts (like eq), and only a starred child reaches the two
+    glob-under-glob rules.
+    """
+    if child_op == "glob" and parent_op != "any":
+        if "*" not in child_value:
+            child_op = "glob literal (star-free child)"
+        elif parent_op == "glob":
+            child_op = "glob (identical)" if parent_value == child_value else "glob (longer prefix)"
     return f"parent {parent_op} / child {child_op}"
 
 

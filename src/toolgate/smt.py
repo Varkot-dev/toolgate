@@ -275,7 +275,10 @@ def find_grant_escalation(parent: Grant, child: Grant) -> Call | None:
                 for a in names
                 if z3.is_true(m.eval(present[a], model_completion=True))
             }
-            call = Call(tool, args)
+            try:
+                call = Call(tool, args)
+            except ValueError as e:
+                raise Inconclusive(f"witness is not a constructible call: {e}") from e
             now = min(parent.expires_at, child.expires_at) - 1
             if not child.allows(call, now) or parent.allows(call, now):
                 raise Inconclusive(f"witness {call!r} does not replay in Python")

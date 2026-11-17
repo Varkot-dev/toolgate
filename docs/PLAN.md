@@ -158,7 +158,7 @@ Be precise about the claim: the solver proves the rules as modeled. The Python i
 | M1b | Offline attenuation (section 3.8): HMAC chain first, then the Ed25519 chain | Tests show a holder can add a restriction offline, cannot remove one, and a modified chain fails verification |
 | M2 | Policy engine and hash-chained audit log with `verify` | Editing any log line is detected at the correct index |
 | M3 (done 2026-11-17) | Gateway service (FastAPI): `/token`, `/token/exchange`, `/call`, `/approvals`, `/audit/verify` | An end-to-end test drives a scripted client through allow, deny and approve |
-| M4 | MCP proxy mode in front of a simple real MCP server, following the current spec | An MCP client connected through the gateway sees and can call only permitted tools |
+| M4 (done 2026-11-17) | MCP proxy mode in front of a simple real MCP server, following the current spec | An MCP client connected through the gateway sees and can call only permitted tools |
 | M4b | Provenance (section 3.7): session labels, then value labels with handles, then plan-then-execute mode | Tests show labels propagate correctly through derived values; label creep is measured on the sandbox tasks |
 | M5 | Agent demo: a Gemini or local model with email, calendar and file tools in a sandbox, run with and without the gateway | A results table produced by a script comparing four configurations (no gateway, argument constraints only, plus session labels, plus value labels): unintended tool calls, normal tasks still completed, and approvals requested |
 | M6 | Measurement and polish: added latency per call (p50, p99), throughput, README, demo recording | README complete, repo ready to make public |
@@ -274,3 +274,11 @@ Checked against upstream sources. The session's network could not reach modelcon
 
 1. **Model limit mid-run.** Two engineers stopped partway when the original model's usage limit was reached. Their work was in the tree; fresh engineers on another model audited it against the original brief and finished it. No work was redone from scratch.
 2. **CI went red twice** when commits from concurrently edited files were pushed in an order where one depended on another not yet pushed. Rule since then: run the full suite before every push and push related commits together.
+
+### 2026-11-17, M4 (MCP proxy)
+
+1. **Built against the current spec and SDK, not the plan's assumptions.** MCP 2026-07-28 is stateless (no `initialize`, no session id) and the Python SDK 2.x renamed and restructured its API (`MCPServer`, low-level `Server(on_list_tools=..., on_call_tool=...)`, types in `mcp-types`, `httpx2`). The proxy is a low-level server whose handlers call `Gateway.handle_call`, so the decision rules live in one place for HTTP and MCP alike.
+2. **Visibility rule.** A tool appears in `tools/list` only if the grant names it exactly and policy does not deny every call to it; a tool the grant does not name is never shown. Lists are marked `cacheScope: private`, which the spec permits when a list varies by the authorization presented. A call to a tool the caller cannot see gets the same "Unknown tool" error as a tool that does not exist, so its existence is not revealed.
+3. **No token passthrough.** The caller's token is checked by the proxy and never sent upstream, as the spec requires; a test records every upstream header and asserts the token never appears.
+4. **Deny by default for everything that is not tools.** Resources, prompts, sampling, subscriptions and the legacy `initialize` handshake are refused, because the gateway has no rules for them yet.
+5. **Found while finishing: the SDK client retries on its own.** When the upstream answers "input required" or reports a header mismatch, the SDK client re-sends the call. One allow decision and one budget charge produced 11 upstream calls. The proxy now forwards through the raw session, so one decision is at most one upstream call. Lesson: an authorization layer must control retries below it, or one approval silently becomes many actions.

@@ -158,8 +158,9 @@ class Env:
             self.queue,
             self.tools,
             clock=self.clock,
-            # Explicit, not the default (False): several tests here and in
-            # test_approvals.py check the exception text a tool raised.
+            # Explicit, not the default (False): two tests check the exception
+            # text a tool raised (test_tool_exception_is_an_error_with_a_bounded_message
+            # here and test_tool_error_during_an_approved_call in test_approvals.py).
             tool_error_detail=True,
         )
 
@@ -1373,3 +1374,67 @@ def test_tool_exception_text_can_be_withheld_from_the_caller(env: Env) -> None:
         assert secret not in outcome.reason
         assert secret not in env.audit_path.read_text()
     assert [e["decision"] for e in env.entries()] == ["allow"]
+
+
+# --------------------------------------------- 14. one signature check per decision
+
+
+def count_signatures(env: Env, monkeypatch: pytest.MonkeyPatch) -> list[str]:
+    """Turn the verify cache off and record every signature check."""
+    monkeypatch.setattr(env.authority, "verify_cache_size", 0)
+    env.authority._cache.clear()
+    checks: list[str] = []
+    real = env.authority._check_signature
+    monkeypatch.setattr(env.authority, "_check_signature", lambda t: checks.append(t) or real(t))
+    return checks
+
+
+def test_an_allowed_call_checks_the_signature_once(
+    env: Env, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    token = env.mint()
+    checks = count_signatures(env, monkeypatch)
+    outcome = env.gateway.handle_call(token, "read_file", {"path": "reports/x"})
+    assert outcome.status == "allowed"
+    assert checks == [token]
+
+
+def test_an_approved_call_checks_the_signature_once_more(
+    env: Env, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    token = env.mint()
+    checks = count_signatures(env, monkeypatch)
+    parked = env.gateway.handle_call(token, "send_email", {"to": "x@else.test", "body": "hi"})
+    assert parked.status == "pending" and checks == [token]
+    outcome = env.gateway.resolve_approval(parked.approval_id, "approve", "alice")
+    assert outcome.status == "allowed"
+    assert checks == [token, token]  # one for the call, one for the approval
+
+
+def test_a_call_with_provenance_checks_the_signature_once(
+    env: Env, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from toolgate.provenance import Label, Provenance
+
+    provenance = Provenance(lambda *a: Label(frozenset({"user"})), handles=None)
+    env.rebuild(provenance=provenance)
+    token = env.mint()
+    checks = count_signatures(env, monkeypatch)
+    outcome = env.gateway.handle_call(token, "read_file", {"path": "reports/x"})
+    assert outcome.status == "allowed"
+    assert checks == [token]
+
+
+def test_revocation_with_a_warm_verify_cache_stops_the_very_next_call(env: Env) -> None:
+    parent = env.mint()
+    child = env.child(parent, [CAPS[READ]])
+    assert env.gateway.handle_call(child, "read_file", {"path": "reports/x"}).status == "allowed"
+    env.authority.revoke(env.jti(parent))
+    outcome = env.gateway.handle_call(child, "read_file", {"path": "reports/y"})
+    assert (outcome.status, outcome.stage, outcome.reason) == ("denied", "token", "revoked")
+    assert len(env.spies["read_file"].calls) == 1
+
+
+def test_tool_error_detail_defaults_to_withheld(env: Env) -> None:
+    gateway = Gateway(env.authority, env.gateway.policy, env.audit, env.queue, {})
+    assert gateway.tool_error_detail is False

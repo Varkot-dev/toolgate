@@ -494,9 +494,14 @@ class Gateway:
         key: str | None = None
         labels: Any = None
         used: Any = None
+        # With a provenance layer the token is verified here, to find whose
+        # values to resolve. Step b then rechecks this record instead of
+        # verifying the string a second time.
+        early: Verified | None = None
         if self.provenance is not None:
             try:
-                key = self.authority.verify(token).jti
+                early = self.authority.verify(token)
+                key = early.jti
             except Exception:
                 key = None  # step b refuses it; nothing is resolved for it
             if key is not None:
@@ -557,7 +562,9 @@ class Gateway:
             if key is None:
                 return self._decide(token, call)
             context = self.provenance.context(key, labels)
-            outcome = self._decide(token, call, context=context, labels=(key, labels, used))
+            outcome = self._decide(
+                token, call, context=context, labels=(key, labels, used), verified=early
+            )
             return self._provenance_record(key, call, outcome, labels, used)
         except Exception:
             # Nothing below is expected to raise. If something does, it is
@@ -748,11 +755,15 @@ class Gateway:
         approval: Approval | None = None,
         context: PolicyContext | None = None,
         labels: tuple[str, Any, Any] | None = None,
+        verified: Verified | None = None,
     ) -> CallOutcome:
         """Steps b to e for a fresh call, or for a stored call being approved.
 
         `context` is the provenance context for policy (None without a
         provenance layer); `labels` is kept with the call if it is parked.
+        `verified` is the record `authority.verify(token)` returned earlier in
+        this same request, if any: step b then rechecks it (fresh clock,
+        revocation) instead of verifying the string again.
         """
         tool, args = call.tool, call.args
         approver = None if approval is None else approval.approver
@@ -786,10 +797,14 @@ class Gateway:
                 code=code,
             )
 
-        # b. Verify and ask the grant. Nothing is charged here.
+        # b. Verify and ask the grant. Nothing is charged here. This is the
+        # one signature check of the decision; d and e recheck the record.
         try:
             now = self._clock()
-            verified = self.authority.verify(token)
+            if verified is None:
+                verified = self.authority.verify(token)
+            else:
+                self.authority.recheck(verified)
         except TokenError as exc:
             if exc.code == "unavailable":
                 return deny("unavailable", "token state is unavailable")
@@ -872,7 +887,7 @@ class Gateway:
                 stage = "budget" if code.startswith("budget") else "grant"
                 return deny(stage, refused.reason, log=code, code=code)
 
-            # e. Audit, verify once more, then run. No entry, no execution.
+            # e. Audit, recheck once more, then run. No entry, no execution.
             # From here until the tool starts, every refusal gives the charge
             # back: an audit outage must not drain budgets while nothing runs.
             decision = "allow" if approval is None else "approved"

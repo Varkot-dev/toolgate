@@ -1852,3 +1852,300 @@ def test_a_request_at_the_size_limits_is_still_checked():
     root = authority.mint("u", Grant((Capability.from_dict(wide),), T0 + 300), "a0", ttl=300)
     child = authority.exchange(root, [wide], "a1", ttl=60)
     assert len(authority.verify(child).grant.capabilities[0].constraints) == 64
+
+
+# ---------------------------------------------------------------------------
+# recheck: verify once, then check only what can change
+# ---------------------------------------------------------------------------
+
+
+class RecordingStore(MemoryStore):
+    """Remembers which store methods were called, in order."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.log: list[str] = []
+        self.fail: set[str] = set()
+
+    def __getattribute__(self, name: str) -> Any:
+        attr = super().__getattribute__(name)
+        if name in ("any_revoked", "is_registered", "charge", "refund", "revoke"):
+            self.log.append(name)
+            if name in self.fail:
+                raise RuntimeError("store down")
+        return attr
+
+
+def test_recheck_passes_for_a_fresh_record_with_one_store_call():
+    store = RecordingStore()
+    authority, _ = make(store=store)
+    root = authority.mint("u", GRANT, "a0", ttl=300)
+    child = authority.exchange(root, [READ], "a1", ttl=60)
+    v = authority.verify(child)
+    store.log.clear()
+    assert authority.recheck(v) is None
+    assert store.log == ["any_revoked"]
+
+
+@pytest.mark.parametrize("level", [0, 1, 2])  # revoke the leaf, its parent or the root
+def test_recheck_sees_revocation_of_the_token_and_of_every_ancestor(level):
+    authority, _ = make()
+    root = authority.mint("u", GRANT, "a0", ttl=300)
+    mid = authority.exchange(root, [READ, SEND], "a1", ttl=200)
+    leaf = authority.exchange(mid, [READ], "a2", ttl=100)
+    v = authority.verify(leaf)
+    authority.recheck(v)
+    authority.revoke(claims_of((leaf, mid, root)[level])["jti"])
+    for check in (lambda: authority.recheck(v), lambda: authority.authorize(v, READ_CALL)):
+        with pytest.raises(TokenError) as info:
+            check()
+        assert info.value.code == "revoked"
+
+
+def test_recheck_reads_the_clock_afresh():
+    authority, clock = make()
+    v = authority.verify(authority.mint("u", GRANT, "a", ttl=60))
+    clock.now = T0 + 59
+    authority.recheck(v)
+    clock.now = T0 + 60
+    with pytest.raises(TokenError) as info:
+        authority.recheck(v)
+    assert info.value.code == "expired"
+    clock.now = T0 - 1
+    with pytest.raises(TokenError) as info:
+        authority.recheck(v)
+    assert info.value.code == "not_yet_valid"
+
+
+@pytest.mark.parametrize("now", [float("nan"), float("inf"), None, "now", True])
+def test_recheck_with_a_broken_clock_is_unavailable(now):
+    authority, clock = make()
+    v = authority.verify(authority.mint("u", GRANT, "a", ttl=60))
+    clock.now = now
+    for check in (lambda: authority.recheck(v), lambda: authority.authorize(v, READ_CALL)):
+        with pytest.raises(TokenError) as info:
+            check()
+        assert info.value.code == "unavailable"
+
+
+def test_recheck_with_a_store_outage_is_unavailable():
+    store = RecordingStore()
+    authority, _ = make(store=store)
+    v = authority.verify(authority.mint("u", GRANT, "a", ttl=60))
+    store.fail.add("any_revoked")
+    for check in (lambda: authority.recheck(v), lambda: authority.authorize(v, READ_CALL)):
+        with pytest.raises(TokenError) as info:
+            check()
+        assert info.value.code == "unavailable"
+
+
+def test_authorize_accepts_a_verified_record_and_does_not_check_the_signature_again(
+    monkeypatch,
+):
+    authority, _ = make(verify_cache_size=0)
+    token = authority.mint("u", Grant((cap("read", 2, path={"any": True}),), T0 + 300), "a", 300)
+    v = authority.verify(token)
+    checks = []
+    real = authority._check_signature
+    monkeypatch.setattr(authority, "_check_signature", lambda t: checks.append(t) or real(t))
+    first = authority.authorize(v, READ_CALL)
+    assert first and first.verified is v
+    assert authority.authorize(v, READ_CALL)
+    refused = authority.authorize(v, READ_CALL)
+    assert not refused and refused.decision.reason == "budget exhausted"
+    assert checks == []
+    # The refund follows the record's path like a string's.
+    assert authority.refund(first) is True
+    assert authority.authorize(v, READ_CALL)
+    # A string is still verified completely.
+    authority.authorize(token, READ_CALL)
+    assert checks == [token]
+
+
+def _forgeries(authority: Authority, token: str, v: Verified) -> list[Any]:
+    """Ways in-process code could try to pass something unsigned as verified."""
+    import dataclasses
+
+    wide = Grant((Capability("anything"), *v.grant.capabilities), v.grant.expires_at)
+    out: list[Any] = [
+        # Built by hand with the same fields.
+        Verified(v.jti, v.sub, v.actors, v.grant, v.chain, v.der, v.exp, v.iat),
+        # Copies.
+        dataclasses.replace(v),
+        dataclasses.replace(v, grant=wide),
+        dataclasses.replace(v, exp=v.exp + 10_000),
+        # Not a Verified at all.
+        "not a record",
+        None,
+    ]
+    for name, value in [
+        ("grant", wide),
+        ("exp", v.exp + 10_000),
+        ("jti", "someone-else"),
+        ("chain", ("an-ancestor",)),
+        ("der", ((0,),) * len(v.der)),
+        ("sub", "user:mallory"),
+        ("actors", ("agent:other",)),
+        ("iat", v.iat - 1),
+    ]:
+        mutated = authority.verify(token)
+        object.__setattr__(mutated, name, value)
+        out.append(mutated)
+    # Another Authority's record, for a token minted with the same key.
+    other, _ = make(store=authority.store)
+    out.append(other.verify(token))
+    return out
+
+
+def test_a_hand_built_copied_or_mutated_verified_record_is_refused():
+    authority, _ = make()
+    token = authority.mint("u", Grant((READ,), T0 + 300), "a", 300)
+    v = authority.verify(token)
+    for forged in _forgeries(authority, token, v):
+        for check in (
+            lambda f=forged: authority.recheck(f),
+            lambda f=forged: authority.authorize(f, Call("anything", {})),
+            lambda f=forged: authority.authorize(f, READ_CALL),
+        ):
+            with pytest.raises(TokenError) as info:
+                check()
+            assert info.value.code == "malformed", forged
+    # The genuine record is still accepted, and nothing was charged above.
+    assert authority.authorize(v, READ_CALL)
+
+
+def test_mutating_the_grant_inside_a_record_widens_nothing():
+    authority, _ = make()
+    token = authority.mint("u", Grant((READ,), T0 + 300), "a", 300)
+    v = authority.verify(token)
+    # The Grant object stays the same, its contents are bent.
+    object.__setattr__(v.grant, "capabilities", (Capability("delete"),))
+    object.__setattr__(v.grant.capabilities[0], "tool", "read")
+    assert not authority.authorize(v, Call("delete", {}))
+    assert not authority.authorize(v, Call("read", {"path": "secrets/key"}))
+    assert authority.authorize(v, READ_CALL)
+    # Records handed out later, and the decisions on fresh strings, are untouched.
+    assert authority.verify(token).grant == Grant((READ,), T0 + 300)
+    assert not authority.authorize(token, Call("delete", {}))
+
+
+def test_a_record_whose_object_is_gone_cannot_be_impersonated():
+    authority, _ = make()
+    token = authority.mint("u", GRANT, "a", ttl=60)
+    for _ in range(2000):  # enough to trigger the receipt sweep, and reuse ids
+        v = authority.verify(token)
+        fake = Verified(v.jti, v.sub, v.actors, v.grant, v.chain, v.der, v.exp, v.iat)
+        del v  # freed at once (reference counting), so its id can be reused
+        with pytest.raises(TokenError):
+            authority.recheck(fake)
+    assert len(authority._receipts) < 2000
+
+
+# ---------------------------------------------------------------------------
+# the verify cache: signatures only, never revocation or expiry
+# ---------------------------------------------------------------------------
+
+
+def _count_signatures(monkeypatch, authority: Authority) -> list[str]:
+    checks: list[str] = []
+    real = authority._check_signature
+    monkeypatch.setattr(authority, "_check_signature", lambda t: checks.append(t) or real(t))
+    return checks
+
+
+def test_the_verify_cache_skips_only_the_signature(monkeypatch):
+    store = RecordingStore()
+    authority, _ = make(store=store)
+    token = authority.mint("u", GRANT, "a", ttl=60)
+    checks = _count_signatures(monkeypatch, authority)
+    first, second = authority.verify(token), authority.verify(token)
+    assert checks == [token]
+    assert first == second and first is not second and first.grant is not second.grant
+    # The store is still asked every time.
+    assert store.log.count("any_revoked") == 2 and store.log.count("is_registered") == 2
+
+
+def test_a_revoked_token_is_refused_on_the_very_next_call_despite_the_cache():
+    authority, _ = make()
+    root = authority.mint("u", GRANT, "a0", ttl=300)
+    child = authority.exchange(root, [READ], "a1", ttl=60)
+    assert authority.authorize(child, READ_CALL)  # now cached
+    authority.revoke(claims_of(root)["jti"])
+    with pytest.raises(TokenError) as info:
+        authority.authorize(child, READ_CALL)
+    assert info.value.code == "revoked"
+    assert code_of(authority, child) == "revoked"
+
+
+def test_expiry_and_registration_are_not_cached():
+    authority, clock = make()
+    token = authority.mint("u", GRANT, "a", ttl=60)
+    authority.verify(token)
+    clock.now = T0 + 60
+    assert code_of(authority, token) == "expired"
+    clock.now = T0
+    authority.verify(token)  # the clock went back: valid again, as without a cache
+    authority.store.prune(T0 + 1000)
+    assert code_of(authority, token) == "unknown_token"
+
+
+def test_the_verify_cache_is_keyed_by_audience_issuer_and_depth(monkeypatch):
+    authority, _ = make()
+    root = authority.mint("u", GRANT, "a0", ttl=300)
+    child = authority.exchange(root, [READ], "a1", ttl=60)
+    authority.verify(child)
+    assert code_of(authority, child, audience="elsewhere") == "wrong_audience"
+    authority.max_depth = 0
+    assert code_of(authority, child) == "depth_exceeded"
+    authority.max_depth = 4
+    authority.issuer = "https://other.test"
+    assert code_of(authority, child) == "wrong_issuer"
+
+
+def test_the_verify_cache_is_bounded_and_can_be_turned_off(monkeypatch):
+    authority, _ = make(verify_cache_size=3)
+    tokens = [authority.mint("u", GRANT, f"a{n}", ttl=60) for n in range(5)]
+    for t in tokens:
+        authority.verify(t)
+    assert len(authority._cache) == 3
+    off, _ = make(verify_cache_size=0)
+    token = off.mint("u", GRANT, "a", ttl=60)
+    checks = _count_signatures(monkeypatch, off)
+    off.verify(token)
+    off.verify(token)
+    assert checks == [token, token] and len(off._cache) == 0
+    for bad in (-1, 1.5, True, None):
+        with pytest.raises(ValueError):
+            make(verify_cache_size=bad)
+
+
+def test_refusals_are_never_cached(monkeypatch):
+    authority, _ = make()
+    token = authority.mint("u", GRANT, "a", ttl=60)
+    head, payload, signature = token.split(".")
+    tampered = f"{head}.{payload}.{signature[:-2]}AA"
+    for _ in range(2):
+        assert code_of(authority, tampered) == "bad_signature"
+    assert len(authority._cache) == 0
+
+
+def test_refund_of_a_hand_built_authorization_changes_nothing():
+    import dataclasses
+
+    authority, _ = make()
+    token = authority.mint("u", Grant((budgeted(3),), T0 + 300), "a0", ttl=300)
+    charged = authority.authorize(token, READ_CALL)
+    assert charged and used(authority, token) == 1
+    v = charged.verified
+    forged = [
+        Authorization(charged.decision, dataclasses.replace(v)),
+        Authorization(
+            charged.decision,
+            Verified(v.jti, v.sub, v.actors, v.grant, v.chain, v.der, v.exp, v.iat),
+        ),
+    ]
+    for authorization in forged:
+        assert authority.refund(authorization) is False
+    assert used(authority, token) == 1
+    assert authority.refund(charged) is True
+    assert used(authority, token) == 0

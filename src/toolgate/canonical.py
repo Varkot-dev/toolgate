@@ -25,17 +25,54 @@ Configuration. The operator names, per tool, the kind of each argument:
 Kinds:
 
     path        posixpath.normpath, then refused if it is empty, ".", starts
-                with ".." or "/", contains NUL, a backslash or a control
-                character, or has a segment made only of dots ("...")
+                with ".." or "/", ends with "/", contains NUL, a backslash or
+                a control character, or has a segment made only of dots
+                ("...")
     email       exactly one address local@domain; the domain is lowercased;
                 refused if it holds whitespace, a comma, semicolon, angle
                 bracket, quote, a second "@", a control character or any
-                non-ASCII character
+                non-ASCII character, or a wildcard or routing character in
+                the local part ("*", "?", "%", "!")
     email_list  a list of `email` values (each canonicalized the same way)
-    url         http or https only; scheme and host lowercased; refused if it
+    url         http or https only; scheme and host lowercased; a default
+                port (":80" for http, ":443" for https) removed; refused if it
                 has user info ("a@b" before the host), a non-ASCII or empty
-                host, whitespace, control characters, a backslash, or "." or
-                ".." path segments (encoded or not)
+                host, a host that is neither a strict dotted-quad IPv4
+                address nor a DNS name of two or more labels ending in a
+                letter label, a trailing dot on the host, a port not written
+                as plain decimal, whitespace, control characters, a
+                backslash, "." or ".." path segments (encoded or not), or a
+                path that still holds a percent escape after one decoding
+
+Why these refusals (each is a string two programs can read differently):
+
+  * Paths. A trailing slash means "this must be a directory" to POSIX, so
+    "notes/todo.txt/" fails on a real file system while "notes/todo.txt"
+    succeeds; dropping the slash would be a repair, so it is refused.
+    Resolution is LEXICAL: normpath cannot see symlinks, so "a/link/../b" is
+    "a/b" here even if "a/link" points elsewhere and the kernel would resolve
+    ".." from the link's target. The canonical form is only what runs if the
+    tool does not follow symlinks (open with O_NOFOLLOW on every component,
+    or resolve the real path and check it against the canonical one before
+    acting). The sandbox's file tool is an in-memory dict with no links.
+  * Addresses. "*@northwind.example" is how provenance writes the whole
+    domain as a reader (toolgate.provenance), so a recipient spelled that way
+    would pass `readers_include` for any data the organization may read; "?"
+    is a wildcard in other matchers. "%" and "!" are old source-routing
+    syntax ("bob%evil.example@relay.example"): some relays forward on them,
+    so the domain checked is not the one that receives the mail.
+  * Hosts. "2130706433", "0x7f000001", "0177.0.0.1" and "127.1" are all
+    127.0.0.1 to inet_aton and to browsers, and plain names to a glob; a
+    name with one label ("intranet") depends on the resolver's search list;
+    "vendor.example." is the same DNS name as "vendor.example" but a
+    different Host header and a different string for a policy glob. Only the
+    strict dotted quad and ordinary DNS names have one reading.
+  * Ports. ":443" on https means the same as no port, so it is removed (an
+    unambiguous normalization); ":0443", ":" and ":0" are refused.
+  * Percent escapes. The path is decoded once to look for dot segments. A
+    server that decodes twice sees "%252e%252e" as "..", so a path that
+    still holds an escape after one decoding is refused, as is an encoded
+    backslash ("%5c"), which some servers treat as "/".
 
 Every tool name is NFC-normalized and refused unless it is 1 to 128
 characters from [A-Za-z0-9_.:/-]; that is the gateway's own rule for
@@ -73,11 +110,18 @@ CODES: frozenset[str] = frozenset(
 )
 
 _TOOL = re.compile(r"[A-Za-z0-9_.:/-]{1,128}")
-_LOCAL = re.compile(r"[A-Za-z0-9.!#$%&'*+/=?^_`{|}~-]{1,64}")
+# RFC 5322 atext minus "*", "?" (wildcards), "%" and "!" (source routing).
+_LOCAL = re.compile(r"[A-Za-z0-9.#$&'+/=^_`{|}~-]{1,64}")
 _DOMAIN = re.compile(
     r"(?=.{1,253}$)([A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\.)+[A-Za-z]{2,63}"
 )
 _HOST = re.compile(r"[a-z0-9.-]{1,253}")
+_LABEL = re.compile(r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?")
+_TLD = re.compile(r"[a-z]{2,63}|xn--[a-z0-9-]{1,59}")
+_OCTET = re.compile(r"0|[1-9][0-9]{0,2}")
+_PORT = re.compile(r"[1-9][0-9]{0,4}")
+_ESCAPE = re.compile(r"%[0-9A-Fa-f]{2}")
+_DEFAULT_PORT = {"http": 80, "https": 443}
 
 
 class CanonicalError(ValueError):
@@ -110,6 +154,8 @@ def canonical_path(value: Any, arg: str = "path") -> str:
         raise CanonicalError("not_a_string", arg)
     if not value or "\x00" in value or "\\" in value or _control(value):
         raise CanonicalError("bad_path", arg)
+    if value.endswith("/"):
+        raise CanonicalError("bad_path", arg)  # "x/" means "x is a directory"; not a repair
     clean = posixpath.normpath(value)
     if clean in (".", "..") or clean.startswith(("/", "../")):
         raise CanonicalError("path_escapes_root", arg)
@@ -133,6 +179,18 @@ def canonical_email(value: Any, arg: str = "to") -> str:
     return f"{local}@{domain.lower()}"
 
 
+def _host_ok(host: str) -> bool:
+    """A strict dotted-quad IPv4 address, or a DNS name with a letter top label."""
+    labels = host.split(".")
+    if len(labels) == 4 and all(_OCTET.fullmatch(x) for x in labels):
+        return all(int(x) <= 255 for x in labels)
+    return (
+        len(labels) >= 2
+        and all(_LABEL.fullmatch(x) for x in labels)
+        and _TLD.fullmatch(labels[-1]) is not None
+    )
+
+
 def canonical_url(value: Any, arg: str = "url") -> str:
     """http(s) URLs with a plain ASCII host and no credentials or dot segments."""
     if type(value) is not str:
@@ -148,11 +206,17 @@ def canonical_url(value: Any, arg: str = "url") -> str:
     if scheme not in ("http", "https") or "@" in parts.netloc:
         raise CanonicalError("bad_url", arg)
     host = (parts.hostname or "").lower()
-    if not host or not _HOST.fullmatch(host) or "%" in parts.netloc:
+    if not host or not _HOST.fullmatch(host) or "%" in parts.netloc or not _host_ok(host):
         raise CanonicalError("bad_url", arg)
-    segments = unquote(parts.path).split("/")
-    if any(s in (".", "..") for s in segments):
+    if ":" in parts.netloc and not _PORT.fullmatch(parts.netloc.rsplit(":", 1)[1]):
+        raise CanonicalError("bad_url", arg)  # ":", ":0", ":0443": not one plain spelling
+    decoded = unquote(parts.path)
+    if _ESCAPE.search(decoded) or "\\" in decoded or _control(decoded):
         raise CanonicalError("bad_url", arg)
+    if any(s in (".", "..") for s in decoded.split("/")):
+        raise CanonicalError("bad_url", arg)
+    if port == _DEFAULT_PORT[scheme]:
+        port = None
     netloc = host if port is None else f"{host}:{port}"
     return urlunsplit((scheme, netloc, parts.path, parts.query, parts.fragment))
 

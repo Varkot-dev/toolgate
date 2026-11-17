@@ -299,3 +299,148 @@ def test_args_04_is_stopped_by_the_grant_once_arguments_are_canonical():
         assert run.stopped_by == GRANT_ARGS == task.expected, key
         assert not run.attack_succeeded
         assert not any(run.world.canary["api_key"] in e.get("body", "") for e in run.world.effects)
+
+
+# -- lead L3 to L5: spellings two programs read differently -----------------------
+
+
+@pytest.mark.parametrize(
+    "raw",
+    [
+        "http://2130706433/",  # 127.0.0.1 as one decimal number
+        "http://0x7f000001/",  # ... as hex
+        "http://0x7f.0.0.1/",
+        "http://0177.0.0.1/",  # ... with an octal part
+        "http://127.1/",  # ... shortened
+        "http://127.0.0.01/",
+        "http://256.0.0.1/",
+        "http://1.2.3.4.5/",
+        "http://vendor.0x1/",  # a numeric top label is parsed as IPv4 by browsers
+        "http://vendor.123/",
+        "http://localhost/",  # one label: depends on the resolver's search list
+        "http://intranet/x",
+        "https://vendor.example./x",  # trailing dot: same name, another Host and string
+        "https://vendor.example../x",
+        "https://-vendor.example/",
+        "https://vendor-.example/",
+        "https://vendor..example/",
+    ],
+)
+def test_numeric_dotted_and_single_label_hosts_are_refused(raw):
+    with pytest.raises(CanonicalError) as info:
+        canonical_url(raw)
+    assert info.value.code == "bad_url"
+
+
+@pytest.mark.parametrize(
+    ("raw", "clean"),
+    [
+        ("https://vendor.example:443/x", "https://vendor.example/x"),
+        ("http://vendor.example:80/", "http://vendor.example/"),
+        ("HTTP://Vendor.Example:80/a?b=1", "http://vendor.example/a?b=1"),
+        ("https://vendor.example:80/", "https://vendor.example:80/"),  # not https's default
+        ("http://vendor.example:443/", "http://vendor.example:443/"),
+        ("http://127.0.0.1:8080/x", "http://127.0.0.1:8080/x"),  # the strict dotted quad
+        ("https://shop.xn--p1ai/", "https://shop.xn--p1ai/"),  # an ASCII (punycode) top label
+    ],
+)
+def test_a_default_port_is_removed_and_nothing_else_changes(raw, clean):
+    assert canonical_url(raw) == clean
+    assert canonical_url(clean) == clean
+
+
+@pytest.mark.parametrize(
+    "raw",
+    [
+        "https://vendor.example:0443/",  # leading zero
+        "https://vendor.example:/",  # empty port
+        "https://vendor.example:0/",
+        "https://vendor.example:65536/",
+    ],
+)
+def test_ports_not_written_as_plain_decimal_are_refused(raw):
+    with pytest.raises(CanonicalError):
+        canonical_url(raw)
+
+
+@pytest.mark.parametrize(
+    "raw",
+    [
+        "https://vendor.example/%252e%252e/secret",  # ".." to a server that decodes twice
+        "https://vendor.example/a/%252E%252E/b",
+        "https://vendor.example/%25%32%65%25%32%65/x",  # "%2e%2e" after one decoding
+        "https://vendor.example/a%5c..%5cb",  # an encoded backslash
+        "https://vendor.example/a%00b",
+    ],
+)
+def test_escapes_that_survive_one_decoding_are_refused(raw):
+    with pytest.raises(CanonicalError):
+        canonical_url(raw)
+
+
+def test_a_literal_percent_sign_is_still_allowed():
+    assert canonical_url("https://vendor.example/100%25off") == "https://vendor.example/100%25off"
+
+
+@settings(max_examples=500, deadline=None)
+@given(
+    st.text(alphabet="0123456789abcdefx.-", min_size=1, max_size=16),
+    st.sampled_from(["", ":80", ":443", ":8080", ":0443", ":"]),
+)
+def test_an_accepted_url_has_one_reading_and_is_a_fixed_point(host, port):
+    try:
+        clean = canonical_url(f"https://{host}{port}/p")
+    except CanonicalError:
+        return
+    netloc = clean.split("/")[2]
+    name = netloc.split(":")[0]
+    labels = name.split(".")
+    is_quad = len(labels) == 4 and all(x.isdigit() for x in labels)
+    if is_quad:
+        assert all(x == str(int(x)) and int(x) <= 255 for x in labels)
+    else:
+        assert len(labels) >= 2 and labels[-1].isalpha() and not name.endswith(".")
+    assert ":443" not in netloc
+    assert canonical_url(clean) == clean
+
+
+@pytest.mark.parametrize(
+    "raw",
+    [
+        "*@northwind.example",  # the whole-domain reader principal of provenance
+        "a*@northwind.example",
+        "?@northwind.example",
+        "bob%evil.example@northwind.example",  # source routing through a relay
+        "evil.example!bob@northwind.example",
+    ],
+)
+def test_wildcard_and_routing_characters_are_refused_in_addresses(raw):
+    with pytest.raises(CanonicalError) as info:
+        canonical_email(raw)
+    assert info.value.code == "bad_email"
+
+
+def test_a_wildcard_recipient_cannot_reach_a_canonicalized_tool():
+    canon = Canonicalizer(
+        {"send_email": {"to": "email"}, "create_event": {"attendees": "email_list"}}
+    )
+    with pytest.raises(CanonicalError):
+        canon("send_email", {"to": "*@northwind.example"})
+    with pytest.raises(CanonicalError):
+        canon("create_event", {"attendees": ["bob@northwind.example", "*@northwind.example"]})
+    assert canonical_email("o'brien+tag@northwind.example") == "o'brien+tag@northwind.example"
+
+
+@pytest.mark.parametrize("raw", ["reports/", "notes/todo.txt/", "a//", "reports/./"])
+def test_a_trailing_slash_is_refused_not_dropped(raw):
+    with pytest.raises(CanonicalError) as info:
+        canonical_path(raw)
+    assert info.value.code == "bad_path"
+
+
+def test_path_resolution_is_lexical_and_says_so():
+    """normpath cannot see links: the documented limit, pinned so it cannot drift silently."""
+    assert canonical_path("a/link/../b") == "a/b"
+    import toolgate.canonical as module
+
+    assert "symlink" in (module.__doc__ or "")

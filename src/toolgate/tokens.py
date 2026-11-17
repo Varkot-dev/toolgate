@@ -655,8 +655,10 @@ class Authority:
     def refund(self, authorization: Authorization) -> bool:
         """Give back the budget `authorize` charged, for a call that never ran.
 
-        Only an allowed Authorization was charged; anything else returns False
-        and changes nothing. Counters never go below zero. Raises TokenError
+        Only an allowed Authorization this Authority returned was charged;
+        anything else (a denied one, one built by hand or carrying a record
+        that is not a genuine receipt, see Verified) returns False and changes
+        nothing. Counters never go below zero. Raises TokenError
         "unavailable" if the store could not record the refund, in which case
         the budget simply stays spent (which fails closed). The caller must
         never refund a call whose tool started to run.
@@ -666,12 +668,14 @@ class Authority:
         decision, verified = authorization.decision, authorization.verified
         if not decision.allowed or type(decision.capability) is not int:
             return False
-        # For a record verify returned, the path comes from the private copy,
-        # whatever was done to the record since.
-        with self._lock:
-            receipt = self._receipts.get(id(verified))
-        if receipt is not None and receipt[0]() is verified:
-            verified = receipt[1]
+        # The path comes from this Authority's private copy of the record.
+        # An Authorization built by hand, or holding a record that was built,
+        # copied or altered, is refused like a denied one: refunding a path
+        # nobody was charged on would hand out budget.
+        try:
+            verified = self._own(verified)
+        except TokenError:
+            return False
         if not 0 <= decision.capability < len(verified.der):
             return False
         return bool(self._ask_store("refund", verified.budget_path(decision.capability)))

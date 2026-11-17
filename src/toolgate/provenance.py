@@ -66,13 +66,45 @@ The wire form of an argument (`resolve_args`):
                                            per result, not per field
     {"$concat": [part, ...]}               the parts joined as one string;
                                            non-strings are written as JSON
-                                           with sorted keys; label = join
+                                           with sorted keys; label = join of
+                                           the parts, plus the literal label
+                                           unless there is exactly one part
     {"$urlencode": part}                   the part percent-encoded for a
                                            URL (nothing is safe); label kept
     a list or an object                    resolved element by element;
                                            label = join of the elements and,
-                                           for a non-empty object or an
-                                           empty container, the literal label
+                                           for an object or a list that does
+                                           not hold exactly one element, the
+                                           literal label
+
+The rule behind these labels: every BYTE of the resolved value either comes
+from a stored value, and carries that value's label, or was placed there by
+whoever wrote the expression, and carries the literal label. The writer
+places bytes with literals, with object keys, and with ARRANGEMENT: the order
+and number of the parts of a list or a "$concat". Arrangement counts because
+it is enough to write new text: a "$concat" of references only, each picking
+one short field, can spell an address or a URL that no stored value holds.
+So an expression of two or more parts carries the literal label even when
+every part is a reference. One part arranges nothing ("$concat" of one
+string, a one-element list, "$urlencode" are fixed functions of their part),
+so those keep the part's label.
+
+What the label does NOT cover is SELECTION: which handle, and which field of
+it (`path`), the writer picked. Both are choices among values the store
+already labels, so no attacker-written byte reaches the tool through them,
+but an injection can steer them ("send it to the second contact"). They are
+deliberately not joined, for two reasons. Selection is control, not data:
+it leaks at most which of the offered values was chosen, the same kind of
+implicit flow the section below says labels do not track. And joining it
+for `path` alone would be inconsistent, not safer: the same choice is
+available by picking a different handle, or by calling a lookup tool with a
+steered query (its result is labeled by the tool, not by the query). Joining
+every choice made after an untrusted read makes every argument carry the
+session's `seen` label, which is level 1 (session labels) again. The
+defence against steered selection is plan-then-execute (toolgate.plan),
+where the planner picks handles and fields before any untrusted text is
+read; in agent mode a steered choice can only pick a value whose own label
+the policy still checks (its sources, and who may read it).
 
 Any other object key starting with "$" is refused. The gateway decides on,
 and the tool receives, the RESOLVED value. Each top-level argument's label is
@@ -416,7 +448,8 @@ class Provenance:
                 parts = node["$concat"]
                 if type(parts) is not list:
                     raise ProvenanceError("bad_reference")
-                texts, label = [], BOTTOM if parts else literal
+                # One part arranges nothing; none, or two or more, is the writer's text.
+                texts, label = [], BOTTOM if len(parts) == 1 else literal
                 for part in parts:
                     value, part_label = self._resolve(s, part, refs, depth + 1)
                     texts.append(_text(value))
@@ -427,7 +460,7 @@ class Provenance:
                 return quote(_text(value), safe=""), label
             raise ProvenanceError("bad_reference")
         if type(node) is list:
-            out_list, label = [], literal if not node else BOTTOM
+            out_list, label = [], BOTTOM if len(node) == 1 else literal
             for item in node:
                 value, part = self._resolve(s, item, refs, depth + 1)
                 out_list.append(value)

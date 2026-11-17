@@ -147,11 +147,32 @@ class Call:
         object.__setattr__(self, "args", _plain(dict(self.args)))
 
 
+# Machine-readable codes a Decision made in this module can carry. `reason` is
+# for people and may quote the caller's own tool and argument names; `code` is
+# one of these fixed words and is the only part fit for a log.
+DECISION_CODES: frozenset[str] = frozenset(
+    {
+        "ok",
+        "not_a_call",
+        "wrong_tool",
+        "no_capability",
+        "argument_not_permitted",
+        "argument_missing",
+        "constraint_failed",
+        "expired",
+        "invalid_time",
+    }
+)
+
+
 @dataclass(frozen=True)
 class Decision:
     allowed: bool
     reason: str
     capability: int | None = None  # index of the capability that permitted the call
+    # One of DECISION_CODES, or "" when whoever built the Decision set none.
+    # Not part of equality: two decisions with the same answer and reason are equal.
+    code: str = field(default="", compare=False)
 
     def __bool__(self) -> bool:
         return self.allowed
@@ -179,19 +200,21 @@ class Capability:
     def decide(self, call: Call) -> Decision:
         """Stateless check of one call. The call budget is not consulted here."""
         if type(call) is not Call:
-            return Decision(False, "not a Call")
+            return Decision(False, "not a Call", code="not_a_call")
         if call.tool != self.tool:
-            return Decision(False, f"tool {call.tool!r} is not {self.tool!r}")
+            return Decision(False, f"tool {call.tool!r} is not {self.tool!r}", code="wrong_tool")
         extra = sorted(a for a in call.args if a not in self.arg_names)
         if extra:
-            return Decision(False, f"argument {extra[0]!r} is not permitted")
+            return Decision(
+                False, f"argument {extra[0]!r} is not permitted", code="argument_not_permitted"
+            )
         for c in self.constraints:
             value = call.args.get(c.arg, _MISSING)
             if value is _MISSING:
-                return Decision(False, f"argument {c.arg!r} is missing")
+                return Decision(False, f"argument {c.arg!r} is missing", code="argument_missing")
             if not c.holds(value):
-                return Decision(False, f"argument {c.arg!r} fails {c.op}")
-        return Decision(True, "ok")
+                return Decision(False, f"argument {c.arg!r} fails {c.op}", code="constraint_failed")
+        return Decision(True, "ok", code="ok")
 
     def permits(self, call: Call) -> bool:
         return self.decide(call).allowed
@@ -257,19 +280,19 @@ class Grant:
     def decide(self, call: Call, now: float) -> Decision:
         """Allow if the grant is unexpired and some capability permits the call."""
         if type(call) is not Call:
-            return Decision(False, "not a Call")
+            return Decision(False, "not a Call", code="not_a_call")
         if not _is_time(now):
-            return Decision(False, "invalid time")
+            return Decision(False, "invalid time", code="invalid_time")
         if not now < self.expires_at:
-            return Decision(False, "grant expired")
-        reason = f"no capability for tool {call.tool!r}"
+            return Decision(False, "grant expired", code="expired")
+        reason, code = f"no capability for tool {call.tool!r}", "no_capability"
         for i, cap in enumerate(self.capabilities):
             d = cap.decide(call)
             if d.allowed:
-                return Decision(True, "ok", i)
+                return Decision(True, "ok", i, code="ok")
             if cap.tool == call.tool:
-                reason = d.reason
-        return Decision(False, reason)
+                reason, code = d.reason, d.code
+        return Decision(False, reason, code=code)
 
     def allows(self, call: Call, now: float) -> bool:
         return self.decide(call, now).allowed

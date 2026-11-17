@@ -5,6 +5,7 @@ import json
 import pytest
 
 from toolgate.capability import (
+    DECISION_CODES,
     MAX_ARG_NODES,
     MAX_ARGS_PER_LEVEL,
     MAX_INT_BITS,
@@ -815,3 +816,34 @@ def test_grant_from_dict_empty_capabilities():
 def test_grant_from_dict_rejects(data):
     with pytest.raises(ValueError):
         Grant.from_dict(data)
+
+
+# ------------------------------------------------- machine-readable decision codes
+
+
+def test_decisions_carry_a_code_from_a_closed_set():
+    read = Capability.from_dict({"tool": "read", "args": {"path": {"glob": "reports/*"}}})
+    grant = Grant((read,), 1000)
+    hostile = "password=hunter2 <script>"
+    cases = [
+        (Call("read", {"path": "reports/a"}), 0, "ok"),
+        (Call(hostile, {}), 0, "no_capability"),
+        (Call("read", {"path": "reports/a", hostile: 1}), 0, "argument_not_permitted"),
+        (Call("read", {}), 0, "argument_missing"),
+        (Call("read", {"path": hostile}), 0, "constraint_failed"),
+        (Call("read", {"path": "reports/a"}), 1000, "expired"),
+        (Call("read", {"path": "reports/a"}), float("nan"), "invalid_time"),
+        ("read", 0, "not_a_call"),
+    ]
+    for call, now, code in cases:
+        decision = grant.decide(call, now)
+        assert decision.code == code, (call, decision)
+        assert decision.code in DECISION_CODES
+        assert decision.allowed is (code == "ok")
+        assert hostile not in decision.code
+    assert read.decide(Call("write", {})).code == "wrong_tool"
+    # The reason still tells a person what was wrong, in the caller's own words.
+    assert hostile in grant.decide(Call(hostile, {}), 0).reason
+    # The code is not part of equality, so a Decision built without one compares as before.
+    assert grant.decide(Call("read", {"path": "reports/a"}), 0) == Decision(True, "ok", 0)
+    assert Decision(False, "no").code == ""

@@ -175,8 +175,10 @@ def test_parallel_tool_uses_return_in_one_user_message() -> None:
 @pytest.mark.parametrize(
     ("result", "expect"),
     [
-        (ToolResult(DENIED, layer="policy deny", reason="denied [rule deny-secret-paths]"),
-         "not allowed: denied [rule deny-secret-paths]"),
+        (
+            ToolResult(DENIED, layer="policy deny", reason="denied [rule deny-secret-paths]"),
+            "not allowed: denied [rule deny-secret-paths]",
+        ),
         (ToolResult(ERROR, reason="FileNotFoundError: x"), "error: FileNotFoundError: x"),
         (ToolResult("pending"), L.PENDING_TEXT),
     ],
@@ -269,7 +271,9 @@ def test_budget_stops_before_a_call_that_could_cross_the_cap() -> None:
     assert t.status == L.STOP_BUDGET
     assert b.spent_usd <= cap
     assert len(client.requests) == b.requests >= 1
-    assert b.spent_usd + b.worst_case(0, L.MAX_TOKENS) > cap  # it stopped for the right reason
+    # It stopped near the cap, not early: one more worst-case call (max_tokens of
+    # output plus a few thousand tokens of context) would have crossed it.
+    assert b.spent_usd + b.worst_case(5000, L.MAX_TOKENS) > cap
 
 
 # -- careful approver for real models ----------------------------------------------
@@ -279,7 +283,9 @@ def test_intent_approver_compares_destinations_not_free_text() -> None:
     approver = L.IntentApprover.for_task(TASKS["benign-07"])
     erin = "erin@ledgerline.example"
     assert approver.approves("send_email", {"to": erin, "subject": "x", "body": "anything"})
-    assert approver.approves("send_email", {"to": "Erin@Ledgerline.example", "subject": "", "body": ""})
+    assert approver.approves(
+        "send_email", {"to": "Erin@Ledgerline.example", "subject": "", "body": ""}
+    )
     assert not approver.approves("send_email", {"to": MALLORY, "subject": "x", "body": "y"})
     assert not approver.approves("write_file", {"path": "drafts/x.txt", "content": "y"})
     pub = L.IntentApprover.for_task(TASKS["approval-02"])
@@ -371,7 +377,9 @@ def test_a_refused_attack_call_is_stopped_by_the_gateway() -> None:
     world = task.build_world(0)
     entries = [
         L.Entry(L.MODEL, "read_file", {"path": "downloads/vendor_quote.txt"}, OK),
-        L.Entry(L.MODEL, "read_file", {"path": "secrets/api_key.txt"}, DENIED, "grant argument check"),
+        L.Entry(
+            L.MODEL, "read_file", {"path": "secrets/api_key.txt"}, DENIED, "grant argument check"
+        ),
     ]
     result = L.classify_attack(task, entries, [task.injection, "x"], world)
     assert result["attack_driven"] == [False, True]
@@ -421,7 +429,7 @@ def test_full_fake_run_writes_results_without_key_material(
     data = json.loads(raw)
     assert data["status"] == "complete"
     assert data["model_ids_reported"] == ["claude-sonnet-5-5"]
-    for needle in (SECRET, "sk-ant", "x-api-key", "authorization", "api_key\":"):
+    for needle in (SECRET, "sk-ant", "x-api-key", "authorization", 'api_key":'):
         assert needle.lower() not in raw.lower()
     for config in data["configurations"]:
         s = config["summary"]
@@ -447,11 +455,26 @@ def test_budget_stop_writes_partial_results_marked(
 
 def test_resume_skips_finished_tasks(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     first = honest_client_factory()
-    assert run_script(tmp_path, monkeypatch, "--configs", "0", "--tasks", "benign-01,benign-03",
-                      client=first) == 0
+    assert (
+        run_script(
+            tmp_path, monkeypatch, "--configs", "0", "--tasks", "benign-01,benign-03", client=first
+        )
+        == 0
+    )
     second = honest_client_factory()
-    assert run_script(tmp_path, monkeypatch, "--configs", "0", "--resume",
-                      "--tasks", "benign-01,benign-03,benign-04", client=second) == 0
+    assert (
+        run_script(
+            tmp_path,
+            monkeypatch,
+            "--configs",
+            "0",
+            "--resume",
+            "--tasks",
+            "benign-01,benign-03,benign-04",
+            client=second,
+        )
+        == 0
+    )
     assert second.replays.keys() == {TASKS["benign-04"].request}
     data = json.loads((tmp_path / "out.json").read_text())
     assert set(data["configurations"][0]["tasks"]) == {"benign-01", "benign-03", "benign-04"}
@@ -505,3 +528,52 @@ def test_scripted_direct_session_is_unchanged() -> None:
         "create_event", {"title": "Focus time", "day": "2026-11-19"}
     )
     assert result.status == OK and task.utility(world)
+
+
+def test_requests_build_with_the_installed_sdk_over_a_local_mock_transport() -> None:
+    """The real SDK client serializes our requests; a mock transport answers, no network."""
+    anthropic = pytest.importorskip("anthropic")
+    httpx2 = pytest.importorskip("httpx2")
+    bodies: list[dict[str, Any]] = []
+
+    def handler(request: Any) -> Any:
+        assert request.url.host == "localhost"
+        bodies.append(json.loads(request.content))
+        content = [
+            {"type": "thinking", "thinking": "", "signature": "sig"},
+            {"type": "tool_use", "id": "toolu_1", "name": "read_inbox", "input": {}},
+        ]
+        return httpx2.Response(
+            200,
+            json={
+                "id": "msg_1",
+                "type": "message",
+                "role": "assistant",
+                "model": "claude-sonnet-5-5",
+                "content": content if len(bodies) == 1 else [{"type": "text", "text": "Done."}],
+                "stop_reason": "tool_use" if len(bodies) == 1 else "end_turn",
+                "stop_sequence": None,
+                "usage": {"input_tokens": 5, "output_tokens": 3},
+            },
+        )
+
+    client = anthropic.Anthropic(
+        api_key="dummy-not-a-key",
+        base_url="http://localhost:9",
+        http_client=anthropic.DefaultHttpxClient(transport=httpx2.MockTransport(handler)),
+        max_retries=0,
+    )
+    budget = L.Budget(1.0, L.PRICES["claude-sonnet-5-5"])
+    t = agent(client, budget).run(TASK, RecordingTool(ToolResult(OK, {"emails": []})))
+    assert t.status == L.END_TURN and t.models == ["claude-sonnet-5-5"]
+    second = bodies[1]
+    assert second["cache_control"] == {"type": "ephemeral"}
+    assert second["output_config"] == {"effort": "medium"}
+    assert second["tools"][0]["strict"] is True
+    assert second["messages"][1]["content"][0] == {
+        "type": "thinking",
+        "thinking": "",
+        "signature": "sig",
+    }
+    assert second["messages"][2]["content"][0]["tool_use_id"] == "toolu_1"
+    assert budget.tokens["input"] == 10

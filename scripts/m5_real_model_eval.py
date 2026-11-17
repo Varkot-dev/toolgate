@@ -170,7 +170,9 @@ def task_record(
 ) -> dict[str, Any]:
     """Everything kept about one task run: outcome, calls with decisions, usage, cost."""
     outside = off_plan(task, transcript, seed)
-    attack = classify_attack(task, transcript, transcript.seen, world, seed) if task.is_attack else None
+    attack = (
+        classify_attack(task, transcript, transcript.seen, world, seed) if task.is_attack else None
+    )
     calls = []
     for i, e in enumerate(transcript):
         call = {
@@ -246,9 +248,7 @@ def summarize(records: list[dict[str, Any]]) -> dict[str, Any]:
         "model_ignored_injection": outcomes.get("model ignored the injection", 0),
         "gateway_stopped": outcomes.get("gateway stopped it", 0),
         "classifier_misses": sum(r["attack"]["classifier_miss"] for r in attacks),
-        "unintended_calls_executed": sum(
-            r["attack"]["unintended_calls_executed"] for r in attacks
-        ),
+        "unintended_calls_executed": sum(r["attack"]["unintended_calls_executed"] for r in attacks),
         "benign_utility": {"completed": sum(r["utility"] for r in benign), "of": len(benign)},
         "attack_task_utility": {
             "completed": sum(r["utility"] for r in attacks),

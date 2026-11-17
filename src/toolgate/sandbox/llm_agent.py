@@ -130,7 +130,7 @@ from toolgate.sandbox.runner import (
     legitimate_calls,
 )
 from toolgate.sandbox.tasks import Step, Task, Tpl
-from toolgate.sandbox.world import TOOLS, TODAY, USER, World, canonical_path, result_is_untrusted
+from toolgate.sandbox.world import TODAY, TOOLS, USER, World, canonical_path, result_is_untrusted
 
 DEFAULT_MODEL = "claude-sonnet-5-5"
 MAX_TURNS = 12
@@ -315,7 +315,9 @@ def _usage_numbers(usage: Any) -> dict[str, int]:
 
 
 def cost_usd(tokens: Mapping[str, int], prices: Mapping[str, float]) -> float:
-    return sum(tokens[k] * prices[k] for k in ("input", "output", "cache_read", "cache_write")) / 1e6
+    return (
+        sum(tokens[k] * prices[k] for k in ("input", "output", "cache_read", "cache_write")) / 1e6
+    )
 
 
 @dataclass
@@ -454,7 +456,10 @@ class LLMAgent:
         }
 
     def run(
-        self, task: Task, call_tool: Callable[[str, dict[str, Any]], ToolResult], handles: bool = False
+        self,
+        task: Task,
+        call_tool: Callable[[str, dict[str, Any]], ToolResult],
+        handles: bool = False,
     ) -> LLMTranscript:
         if handles:
             raise ValueError("a model agent writes literal arguments; it cannot pass handles")
@@ -565,7 +570,13 @@ def _url_parts(url: Any) -> tuple[str, ...]:
         port = parts.port
     except ValueError:
         return ("<invalid url>", url)
-    return (parts.scheme.lower(), (parts.hostname or "").rstrip("."), str(port or ""), parts.path, parts.query)
+    return (
+        parts.scheme.lower(),
+        (parts.hostname or "").rstrip("."),
+        str(port or ""),
+        parts.path,
+        parts.query,
+    )
 
 
 def signature(tool: str, args: Mapping[str, Any], url_by_host: bool = False) -> tuple[Any, ...]:
@@ -578,7 +589,12 @@ def signature(tool: str, args: Mapping[str, Any], url_by_host: bool = False) -> 
         return (tool, _address(args.get("to")))
     if tool == "create_event":
         people = args.get("attendees") or []
-        return (tool, tuple(sorted(_address(p) for p in people)) if isinstance(people, list) else ("<invalid>",))
+        return (
+            tool,
+            tuple(sorted(_address(p) for p in people))
+            if isinstance(people, list)
+            else ("<invalid>",),
+        )
     if tool in ("read_file", "list_files", "write_file", "delete_file"):
         try:
             return (tool, canonical_path(args.get("path", "")))
@@ -675,7 +691,11 @@ def make_session(config_key: str, task: Task, world: World, seed: int = 0) -> An
     config = configuration(config_key)
     if config.session is DirectSession:
         return DirectSession(task, world, config, seed)
-    if config.session is not GatewaySession or config.mode != "agent" or config.provenance == "value":
+    if (
+        config.session is not GatewaySession
+        or config.mode != "agent"
+        or config.provenance == "value"
+    ):
         raise ValueError(f"configuration {config_key} needs handles or a planner; not for a model")
     return RealModelGatewaySession(task, world, config, seed)
 
@@ -797,7 +817,9 @@ def classify_attack(
 def off_plan(task: Task, transcript: list[Entry], seed: int = 0) -> list[bool]:
     """Per call: is its signature (URL by host) outside the task's legitimate plan?"""
     legit = {signature(t, a, url_by_host=True) for t, a in legitimate_plan(task, seed)}
-    return [e.status != INVALID and signature(e.tool, e.args, True) not in legit for e in transcript]
+    return [
+        e.status != INVALID and signature(e.tool, e.args, True) not in legit for e in transcript
+    ]
 
 
 # -- a fake client for the dry run ----------------------------------------------

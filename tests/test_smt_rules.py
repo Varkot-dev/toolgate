@@ -64,6 +64,16 @@ def test_every_requested_lemma_and_variant_is_present(lemmas, wrong_variants):
     assert {"in", "max", "glob", "capability", "grant", "budget"} <= rows
 
 
+def test_rule_a_has_a_lemma_and_a_wrong_variant(lemmas, wrong_variants):
+    # Rule A: a child glob with no star is the single string of its pattern.
+    assert "L1e" in {x.name.split()[0] for x in lemmas}
+    assert "W12" in {x.name.split()[0] for x in wrong_variants}
+    assert proofs.star_free_glob_is_literal in proofs.LEMMAS
+    assert proofs.wrong_starred_glob_as_literal in proofs.WRONG_VARIANTS
+    assert "" in proofs.STAR_FREE_PATTERNS
+    assert all("*" not in g for g in proofs.STAR_FREE_PATTERNS)
+
+
 def test_names_are_unique(lemmas, wrong_variants):
     names = [x.name for x in lemmas + wrong_variants]
     assert len(names) == len(set(names))
@@ -71,7 +81,7 @@ def test_names_are_unique(lemmas, wrong_variants):
 
 def test_bounded_lemmas_say_so(lemmas):
     bounded = {x.name.split()[0] for x in lemmas if x.bound is not None}
-    assert bounded == {"L4", "L4c", "L6", "L7", "L8a"}
+    assert bounded == {"L1e", "L4", "L4c", "L6", "L7", "L8a"}
 
 
 def test_unknown_is_never_reported_as_proved(monkeypatch):

@@ -4,13 +4,13 @@
   "timeout_ms_per_query": 20000,
   "all_as_expected": true,
   "summary": {
-    "lemmas": 18,
-    "lemmas_unsat": 18,
-    "lemmas_bounded": 5,
-    "wrong_variants": 11,
-    "wrong_variants_sat": 11,
-    "premise_checks": 18,
-    "premise_checks_sat": 18
+    "lemmas": 19,
+    "lemmas_unsat": 19,
+    "lemmas_bounded": 6,
+    "wrong_variants": 12,
+    "wrong_variants_sat": 12,
+    "premise_checks": 19,
+    "premise_checks_sat": 19
   },
   "lemmas": [
     {
@@ -20,7 +20,7 @@
       "bound": null,
       "result": "unsat",
       "counterexample": null,
-      "seconds": 0.0029
+      "seconds": 0.0036
     },
     {
       "name": "L1a parent eq a, child eq a",
@@ -29,7 +29,7 @@
       "bound": null,
       "result": "unsat",
       "counterexample": null,
-      "seconds": 0.0007
+      "seconds": 0.0008
     },
     {
       "name": "L1b parent in S, child in T, T subset of S",
@@ -38,7 +38,7 @@
       "bound": null,
       "result": "unsat",
       "counterexample": null,
-      "seconds": 0.0019
+      "seconds": 0.0023
     },
     {
       "name": "L1c parent max m, child eq/in with all values <= m",
@@ -47,7 +47,7 @@
       "bound": null,
       "result": "unsat",
       "counterexample": null,
-      "seconds": 0.0014
+      "seconds": 0.0027
     },
     {
       "name": "L1d parent glob g, child eq/in with all values matching g",
@@ -56,7 +56,16 @@
       "bound": null,
       "result": "unsat",
       "counterexample": null,
-      "seconds": 0.002
+      "seconds": 0.0022
+    },
+    {
+      "name": "L1e a star-free glob g accepts exactly the string g",
+      "table_row": "glob",
+      "statement": "A string t on which membership in toolgate.smt.glob_regex(g) and t == g disagree, for a pattern g that contains no star. A regex cannot be built from a symbolic pattern, so this is checked for fixed g only. Together with L1 (the enumeration rule for an arbitrary parent predicate, taking T = {g}) this covers rule A: a child glob with no star is accepted exactly when the parent accepts the string g.",
+      "bound": "concrete g in '', 'a', 'abc', 'reports/q3.csv', 'a b', '?[x].+(y)|z\\\\^$', 'é/ü'",
+      "result": "unsat",
+      "counterexample": null,
+      "seconds": 0.0041
     },
     {
       "name": "L2 parent max m, child max n, n <= m",
@@ -65,7 +74,7 @@
       "bound": null,
       "result": "unsat",
       "counterexample": null,
-      "seconds": 0.0013
+      "seconds": 0.0012
     },
     {
       "name": "L3 parent glob g, child glob g",
@@ -74,7 +83,7 @@
       "bound": null,
       "result": "unsat",
       "counterexample": null,
-      "seconds": 0.0006
+      "seconds": 0.0007
     },
     {
       "name": "L4 parent glob P*, child head starts with P",
@@ -83,7 +92,7 @@
       "bound": "one query per number of child stars k = 0..4; strings of any length",
       "result": "unsat",
       "counterexample": null,
-      "seconds": 0.008
+      "seconds": 0.0081
     },
     {
       "name": "L4a a match starts with the child's head",
@@ -101,7 +110,7 @@
       "bound": null,
       "result": "unsat",
       "counterexample": null,
-      "seconds": 0.0012
+      "seconds": 0.0017
     },
     {
       "name": "L4c the model's regex for P* means 'starts with P'",
@@ -110,7 +119,7 @@
       "bound": "concrete P in '', 'a', 'reports/', 'reports/q3/', 'a b', '?[x]', 'é/ü'",
       "result": "unsat",
       "counterexample": null,
-      "seconds": 0.0039
+      "seconds": 0.0041
     },
     {
       "name": "L5 parent any, child anything",
@@ -128,7 +137,7 @@
       "bound": "calls over 3 argument names; at most 3 constraints per capability; which argument each constraint is on is symbolic; each constraint's predicate is an arbitrary function of the value",
       "result": "unsat",
       "counterexample": null,
-      "seconds": 0.0211
+      "seconds": 0.0208
     },
     {
       "name": "L7 grant composition (check_attenuation)",
@@ -137,7 +146,7 @@
       "bound": "at most 3 capabilities per grant; 'permits' is an arbitrary relation; times are reals",
       "result": "unsat",
       "counterexample": null,
-      "seconds": 0.0022
+      "seconds": 0.0024
     },
     {
       "name": "L7a grant composition, any number of capabilities",
@@ -146,7 +155,7 @@
       "bound": null,
       "result": "unsat",
       "counterexample": null,
-      "seconds": 0.0031
+      "seconds": 0.0033
     },
     {
       "name": "L7b expiry",
@@ -164,7 +173,7 @@
       "bound": null,
       "result": "unsat",
       "counterexample": null,
-      "seconds": 0.0023
+      "seconds": 0.0025
     },
     {
       "name": "L8a budget along an unrolled chain",
@@ -184,7 +193,7 @@
       "bound": null,
       "result": "sat",
       "counterexample": "m = 0; n = 1/2; v = N(1/2)",
-      "seconds": 0.0015
+      "seconds": 0.0016
     },
     {
       "name": "W2 prefix rule reversed",
@@ -192,8 +201,8 @@
       "statement": "Accept child p0*p1 when P starts with p0 (the child's head is SHORTER than the parent's prefix) instead of p0 starting with P.",
       "bound": "child pattern with one star",
       "result": "sat",
-      "counterexample": "P = \"A\"; p0 = \"\"; p1 = \"\"; v = S(\"B\")",
-      "seconds": 0.0099
+      "counterexample": "P = \"C\"; p0 = \"\"; p1 = \"\"; v = S(\"\")",
+      "seconds": 0.0046
     },
     {
       "name": "W3 prefix rule applied to a parent P*Q",
@@ -201,8 +210,8 @@
       "statement": "Apply the prefix rule to a parent pattern P*Q that has a literal tail, looking only at P.",
       "bound": "parent with one star, child pattern with one star",
       "result": "sat",
-      "counterexample": "P = \"A\"; Q = \"A\"; p0 = \"A\"; p1 = \"\"; v = S(\"A\")",
-      "seconds": 0.0112
+      "counterexample": "P = \"\"; Q = \"A\"; p0 = \"B\"; p1 = \"\"; v = S(\"B\")",
+      "seconds": 0.0076
     },
     {
       "name": "W4 glob_regex(P) read as 'starts with P'",
@@ -210,8 +219,8 @@
       "statement": "Membership in glob_regex('reports/') (no star) and PrefixOf('reports/', t) disagree on some t.",
       "bound": "concrete P = 'reports/'",
       "result": "sat",
-      "counterexample": "t = \"reports/I\"",
-      "seconds": 0.022
+      "counterexample": "t = \"reports/H\"",
+      "seconds": 0.0215
     },
     {
       "name": "W5 sets intersect instead of subset",
@@ -229,7 +238,7 @@
       "bound": null,
       "result": "sat",
       "counterexample": "m = -1; v = S(\"!0!\")",
-      "seconds": 0.0014
+      "seconds": 0.0015
     },
     {
       "name": "W7 argument-name sets not required equal",
@@ -237,8 +246,8 @@
       "statement": "covers() without the arg_names equality: the child may constrain an argument the parent never mentions.",
       "bound": "calls over 3 argument names; at most 3 constraints per capability; which argument each constraint is on is symbolic; each constraint's predicate is an arbitrary function of the value",
       "result": "sat",
-      "counterexample": "call(arg2 = S(\"\")); parent constraints: none; child constraints: child_pred_0 on arg2 (holds: True), child_pred_1 on arg2 (holds: True)",
-      "seconds": 0.0066
+      "counterexample": "call(arg1 = S(\"B\"), arg2 = S(\"A\")); parent constraints: none; child constraints: child_pred_0 on arg2 (holds: True), child_pred_1 on arg1 (holds: True), child_pred_2 on arg2 (holds: True)",
+      "seconds": 0.0065
     },
     {
       "name": "W8 constraint quantifiers swapped",
@@ -246,8 +255,8 @@
       "statement": "covers() asking that every CHILD constraint implies some parent constraint on its argument, instead of every parent constraint being implied by some child constraint. Argument names still equal.",
       "bound": "calls over 3 argument names; at most 3 constraints per capability; which argument each constraint is on is symbolic; each constraint's predicate is an arbitrary function of the value",
       "result": "sat",
-      "counterexample": "call(arg0 = S(\"A\")); parent constraints: parent_pred_0 on arg0 (holds: True), parent_pred_1 on arg0 (holds: False), parent_pred_2 on arg0 (holds: True); child constraints: child_pred_0 on arg0 (holds: True)",
-      "seconds": 0.0064
+      "counterexample": "call(arg0 = S(\"A\"), arg2 = S(\"\")); parent constraints: parent_pred_0 on arg0 (holds: False), parent_pred_1 on arg2 (holds: True), parent_pred_2 on arg0 (holds: True); child constraints: child_pred_0 on arg2 (holds: True), child_pred_2 on arg0 (holds: True)",
+      "seconds": 0.0062
     },
     {
       "name": "W9 expiry check dropped",
@@ -255,8 +264,8 @@
       "statement": "check_attenuation without 'child expires no later than parent'.",
       "bound": "at most 3 capabilities per grant",
       "result": "sat",
-      "counterexample": "now = 0; child_expires = 1; parent_expires = 0; child capabilities: child_cap_2 (permits the call: True); parent capabilities: parent_cap_2 (permits the call: True)",
-      "seconds": 0.0036
+      "counterexample": "now = 0; child_expires = 1; parent_expires = 0; child capabilities: child_cap_2 (permits the call: True); parent capabilities: parent_cap_0 (permits the call: True), parent_cap_2 (permits the call: True)",
+      "seconds": 0.0035
     },
     {
       "name": "W10 capability coverage dropped",
@@ -265,7 +274,7 @@
       "bound": "at most 3 capabilities per grant",
       "result": "sat",
       "counterexample": "now = -1/2; child_expires = 0; parent_expires = 0; child capabilities: child_cap_2 (permits the call: True); parent capabilities: none",
-      "seconds": 0.0016
+      "seconds": 0.0017
     },
     {
       "name": "W11 unlimited child budget under a limited parent",
@@ -274,7 +283,16 @@
       "bound": null,
       "result": "sat",
       "counterexample": "parent_limited = True; parent_calls = 0; child_limited = False",
-      "seconds": 0.0079
+      "seconds": 0.0072
+    },
+    {
+      "name": "W12 a glob with a star read as one literal string",
+      "table_row": "glob",
+      "statement": "Apply rule A to the pattern 'a*', which has a star: a string t that the pattern accepts and that is not the string 'a*' itself.",
+      "bound": "concrete g = 'a*'",
+      "result": "sat",
+      "counterexample": "t = \"a\"",
+      "seconds": 0.0018
     }
   ],
   "premise_checks": [
@@ -282,7 +300,7 @@
       "name": "L1 enumeration rule",
       "result": "sat",
       "witness": "v = S(\"!0!\")",
-      "seconds": 0.0028
+      "seconds": 0.0026
     },
     {
       "name": "L1a parent eq a, child eq a",
@@ -294,13 +312,13 @@
       "name": "L1b parent in S, child in T, T subset of S",
       "result": "sat",
       "witness": "v = N(2)",
-      "seconds": 0.0057
+      "seconds": 0.0055
     },
     {
       "name": "L1c parent max m, child eq/in with all values <= m",
       "result": "sat",
       "witness": "v = N(0); m = 0",
-      "seconds": 0.0063
+      "seconds": 0.0064
     },
     {
       "name": "L1d parent glob g, child eq/in with all values matching g",
@@ -309,28 +327,34 @@
       "seconds": 0.0043
     },
     {
+      "name": "L1e a star-free glob g accepts exactly the string g",
+      "result": "sat",
+      "witness": null,
+      "seconds": 0.0039
+    },
+    {
       "name": "L2 parent max m, child max n, n <= m",
       "result": "sat",
       "witness": "v = N(2); m = 2; n = 2",
-      "seconds": 0.0014
+      "seconds": 0.0013
     },
     {
       "name": "L3 parent glob g, child glob g",
       "result": "sat",
       "witness": "v = S(\"!0!\")",
-      "seconds": 0.0013
+      "seconds": 0.0014
     },
     {
       "name": "L4 parent glob P*, child head starts with P",
       "result": "sat",
       "witness": null,
-      "seconds": 0.0087
+      "seconds": 0.0091
     },
     {
       "name": "L4a a match starts with the child's head",
       "result": "sat",
       "witness": "p0 = \"\"; t = \"\"",
-      "seconds": 0.0007
+      "seconds": 0.0008
     },
     {
       "name": "L4b prefix is transitive",
@@ -342,7 +366,7 @@
       "name": "L4c the model's regex for P* means 'starts with P'",
       "result": "sat",
       "witness": null,
-      "seconds": 0.0039
+      "seconds": 0.004
     },
     {
       "name": "L5 parent any, child anything",
@@ -353,13 +377,13 @@
     {
       "name": "L6 capability composition (covers)",
       "result": "sat",
-      "witness": "call(arg2 = S(\"A\")); parent constraints: parent_pred_1 on arg2 (holds: True); child constraints: child_pred_1 on arg2 (holds: True)",
-      "seconds": 0.0061
+      "witness": "call(); parent constraints: none; child constraints: none",
+      "seconds": 0.0056
     },
     {
       "name": "L7 grant composition (check_attenuation)",
       "result": "sat",
-      "witness": "now = -1; child_expires = 0; parent_expires = 0; child capabilities: child_cap_2 (permits the call: True); parent capabilities: parent_cap_0 (permits the call: True), parent_cap_1 (permits the call: True)",
+      "witness": "now = -1; child_expires = 0; parent_expires = 0; child capabilities: child_cap_2 (permits the call: True); parent capabilities: parent_cap_1 (permits the call: True)",
       "seconds": 0.0032
     },
     {
@@ -378,13 +402,13 @@
       "name": "L8 budget is preserved along a chain (inductive step)",
       "result": "sat",
       "witness": "root_limited = True; root_calls = 0; mid_limited = True; mid_calls = 0; leaf_limited = True; leaf_calls = 0",
-      "seconds": 0.0072
+      "seconds": 0.0071
     },
     {
       "name": "L8a budget along an unrolled chain",
       "result": "sat",
       "witness": "hop0_calls = 0; hop1_calls = 0; hop2_calls = 0; hop3_calls = 0; hop4_calls = 0; hop5_calls = 0; hop6_calls = 0",
-      "seconds": 0.0071
+      "seconds": 0.0069
     }
   ]
 }

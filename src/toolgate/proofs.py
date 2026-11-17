@@ -45,6 +45,17 @@ CHAIN_LENGTH = 6  # delegation hops in the bounded budget chain
 # Concrete prefixes for the check that glob_regex(P + "*") means "starts with P".
 REGEX_PREFIXES: tuple[str, ...] = ("", "a", "reports/", "reports/q3/", "a b", "?[x]", "é/ü")
 
+# Concrete star-free patterns for the check that such a pattern accepts exactly itself.
+STAR_FREE_PATTERNS: tuple[str, ...] = (
+    "",
+    "a",
+    "abc",
+    "reports/q3.csv",
+    "a b",
+    "?[x].+(y)|z\\^$",
+    "é/ü",
+)
+
 _BOOL = z3.BoolSort()
 _STRING = z3.StringSort()
 
@@ -257,6 +268,27 @@ def in_under_glob() -> Lemma:
 
 
 # --- L2: max under max -------------------------------------------------------
+
+
+def _star_free_query(pattern: str) -> Query:
+    t = z3.String("t")
+    return [z3.InRe(t, glob_regex(pattern)) != (t == string_lit(pattern))], [("t", t)]
+
+
+def star_free_glob_is_literal() -> Lemma:
+    """L1 side condition for rule A: a star-free pattern g accepts exactly the string g."""
+    return _lemma_all(
+        "L1e a star-free glob g accepts exactly the string g",
+        "glob",
+        "A string t on which membership in toolgate.smt.glob_regex(g) and t == g "
+        "disagree, for a pattern g that contains no star. A regex cannot be built from "
+        "a symbolic pattern, so this is checked for fixed g only. Together with L1 "
+        "(the enumeration rule for an arbitrary parent predicate, taking T = {g}) this "
+        "covers rule A: a child glob with no star is accepted exactly when the parent "
+        "accepts the string g.",
+        "concrete g in " + ", ".join(repr(g) for g in STAR_FREE_PATTERNS),
+        [(repr(g), _star_free_query(g)) for g in STAR_FREE_PATTERNS],
+    )
 
 
 def max_under_max() -> Lemma:
@@ -781,6 +813,20 @@ def wrong_regex_reading() -> Lemma:
     )
 
 
+def wrong_starred_glob_as_literal() -> Lemma:
+    """Teeth for L1e: a pattern WITH a star is not the single string of its pattern."""
+    t = z3.String("t")
+    pattern = "a*"
+    return _lemma(
+        "W12 a glob with a star read as one literal string",
+        "glob",
+        "Apply rule A to the pattern 'a*', which has a star: a string t that the "
+        "pattern accepts and that is not the string 'a*' itself.",
+        "concrete g = 'a*'",
+        ([z3.InRe(t, glob_regex(pattern)), t != string_lit(pattern)], [("t", t)]),
+    )
+
+
 def wrong_sets_intersect() -> Lemma:
     """Teeth for L1: 'some listed value is allowed' instead of 'every listed value'."""
     v = _v()
@@ -891,6 +937,7 @@ LEMMAS: tuple[Callable[[], Lemma], ...] = (
     in_under_in,
     in_under_max,
     in_under_glob,
+    star_free_glob_is_literal,
     max_under_max,
     glob_identical,
     glob_prefix_bounded,
@@ -918,6 +965,7 @@ WRONG_VARIANTS: tuple[Callable[[], Lemma], ...] = (
     wrong_expiry_dropped,
     wrong_cover_dropped,
     wrong_unlimited_child_budget,
+    wrong_starred_glob_as_literal,
 )
 
 

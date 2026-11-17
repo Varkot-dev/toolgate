@@ -30,6 +30,25 @@ The rules this module enforces:
 
 These are bearer tokens: whoever holds the string can use it. Binding a token
 to a holder key (DPoP style) is a later milestone.
+
+Known limits
+------------
+
+  * Bearer tokens: there is no proof of possession yet, so a stolen token
+    works for the thief until it expires or is revoked.
+  * The actor name is self-declared attribution. Whoever calls mint or
+    exchange picks it, it is recorded for the audit log, and it is never used
+    for a decision.
+  * A clock set backwards can revive an expired token (unless the store has
+    pruned it in the meantime). Expiry is only as good as the clock.
+  * First-fit derivation can strand budget. A child capability is bound to the
+    first parent capability that covers it. If that one is exhausted the child
+    gets nothing, even if another parent capability that also covers it still
+    has budget left.
+  * With overlapping capabilities a limited one does not cap an unlimited one.
+    A call both permit is still allowed by the unlimited capability once the
+    limited one is spent. Grant writers must not rely on a limited capability
+    to bound an overlapping broader one.
 """
 
 from __future__ import annotations
@@ -63,6 +82,14 @@ _COMPACT = re.compile(r"[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]*")
 _MAX_TOKEN_CHARS = 64 * 1024
 _MAX_CAPABILITIES = 256
 _MAX_NAME_CHARS = 256
+_MAX_PRINCIPAL_CHARS = 128  # `sub` and actor names; they end up in the audit log
+# Limits on what one exchange may ask for, checked before the attenuation
+# check, whose cost grows with (parent constraints x child constraints) for
+# every (parent capability, child capability) pair. The byte limit refuses
+# nothing that could have been signed: a larger request cannot fit in
+# _MAX_TOKEN_CHARS once it is base64 encoded.
+_MAX_CONSTRAINTS = 64  # per capability
+_MAX_REQUEST_BYTES = 48 * 1024  # all requested capabilities, serialized
 
 
 class TokenError(Exception):
@@ -70,7 +97,10 @@ class TokenError(Exception):
 
     Codes: malformed, bad_algorithm, bad_signature, wrong_issuer,
     wrong_audience, expired, not_yet_valid, depth_exceeded, revoked,
-    unknown_token.
+    unknown_token, too_many_children, unavailable.
+
+    "unavailable" means the store or the clock failed. It says nothing about
+    the token, and it is still a refusal: the caller must deny, and may retry.
     """
 
     def __init__(self, code: str, detail: str = "") -> None:
@@ -85,6 +115,17 @@ class EscalationError(Exception):
     def __init__(self, reason: str) -> None:
         super().__init__(reason)
         self.reason = reason
+
+
+class RequestTooLarge(TokenError, ValueError):
+    """An exchange asked for more than the size limits allow.
+
+    The code is "malformed". It is also a ValueError, because that is what
+    exchange has always raised for a request it cannot read.
+    """
+
+    def __init__(self, detail: str) -> None:
+        super().__init__("malformed", detail)
 
 
 @dataclass(frozen=True)
@@ -196,6 +237,30 @@ def _is_name(value: Any) -> bool:
     return type(value) is str and 0 < len(value) <= _MAX_NAME_CHARS
 
 
+def _is_encodable(value: str) -> bool:
+    """False for text with lone surrogates, which UTF-8 cannot carry."""
+    try:
+        value.encode("utf-8")
+    except UnicodeEncodeError:
+        return False
+    return True
+
+
+def _is_id(value: Any) -> bool:
+    """A token id: a name the store can actually be asked about."""
+    return _is_name(value) and _is_encodable(value)
+
+
+def _is_principal(value: Any) -> bool:
+    """A `sub` or actor name the audit log can record and a person can read.
+
+    Exact str, 1 to 128 characters, all printable. str.isprintable is False
+    for control characters (NUL, newline, escape), for invisible format
+    characters such as bidi overrides, and for lone surrogates.
+    """
+    return type(value) is str and 0 < len(value) <= _MAX_PRINCIPAL_CHARS and value.isprintable()
+
+
 def _bad(detail: str) -> TokenError:
     return TokenError("malformed", detail)
 
@@ -210,8 +275,8 @@ def _flatten_act(act: Any, expected: int) -> tuple[str, ...]:
     while True:
         if type(node) is not dict or not set(node) <= {"sub", "act"}:
             raise _bad("act must be an object with sub and optionally act")
-        if not _is_name(node.get("sub")):
-            raise _bad("act.sub must be a non-empty string")
+        if not _is_principal(node.get("sub")):
+            raise _bad("act.sub must be a short printable string")
         actors.append(node["sub"])
         if len(actors) > expected:
             raise _bad("act is nested deeper than the chain")
@@ -231,17 +296,25 @@ def _nest_act(actors: Sequence[str]) -> dict[str, Any]:
     return node
 
 
-def _rebuild_capabilities(capabilities: Any) -> tuple[Capability, ...]:
+def _rebuild_capabilities(capabilities: Any, limited: bool = False) -> tuple[Capability, ...]:
     """Fresh Capability objects made from the JSON text of the given ones.
 
     A caller's objects are never trusted as they are: a frozen dataclass can
     still be altered with object.__setattr__, and a subclass can lie. So they
     are written out as JSON and parsed back, and only the parsed copy is
     checked and signed. Raises ValueError for anything that does not survive.
+
+    With `limited` (an exchange, where the caller is an untrusted agent) the
+    request must also stay within the size limits, each checked as early as
+    it can be: the count before anything is touched, the bytes before they
+    are parsed, the constraints per capability before the caller compares
+    them with the parent's. Over a limit raises RequestTooLarge.
     """
     if type(capabilities) not in (list, tuple):
         raise ValueError("capabilities must be a list or tuple")
     if len(capabilities) > _MAX_CAPABILITIES:
+        if limited:
+            raise RequestTooLarge(f"at most {_MAX_CAPABILITIES} capabilities per token")
         raise ValueError(f"at most {_MAX_CAPABILITIES} capabilities per token")
     plain = []
     for cap in capabilities:
@@ -252,10 +325,18 @@ def _rebuild_capabilities(capabilities: Any) -> tuple[Capability, ...]:
         else:
             raise ValueError("each capability must be a Capability or a dict")
     try:
-        parsed = _loads(_dumps(plain))
+        text = _dumps(plain)
+        if limited and len(text) > _MAX_REQUEST_BYTES:
+            raise RequestTooLarge(f"capabilities are larger than {_MAX_REQUEST_BYTES} bytes")
+        parsed = _loads(text)
+    except RequestTooLarge:
+        raise
     except (TypeError, ValueError, RecursionError) as exc:
         raise ValueError(f"capabilities are not plain JSON data: {exc}") from None
-    return tuple(Capability.from_dict(c) for c in parsed)
+    rebuilt = tuple(Capability.from_dict(c) for c in parsed)
+    if limited and any(len(c.constraints) > _MAX_CONSTRAINTS for c in rebuilt):
+        raise RequestTooLarge(f"at most {_MAX_CONSTRAINTS} constraints per capability")
+    return rebuilt
 
 
 # ---------------------------------------------------------------------------
@@ -268,7 +349,8 @@ class Authority:
 
     `clock` returns the current time in seconds since the epoch and `new_id`
     returns a fresh token id; both are injectable so tests and demos are
-    deterministic. Callers of `mint` and `revoke` are trusted (the gateway
+    deterministic. `max_children` is how many child tokens may ever be
+    exchanged from any one token. Callers of `mint` and `revoke` are trusted (the gateway
     authenticates the user before it calls them); `verify`, `exchange` and
     `authorize` take tokens from untrusted agents.
     """
@@ -284,6 +366,7 @@ class Authority:
         max_ttl: int | float = 900,
         clock: Callable[[], float] = time.time,
         new_id: Callable[[], str] | None = None,
+        max_children: int = 64,
     ) -> None:
         if not isinstance(private_key, Ed25519PrivateKey):
             raise ValueError("private_key must be an Ed25519 private key")
@@ -297,8 +380,11 @@ class Authority:
         self._public: Ed25519PublicKey = private_key.public_key()
         self.issuer = issuer
         self.audience = audience
+        if type(max_children) is not int or max_children < 0:
+            raise ValueError("max_children must be a non-negative integer")
         self.store = store
         self.max_depth = max_depth
+        self.max_children = max_children
         self.max_ttl = max_ttl
         self._clock = clock
         self._new_id = new_id if new_id is not None else (lambda: secrets.token_urlsafe(16))
@@ -337,15 +423,22 @@ class Authority:
     ) -> str:
         """Sign a weaker token for a sub-agent, derived from `parent_token`.
 
-        Raises TokenError if the parent does not verify or the depth limit is
-        reached, EscalationError if the child would allow anything the parent
-        does not, ValueError if the request itself is not well formed.
+        Raises TokenError if the parent does not verify, the depth limit is
+        reached, the parent already has max_children children or the store is
+        unavailable; EscalationError if the child would allow anything the
+        parent does not; ValueError if the request itself is not well formed
+        (RequestTooLarge, which is both a ValueError and a TokenError, if it
+        is over the size limits).
         """
         now = self._now()
         parent = self._verify(parent_token, self.audience, now)
         if parent.depth + 1 > self.max_depth:
             raise TokenError("depth_exceeded", f"delegation depth is limited to {self.max_depth}")
-        capabilities = _rebuild_capabilities(child_capabilities)
+        if not _is_principal(actor):
+            raise ValueError("actor must be a short printable string")
+        # Size limits come first: the attenuation check below is the expensive
+        # step and must never run on a request of unbounded size.
+        capabilities = _rebuild_capabilities(child_capabilities, limited=True)
         # Monotonic expiry: a child can never outlive its parent, whatever ttl says.
         exp = min(parent.exp, now + self._capped(ttl))
         child = Grant(capabilities, exp)
@@ -362,6 +455,16 @@ class Authority:
         # It must never be used for an authorization decision: authority comes
         # from `caps` alone, which were just checked against the parent.
         actors = (actor, *parent.actors)
+        # Counted last, so a request refused above uses up no slot. The test
+        # and the increment are one atomic step in the store, so concurrent
+        # exchanges cannot get past the limit together. If signing fails after
+        # this point the slot stays used: failing closed, and it is rare.
+        if not self._ask_store("add_child", parent.jti, self.max_children):
+            if not self._ask_store("is_registered", parent.jti):  # pruned since verify
+                raise TokenError("unknown_token", "the store has no record of this token")
+            raise TokenError(
+                "too_many_children", f"a token may have at most {self.max_children} children"
+            )
         return self._issue(
             parent.sub, actors, capabilities, exp, now, (*parent.chain, parent.jti), der
         )
@@ -376,10 +479,10 @@ class Authority:
         chain: tuple[str, ...],
         der: Sequence[Sequence[int]],
     ) -> str:
-        if not _is_name(sub):
-            raise ValueError("sub must be a non-empty string")
-        if not _is_name(actors[0]):
-            raise ValueError("actor must be a non-empty string")
+        if not _is_principal(sub):
+            raise ValueError("sub must be a short printable string")
+        if not _is_principal(actors[0]):
+            raise ValueError("actor must be a short printable string")
         jti = self._new_id()
         claims = {
             "iss": self.issuer,
@@ -408,7 +511,13 @@ class Authority:
             raise ValueError("token would be too large")
         # Every capability gets a ledger entry, limited or not, so that a
         # missing entry always means "unknown token" and never "unlimited".
-        self.store.register(jti, [c.max_calls for c in capabilities])
+        # The expiry is recorded so that `prune` can forget the token later.
+        try:
+            self.store.register(jti, [c.max_calls for c in capabilities], exp)
+        except ValueError:
+            raise  # a repeated token id; the caller's new_id is at fault
+        except Exception as exc:
+            raise TokenError("unavailable", f"store: {type(exc).__name__}") from None
         return token
 
     # -- checking -----------------------------------------------------------
@@ -425,8 +534,12 @@ class Authority:
     def authorize(self, token: str, call: Call) -> Authorization:
         """Decide one tool call made with `token`, and charge its budget.
 
-        Raises TokenError if the token does not verify. Otherwise returns the
-        Decision with the Verified record. A denied call charges nothing.
+        Raises TokenError if the token does not verify, or with code
+        "unavailable" if the store or the clock fails; never a raw store or
+        clock exception. Otherwise returns the Decision with the Verified
+        record. A denied call charges nothing, with one exception: a call
+        whose charge only completed after the token expired is denied and
+        stays charged.
         """
         now = self._now()
         verified = self._verify(token, self.audience, now)
@@ -442,8 +555,17 @@ class Authority:
         for index, capability in enumerate(verified.grant.capabilities):
             if not capability.decide(call).allowed:
                 continue
-            charged = self.store.charge(verified.budget_path(index))
+            charged = self._ask_store("charge", verified.budget_path(index))
             if charged.ok:
+                # The charge may have waited on a lock for a long time. `now`
+                # is stale by then, so the clock is read again: a call must
+                # not be allowed after the token's expiry just because its
+                # check started before. The charge is deliberately not
+                # refunded. A refund is a second write that can fail or race
+                # with other charges; failing closed (one call of budget lost
+                # on a token that has expired anyway) is preferred.
+                if not self._now() < verified.exp:
+                    return Authorization(Decision(False, "expired during authorization"), verified)
                 return Authorization(Decision(True, "ok", index), verified)
             if charged.reason == "revoked":  # revoked between verify and charge
                 raise TokenError("revoked", "the token or an ancestor was revoked")
@@ -452,18 +574,49 @@ class Authority:
         return Authorization(Decision(False, refusal), verified)
 
     def revoke(self, jti: str) -> None:
-        """Revoke a token id. The token and all its descendants stop verifying."""
+        """Revoke a token id. The token and all its descendants stop verifying.
+
+        Raises ValueError if `jti` is not a non-empty string, TokenError
+        "malformed" if it is text no token id can be (lone surrogates), and
+        TokenError "unavailable" if the store could not record it.
+        """
         if not _is_name(jti):
             raise ValueError("jti must be a non-empty string")
-        self.store.revoke(jti)
+        if not _is_encodable(jti):
+            raise _bad("jti is not encodable text")
+        self._ask_store("revoke", jti)
+
+    def prune(self) -> int:
+        """Let the store forget every token that has expired by now.
+
+        Returns how many tokens were forgotten. This is never called by
+        verify, authorize or exchange; run it from a timer or a maintenance
+        job. See store.py for why forgetting an expired token is safe.
+        """
+        return self._ask_store("prune", self._now())
 
     # -- internals ----------------------------------------------------------
 
     def _now(self) -> int | float:
-        now = self._clock()
+        """The current time, or TokenError "unavailable": no clock, no decision."""
+        try:
+            now = self._clock()
+        except Exception as exc:
+            raise TokenError("unavailable", f"clock: {type(exc).__name__}") from None
         if not _is_time(now):
-            raise TokenError("malformed", "clock returned an invalid time")
+            raise TokenError("unavailable", "clock returned an invalid time")
         return now
+
+    def _ask_store(self, method: str, *args: Any) -> Any:
+        """Call a store method; any failure becomes TokenError "unavailable".
+
+        A store outage is not the token's fault and must not be reported as
+        "malformed", but it is still a refusal.
+        """
+        try:
+            return getattr(self.store, method)(*args)
+        except Exception as exc:
+            raise TokenError("unavailable", f"store: {type(exc).__name__}") from None
 
     def _capped(self, ttl: Any) -> int | float:
         if not _is_time(ttl) or ttl <= 0:
@@ -475,15 +628,16 @@ class Authority:
         try:
             payload = self._check_signature(token)
             verified = self._read_claims(payload, audience, now)
-            if self.store.any_revoked((verified.jti, *verified.chain)):
-                raise TokenError("revoked", "the token or an ancestor was revoked")
-            if not self.store.is_registered(verified.jti):
-                raise TokenError("unknown_token", "the store has no record of this token")
-            return verified
         except TokenError:
             raise
         except Exception as exc:
             raise TokenError("malformed", type(exc).__name__) from None
+        # The token is well formed. A failure from here on is the store's.
+        if self._ask_store("any_revoked", (verified.jti, *verified.chain)):
+            raise TokenError("revoked", "the token or an ancestor was revoked")
+        if not self._ask_store("is_registered", verified.jti):
+            raise TokenError("unknown_token", "the store has no record of this token")
+        return verified
 
     def _check_signature(self, token: Any) -> bytes:
         """Return the payload bytes of a correctly signed token."""
@@ -541,7 +695,7 @@ class Authority:
             raise TokenError("wrong_audience")
 
         sub, jti, iat, exp = claims["sub"], claims["jti"], claims["iat"], claims["exp"]
-        if not _is_name(sub) or not _is_name(jti):
+        if not _is_principal(sub) or not _is_id(jti):
             raise _bad("sub and jti must be non-empty strings")
         if not _is_time(iat) or not _is_time(exp):
             raise _bad("iat and exp must be finite numbers")
@@ -557,7 +711,7 @@ class Authority:
             raise _bad("chain must be a list")
         if len(chain) > self.max_depth:
             raise TokenError("depth_exceeded", f"delegation depth is limited to {self.max_depth}")
-        if not all(_is_name(j) for j in chain):
+        if not all(_is_id(j) for j in chain):
             raise _bad("chain entries must be non-empty strings")
         if len(set(chain)) != len(chain) or jti in chain:
             raise _bad("chain repeats a token id")

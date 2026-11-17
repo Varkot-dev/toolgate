@@ -780,7 +780,7 @@ def test_unexpected_errors_fail_closed():
 
     authority, _ = make(store=BrokenStore())
     token = authority.mint("u", GRANT, "a", ttl=60)
-    assert code_of(authority, token) == "malformed"
+    assert code_of(authority, token) == "unavailable"
 
 
 @pytest.mark.parametrize("now", [float("nan"), float("inf"), None, "now", True])
@@ -1384,3 +1384,383 @@ def test_constraint_values_survive_the_wire_with_their_types():
     assert back == tricky
     values = back.constraints[0].value
     assert [type(v) for v in values] == [int, float, bool, str, str]
+
+
+# ---------------------------------------------------------------------------
+# robustness: fan-out, pruning, expiry during a charge, outages, names, sizes
+# ---------------------------------------------------------------------------
+
+
+def exchange_code(authority: Authority, *args: Any, **kwargs: Any) -> str:
+    with pytest.raises(TokenError) as info:
+        authority.exchange(*args, **kwargs)
+    return info.value.code
+
+
+def test_exchange_fan_out_is_limited_per_parent():
+    authority, _ = make(max_children=3)
+    root = authority.mint("u", GRANT, "a0", ttl=300)
+    children = [authority.exchange(root, [READ], f"a{n}", ttl=60) for n in range(3)]
+    assert exchange_code(authority, root, [READ], "a3", ttl=60) == "too_many_children"
+    assert exchange_code(authority, root, [], "a3", ttl=60) == "too_many_children"
+    # The limit is per parent token: a child has its own count, and so does a new root.
+    assert authority.exchange(children[0], [READ], "b0", ttl=30)
+    other_root = authority.mint("u", GRANT, "a0", ttl=300)
+    assert authority.exchange(other_root, [READ], "a1", ttl=60)
+    for token in children:
+        assert authority.verify(token)  # the refusals broke nothing
+
+
+def test_default_fan_out_limit_is_64():
+    authority, _ = make()
+    assert authority.max_children == 64
+    root = authority.mint("u", GRANT, "a0", ttl=300)
+    for n in range(64):
+        authority.exchange(root, [READ], f"a{n}", ttl=60)
+    assert exchange_code(authority, root, [READ], "late", ttl=60) == "too_many_children"
+
+
+def test_a_refused_exchange_does_not_use_up_a_child_slot():
+    authority, _ = make(max_children=1)
+    root = authority.mint("u", GRANT, "a0", ttl=300)
+    with pytest.raises(EscalationError):
+        authority.exchange(root, [cap("delete")], "a1", ttl=60)
+    with pytest.raises(ValueError):
+        authority.exchange(root, [READ], "", ttl=60)
+    with pytest.raises(ValueError):
+        authority.exchange(root, [READ], "a1", ttl=0)
+    assert authority.exchange(root, [READ], "a1", ttl=60)
+
+
+def test_max_children_zero_forbids_all_delegation_and_bad_values_are_refused():
+    authority, _ = make(max_children=0)
+    root = authority.mint("u", GRANT, "a0", ttl=300)
+    assert exchange_code(authority, root, [READ], "a1", ttl=60) == "too_many_children"
+    for bad in (-1, True, 2.0, "3", None):
+        with pytest.raises(ValueError):
+            make(max_children=bad)
+
+
+def test_fan_out_limit_holds_on_sqlite_across_a_restart(tmp_path):
+    store = SqliteStore(str(tmp_path / "gateway.db"))
+    authority, _ = make(store=store, max_children=2)
+    root = authority.mint("u", GRANT, "a0", ttl=300)
+    authority.exchange(root, [READ], "a1", ttl=60)
+    store.close()
+    reopened = SqliteStore(str(tmp_path / "gateway.db"))
+    restarted, _ = make(store=reopened, max_children=2)
+    restarted.exchange(root, [READ], "a2", ttl=60)
+    assert exchange_code(restarted, root, [READ], "a3", ttl=60) == "too_many_children"
+    reopened.close()
+
+
+@pytest.mark.parametrize("kind", ["memory", "sqlite"])
+def test_prune_forgets_expired_tokens_and_nothing_else(kind, tmp_path):
+    store = MemoryStore() if kind == "memory" else SqliteStore(str(tmp_path / "gateway.db"))
+    authority, clock = make(store=store)
+    root = authority.mint("u", Grant((budgeted(5),), T0 + 300), "a0", ttl=300)
+    short = authority.exchange(root, [budgeted(2)], "a1", ttl=30)
+    longer = authority.exchange(root, [budgeted(2)], "a2", ttl=200)
+    root_jti, short_jti = authority.verify(root).jti, authority.verify(short).jti
+    assert authority.authorize(short, READ_CALL)
+    authority.revoke(short_jti)
+
+    assert authority.prune() == 0  # nothing has expired yet
+    clock.now = T0 + 30
+    assert authority.prune() == 1  # exactly the short-lived child
+    assert not store.is_registered(short_jti)
+    assert store.usage(short_jti, 0) is None
+    assert not store.any_revoked([short_jti])  # its revocation entry went with it
+    assert code_of(authority, short) == "expired"
+    # Everything still alive is untouched, including what the dead child spent.
+    assert store.usage(root_jti, 0) == (1, 5)
+    assert authority.authorize(longer, READ_CALL)
+    assert authority.authorize(root, READ_CALL)
+
+    clock.now = T0 + 300
+    assert authority.prune() == 2
+    assert not store.is_registered(root_jti)
+    # A clock set backwards after pruning no longer revives anything.
+    clock.now = T0 + 1
+    assert code_of(authority, short) == "unknown_token"
+    assert code_of(authority, root) == "unknown_token"
+    if kind == "sqlite":
+        store.close()
+
+
+def test_prune_is_never_run_on_the_hot_path():
+    class Counting(MemoryStore):
+        pruned = 0
+
+        def prune(self, now):
+            self.pruned += 1
+            return super().prune(now)
+
+    store = Counting()
+    authority, clock = make(store=store)
+    root = authority.mint("u", GRANT, "a0", ttl=300)
+    child = authority.exchange(root, [READ], "a1", ttl=60)
+    authority.verify(child)
+    authority.authorize(child, READ_CALL)
+    authority.revoke(authority.verify(child).jti)
+    assert store.pruned == 0
+    authority.prune()
+    assert store.pruned == 1
+
+
+def test_a_charge_that_finishes_after_expiry_is_denied():
+    clock = Clock()
+
+    class SlowStore(MemoryStore):
+        """The charge waits for a lock, and the token expires while it waits."""
+
+        def charge(self, path):
+            result = super().charge(path)
+            clock.now = T0 + 60
+            return result
+
+    authority, _ = make(store=SlowStore(), clock=clock)
+    token = authority.mint("u", Grant((budgeted(3),), T0 + 300), "a", ttl=60)
+    result = authority.authorize(token, READ_CALL)
+    assert not result
+    assert result.decision.reason == "expired during authorization"
+    assert result.verified.jti == claims_of(token)["jti"]
+    # The call was charged and stays charged: no refund.
+    assert authority.store.usage(result.verified.jti, 0) == (1, 3)
+
+
+def test_a_slow_charge_that_finishes_just_before_expiry_is_allowed():
+    clock = Clock()
+
+    class SlowStore(MemoryStore):
+        def charge(self, path):
+            result = super().charge(path)
+            clock.now = T0 + 59.5
+            return result
+
+    authority, _ = make(store=SlowStore(), clock=clock)
+    token = authority.mint("u", Grant((budgeted(3),), T0 + 300), "a", ttl=60)
+    assert authority.authorize(token, READ_CALL)
+
+
+class Outage(RuntimeError):
+    pass
+
+
+def broken_store(method: str) -> MemoryStore:
+    """A MemoryStore whose one named method starts failing when `down` is set."""
+
+    class Broken(MemoryStore):
+        down = False
+
+    original = getattr(MemoryStore, method)
+
+    def failing(self, *args, **kwargs):
+        if self.down:
+            raise Outage("database is on fire")
+        return original(self, *args, **kwargs)
+
+    setattr(Broken, method, failing)
+    return Broken()
+
+
+@pytest.mark.parametrize("method", ["any_revoked", "is_registered", "charge"])
+def test_a_store_outage_is_unavailable_never_a_raw_error(method):
+    store = broken_store(method)
+    authority, _ = make(store=store)
+    token = authority.mint("u", Grant((budgeted(3),), T0 + 300), "a", ttl=60)
+    store.down = True
+    with pytest.raises(TokenError) as info:
+        authority.authorize(token, READ_CALL)
+    assert info.value.code == "unavailable"
+    if method != "charge":
+        assert code_of(authority, token) == "unavailable"
+        assert exchange_code(authority, token, [budgeted(1)], "a1", ttl=30) == "unavailable"
+    store.down = False
+    assert authority.authorize(token, READ_CALL)  # the outage was transient
+
+
+@pytest.mark.parametrize("method", ["add_child", "register"])
+def test_a_store_outage_during_exchange_is_unavailable(method):
+    store = broken_store(method)
+    authority, _ = make(store=store)
+    root = authority.mint("u", GRANT, "a0", ttl=300)
+    store.down = True
+    assert exchange_code(authority, root, [READ], "a1", ttl=60) == "unavailable"
+
+
+def test_a_store_outage_during_revoke_is_unavailable():
+    store = broken_store("revoke")
+    authority, _ = make(store=store)
+    store.down = True
+    with pytest.raises(TokenError) as info:
+        authority.revoke("some-token-id")
+    assert info.value.code == "unavailable"
+
+
+def test_a_closed_sqlite_store_is_unavailable_not_malformed(tmp_path):
+    store = SqliteStore(str(tmp_path / "gateway.db"))
+    authority, _ = make(store=store)
+    token = authority.mint("u", GRANT, "a", ttl=60)
+    store.close()
+    assert code_of(authority, token) == "unavailable"
+    with pytest.raises(TokenError) as info:
+        authority.authorize(token, READ_CALL)
+    assert info.value.code == "unavailable"
+    assert exchange_code(authority, token, [READ], "a1", ttl=30) == "unavailable"
+    with pytest.raises(TokenError) as info:
+        authority.revoke("x")
+    assert info.value.code == "unavailable"
+
+
+def test_a_clock_that_raises_is_unavailable_everywhere():
+    class FailingClock(Clock):
+        fail_after: int | None = None
+
+        def __call__(self) -> float:
+            if self.fail_after is not None:
+                if self.fail_after == 0:
+                    raise OSError("no time source")
+                self.fail_after -= 1
+            return self.now
+
+    clock = FailingClock()
+    authority, _ = make(clock=clock)
+    token = authority.mint("u", Grant((budgeted(3),), T0 + 300), "a", ttl=60)
+    clock.fail_after = 0
+    assert code_of(authority, token) == "unavailable"
+    assert exchange_code(authority, token, [budgeted(1)], "a1", ttl=30) == "unavailable"
+    with pytest.raises(TokenError) as info:
+        authority.authorize(token, READ_CALL)
+    assert info.value.code == "unavailable"
+    # The clock works for the first read and fails for the one after the charge.
+    clock.fail_after = 1
+    with pytest.raises(TokenError) as info:
+        authority.authorize(token, READ_CALL)
+    assert info.value.code == "unavailable"
+
+
+@pytest.mark.parametrize("now", [float("nan"), None, "now"])
+def test_a_clock_returning_nonsense_is_unavailable_not_malformed(now):
+    authority, clock = make()
+    token = authority.mint("u", GRANT, "a", ttl=60)
+    clock.now = now
+    assert code_of(authority, token) == "unavailable"
+
+
+@pytest.mark.parametrize("kind", ["memory", "sqlite"])
+@pytest.mark.parametrize("jti", ["evil\ud800", "\udfff", "a\udc80b"])
+def test_revoking_text_that_cannot_be_encoded_is_malformed(kind, jti):
+    store = MemoryStore() if kind == "memory" else SqliteStore(":memory:")
+    authority, _ = make(store=store)
+    with pytest.raises(TokenError) as info:
+        authority.revoke(jti)
+    assert info.value.code == "malformed"
+    assert not isinstance(info.value, UnicodeError)
+
+
+@pytest.mark.parametrize("kind", ["memory", "sqlite"])
+def test_a_token_id_that_cannot_be_encoded_is_malformed_not_unavailable(kind):
+    store = MemoryStore() if kind == "memory" else SqliteStore(":memory:")
+    authority, _ = make(store=store)
+    root = authority.mint("u", GRANT, "a0", ttl=300)
+    child = authority.exchange(root, [READ], "a1", ttl=60)
+    assert code_of(authority, resign(root, jti="evil\ud800")) == "malformed"
+    assert code_of(authority, resign(child, chain=["evil\ud800"])) == "malformed"
+
+
+BAD_PRINCIPALS = [
+    "evil\ud800",
+    "a\x00b",
+    "line\nbreak",
+    "tab\there",
+    "\x1b[2Jcleared",
+    "rtl‮override",
+    "",
+    "x" * 129,
+    Liar("agent"),
+    b"agent",
+    None,
+]
+
+
+@pytest.mark.parametrize("name", BAD_PRINCIPALS)
+def test_names_the_audit_log_cannot_record_are_refused_when_issuing(name):
+    authority, _ = make()
+    with pytest.raises(ValueError):
+        authority.mint(name, GRANT, "a", ttl=60)
+    with pytest.raises(ValueError):
+        authority.mint("u", GRANT, name, ttl=60)
+    root = authority.mint("u", GRANT, "a0", ttl=300)
+    with pytest.raises(ValueError):
+        authority.exchange(root, [READ], name, ttl=60)
+    assert authority.exchange(root, [READ], "a1", ttl=60)  # nothing was counted or left behind
+
+
+@pytest.mark.parametrize("name", [n for n in BAD_PRINCIPALS if type(n) is str])
+def test_names_the_audit_log_cannot_record_are_refused_when_verifying(name):
+    authority, _ = make()
+    root = authority.mint("u", GRANT, "a0", ttl=300)
+    child = authority.exchange(root, [READ], "a1", ttl=60)
+    assert code_of(authority, resign(root, sub=name)) == "malformed"
+    assert code_of(authority, resign(root, act={"sub": name})) == "malformed"
+    nested = {"sub": "a1", "act": {"sub": name}}
+    assert code_of(authority, resign(child, act=nested)) == "malformed"
+
+
+@pytest.mark.parametrize("name", ["x" * 128, "agent-1", "Zoë", "助手 7", "a b", "u@example.test"])
+def test_ordinary_names_are_accepted(name):
+    authority, _ = make()
+    root = authority.mint(name, GRANT, name, ttl=300)
+    child = authority.exchange(root, [READ], name, ttl=60)
+    verified = authority.verify(child)
+    assert verified.sub == name and verified.actors == (name, name)
+
+
+def _too_many_capabilities() -> list[Any]:
+    return [READ] * 257
+
+
+def _too_many_constraints() -> list[Any]:
+    return [{"tool": "read", "args": {f"arg{n}": {"any": True} for n in range(65)}}]
+
+
+def _too_many_bytes() -> list[Any]:
+    return [{"tool": "read", "args": {"path": {"in": [f"reports/{n}" for n in range(8000)]}}}]
+
+
+def _too_many_bytes_in_total() -> list[Any]:
+    one = {"tool": "read", "args": {"path": {"in": ["reports/" + "x" * 400]}}}
+    return [one] * 200
+
+
+@pytest.mark.parametrize(
+    "request_",
+    [_too_many_capabilities, _too_many_constraints, _too_many_bytes, _too_many_bytes_in_total],
+)
+def test_an_oversized_child_request_is_refused_before_the_attenuation_check(request_, monkeypatch):
+    calls = []
+
+    def spy(parent, child):
+        calls.append(child)
+        return check_attenuation(parent, child)
+
+    monkeypatch.setattr("toolgate.tokens.check_attenuation", spy)
+    authority, _ = make()
+    root = authority.mint("u", GRANT, "a0", ttl=300)
+    with pytest.raises(TokenError) as info:
+        authority.exchange(root, request_(), "a1", ttl=60)
+    assert info.value.code == "malformed"
+    assert isinstance(info.value, ValueError)  # what an unreadable request has always raised
+    assert calls == []
+    # A request of ordinary size still reaches the check.
+    authority.exchange(root, [READ], "a1", ttl=60)
+    assert len(calls) == 1
+
+
+def test_a_request_at_the_size_limits_is_still_checked():
+    authority, _ = make()
+    wide = {"tool": "wide", "args": {f"arg{n}": {"any": True} for n in range(64)}}
+    root = authority.mint("u", Grant((Capability.from_dict(wide),), T0 + 300), "a0", ttl=300)
+    child = authority.exchange(root, [wide], "a1", ttl=60)
+    assert len(authority.verify(child).grant.capabilities[0].constraints) == 64

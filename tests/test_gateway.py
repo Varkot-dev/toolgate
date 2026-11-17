@@ -9,14 +9,22 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import contextlib
 import hashlib
 import json
+import logging
+import tempfile
 import threading
+import time
+from collections.abc import Callable
 from pathlib import Path
+from types import MappingProxyType
 from typing import Any
 
 import pytest
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+from hypothesis import given, settings
+from hypothesis import strategies as st
 from jwt import PyJWS
 
 from toolgate.approvals import ApprovalQueue
@@ -26,6 +34,7 @@ from toolgate.gateway import (
     INVALID_TOOL,
     MAX_REASON_CHARS,
     TRUNCATED,
+    AuditUnavailable,
     CallOutcome,
     Gateway,
     bounded,
@@ -34,7 +43,7 @@ from toolgate.gateway import (
 )
 from toolgate.policy import Policy
 from toolgate.store import MemoryStore
-from toolgate.tokens import Authority
+from toolgate.tokens import Authority, EscalationError, TokenError
 
 KEY = Ed25519PrivateKey.from_private_bytes(bytes(range(32)))
 OTHER_KEY = Ed25519PrivateKey.from_private_bytes(bytes(range(1, 33)))
@@ -168,6 +177,51 @@ class Env:
 
     def total_tool_calls(self) -> int:
         return sum(len(s.calls) for s in self.spies.values())
+
+    def rebuild(self, tools: dict[str, Any] | None = None, **options: Any) -> Gateway:
+        """Replace the gateway with one over the same parts, with other tools or limits."""
+        self.tools = {**self.tools, **(tools or {})}
+        self.gateway = Gateway(
+            self.authority,
+            self.gateway.policy,
+            self.audit,
+            self.queue,
+            self.tools,
+            clock=self.clock,
+            **options,
+        )
+        return self.gateway
+
+    def child(self, parent: str, caps: list[dict[str, Any]], actor: str = "agent:sub") -> str:
+        return self.authority.exchange(parent, caps, actor, 300)
+
+
+class Blocker:
+    """A tool that waits until the test lets it go, and counts who is inside."""
+
+    def __init__(self) -> None:
+        self.started = threading.Semaphore(0)
+        self.release = threading.Event()
+        self.calls = 0
+        self._lock = threading.Lock()
+
+    def __call__(self, **kwargs: Any) -> str:
+        with self._lock:
+            self.calls += 1
+        self.started.release()
+        assert self.release.wait(30), "the test never released the tool"
+        return "finished"
+
+    def wait_started(self, count: int = 1) -> None:
+        for _ in range(count):
+            assert self.started.acquire(timeout=10), "the tool did not start"
+
+
+def wait_until(condition: Callable[[], bool]) -> None:
+    deadline = time.monotonic() + 10
+    while not condition():
+        assert time.monotonic() < deadline, "condition never became true"
+        time.sleep(0.001)
 
 
 def _b64(segment: str) -> bytes:
@@ -314,7 +368,11 @@ def _forged(payload: dict[str, Any]) -> str:
 def test_token_errors_deny_with_the_code_and_run_nothing(env: Env) -> None:
     good = env.mint()
     head, payload, signature = good.split(".")
-    flipped = signature[:-2] + ("AA" if signature[-2:] != "AA" else "BB")
+    # Change the FIRST character of the signature: every one of its six bits is
+    # signature data, so the result is still canonical base64url and can only
+    # fail as a bad signature. (Changing the last two characters, as this test
+    # once did, sometimes left stray padding bits, which is "malformed".)
+    flipped = ("B" if signature[0] == "A" else "A") + signature[1:]
     other = Authority(OTHER_KEY, "https://gw.test", "gw", MemoryStore(), clock=env.clock)
     foreign = other.mint("user:alice", Grant((), T0 + 60), "a", 60)
     expired = env.mint(ttl=10)
@@ -571,8 +629,8 @@ def test_audit_failure_blocks_execution(env: Env) -> None:
     assert (outcome.status, outcome.stage) == ("denied", "audit")
     assert outcome.audit_seq is None
     assert env.spies["read_file"].calls == []  # the point: no entry, no execution
-    # Stated honestly: the budget was already spent in step d and is not refunded.
-    assert env.used(token, READ) == 1
+    # The budget was charged in step d and is given back: nothing ran.
+    assert env.used(token, READ) == 0
     assert env.entries() == []
 
 
@@ -703,3 +761,594 @@ def test_every_outcome_writes_exactly_one_entry_and_the_log_verifies(env: Env) -
     assert result.ok and result.entries == len(script)
     # The two identical pending requests share one approval record.
     assert len(env.queue.pending(env.clock.now)) == 1
+
+
+# ====================================================================================
+# Findings from the security reviews. Each test below failed before its fix.
+# ====================================================================================
+
+# ------------------------------------------- 1. no caller-chosen text in the audit log
+
+HOSTILE_TOOL = '<img src=x onerror=alert(1)>","decision":"allow'
+HOSTILE_ARG = "password=hunter2&token=s3cr3t-value"
+
+
+def test_grant_denial_logs_a_code_and_never_the_callers_names(env: Env) -> None:
+    token = env.mint()
+    cases = [
+        (HOSTILE_TOOL, {}, "no_capability", "grant: no_capability"),
+        ("read_file", {"path": "reports/x", HOSTILE_ARG: 1}, "argument_not_permitted", None),
+        ("read_file", {}, "argument_missing", "grant: argument_missing"),
+        (
+            "read_file",
+            {"path": HOSTILE_ARG},
+            "constraint_failed",
+            "grant: constraint_failed (glob)",
+        ),
+    ]
+    for tool, args, code, rule in cases:
+        outcome = env.gateway.handle_call(token, tool, args)
+        assert (outcome.status, outcome.stage, outcome.code) == ("denied", "grant", code)
+        assert env.entries()[-1]["rule"] == (rule or f"grant: {code}")
+    # The caller still gets the readable reason: it is their own input.
+    assert (
+        "password=hunter2" in env.gateway.handle_call(token, "read_file", {HOSTILE_ARG: 1}).reason
+    )
+    raw = env.audit_path.read_text()
+    for needle in (HOSTILE_ARG, "hunter2", "onerror", "<img"):
+        assert needle not in raw
+    assert all(e["tool"] in ("read_file", INVALID_TOOL) for e in env.entries())
+    assert env.total_tool_calls() == 0 and env.used(token, READ) == 0
+
+
+_SAFE_LOOKING = st.text(alphabet="abcdef0189_.:/-=<>\"' &", min_size=9, max_size=40)
+_ANY_TEXT = st.text(min_size=9, max_size=40)
+_NAMES = st.one_of(_SAFE_LOOKING, _ANY_TEXT)
+_TOOLS = st.one_of(st.sampled_from(["read_file", "send_email", "delete_file", "ghost"]), _NAMES)
+_VALUES = st.one_of(_NAMES, st.integers(-5, 5), st.booleans(), st.lists(_NAMES, max_size=2))
+_ARGS = st.dictionaries(
+    st.one_of(st.sampled_from(["path", "to", "body"]), _NAMES), _VALUES, max_size=4
+)
+
+
+def _strings(value: Any) -> list[str]:
+    if type(value) is str:
+        return [value]
+    if type(value) is dict:
+        return [s for k, v in value.items() for s in (k, *_strings(v))]
+    if type(value) is list:
+        return [s for v in value for s in _strings(v)]
+    return []
+
+
+@settings(max_examples=80, deadline=None)
+@given(tool=_TOOLS, args=_ARGS, junk_token=st.one_of(st.none(), _NAMES), via_child=st.booleans())
+def test_no_caller_supplied_string_reaches_the_audit_log(
+    tool: str, args: dict[str, Any], junk_token: str | None, via_child: bool
+) -> None:
+    with tempfile.TemporaryDirectory() as directory:
+        env = Env(Path(directory))
+        try:
+            token = env.mint()
+            if via_child:
+                token = env.child(token, CAPS[:3])
+            env.gateway.handle_call(token if junk_token is None else junk_token, tool, args)
+            # An exchange is caller input too: requested tool and argument names.
+            requested = [{"tool": tool, "args": {name: {"any": True} for name in args}}]
+            with contextlib.suppress(TokenError, EscalationError, ValueError, TypeError):
+                env.gateway.exchange_token(token, requested, "agent:x", 60)
+            supplied = {s for s in [tool, junk_token or "", *_strings(args)] if len(s) > 8}
+            if loggable_tool(tool) == tool:
+                supplied.discard(tool)  # the one thing a caller may put in the log
+            raw = env.audit_path.read_text()
+            assert raw.count("\n") >= 2  # every attempt above left its entry
+            logged = [s for entry in env.entries() for s in _strings(entry)]
+            for text in supplied:
+                assert text not in raw, text
+                assert not any(text in field for field in logged), text
+        finally:
+            env.audit.close()
+
+
+def test_token_lifecycle_is_audited_without_capability_contents(env: Env) -> None:
+    grant = Grant(tuple(Capability.from_dict(c) for c in CAPS[:2]), T0 + 600)
+    token, minted = env.gateway.mint_token("user:alice", grant, "agent:orchestrator", 600)
+    narrower = [{"tool": "read_file", "args": {"path": {"glob": "reports/q3/*"}}, "max_calls": 1}]
+    child, exchanged = env.gateway.exchange_token(token, narrower, "agent:sub", 60)
+    wider = [{"tool": "read_file", "args": {"path": {"glob": "*"}}}]
+    with pytest.raises(EscalationError):
+        env.gateway.exchange_token(token, wider, "agent:sub", 60)
+    with pytest.raises(TokenError):
+        env.gateway.exchange_token("junk-token-" + "z" * 20, narrower, "agent:sub", 60)
+    with pytest.raises(ValueError):
+        env.gateway.exchange_token(token, [{"tool": "read_file", "surprise": 1}], "agent:sub", 60)
+    assert env.gateway.revoke_token(minted.jti) is not None
+    assert env.gateway.revoke_token("line\nbreak") is not None  # logged as a hash of itself
+
+    rows = [(e["tool"], e["decision"], e["rule"], e["jti"]) for e in env.entries()]
+    assert rows[:5] == [
+        ("token:mint", "allow", "token: minted by admin", minted.jti),
+        ("token:exchange", "allow", f"token: exchanged from {minted.jti}", exchanged.jti),
+        ("token:exchange", "deny", "exchange: escalation", minted.jti),
+        ("token:exchange", "deny", "exchange: malformed", rows[3][3]),
+        ("token:exchange", "deny", "exchange: invalid_request", minted.jti),
+    ]
+    assert rows[3][3].startswith("unverified:")
+    assert rows[5] == ("token:revoke", "allow", "token: revoked by admin", minted.jti)
+    assert rows[6][3].startswith("sha256:") and "\n" not in rows[6][3]
+    entries = env.entries()
+    assert entries[1]["actors"] == ["agent:sub", "agent:orchestrator"]
+    # Only a hash of the capabilities is written, and it can be recomputed from the token.
+    assert entries[0]["args_hash"] == hash_args(
+        {"capabilities": [c.to_dict() for c in minted.grant.capabilities]}
+    )
+    assert entries[1]["args_hash"] != entries[0]["args_hash"]
+    raw = env.audit_path.read_text()
+    for content in ("reports/", "glob", "max_calls", "surprise", "junk-token"):
+        assert content not in raw
+    with pytest.raises(TokenError):  # the revocation was real
+        env.authority.verify(child)
+    assert verify(env.audit_path).ok
+
+
+def test_a_token_that_cannot_be_audited_is_not_issued(env: Env) -> None:
+    grant = Grant(tuple(Capability.from_dict(c) for c in CAPS[:2]), T0 + 600)
+    parent, _ = env.gateway.mint_token("user:alice", grant, "agent:orchestrator", 600)
+    issued: list[str] = []
+    real_mint, real_exchange = env.authority.mint, env.authority.exchange
+
+    def spy_mint(*a: Any, **k: Any) -> str:
+        issued.append(real_mint(*a, **k))
+        return issued[-1]
+
+    def spy_exchange(*a: Any, **k: Any) -> str:
+        issued.append(real_exchange(*a, **k))
+        return issued[-1]
+
+    env.authority.mint, env.authority.exchange = spy_mint, spy_exchange  # type: ignore[method-assign]
+    env.audit.fail = True
+    with pytest.raises(AuditUnavailable):
+        env.gateway.mint_token("user:alice", grant, "agent:orchestrator", 600)
+    with pytest.raises(AuditUnavailable):
+        env.gateway.exchange_token(parent, [CAPS[0]], "agent:sub", 60)
+    # Revocation is never held back by the log; the caller is told it was not recorded.
+    assert env.gateway.revoke_token("some-other-token") is None
+    env.audit.fail = False
+    assert len(issued) == 2
+    for token in issued:  # signed, but revoked again before anyone could hold it
+        with pytest.raises(TokenError) as info:
+            env.authority.verify(token)
+        assert info.value.code == "revoked"
+    assert env.store.any_revoked(["some-other-token"])
+    assert [e["tool"] for e in env.entries()] == ["token:mint"]
+
+
+# ---------------------------------------------- 3. budget and the order of operations
+
+
+def test_a_charged_call_that_never_ran_is_refunded(env: Env) -> None:
+    token = env.mint()
+    env.audit.fail = True
+    for _ in range(5):  # an audit outage must not drain the budget of 2
+        outcome = env.gateway.handle_call(token, "read_file", {"path": "reports/x"})
+        assert (outcome.status, outcome.stage) == ("denied", "audit")
+        assert env.used(token, READ) == 0
+    env.audit.fail = False
+    assert env.gateway.handle_call(token, "read_file", {"path": "reports/x"}).status == "allowed"
+    assert env.gateway.handle_call(token, "read_file", {"path": "reports/x"}).status == "allowed"
+    assert env.used(token, READ) == 2
+    assert len(env.spies["read_file"].calls) == 2
+
+
+def test_an_audit_clock_fault_after_the_charge_is_refunded(tmp_path: Path) -> None:
+    env = Env(tmp_path)
+    ticks = iter([10, 5, 30])  # the second reading goes backwards: that append is refused
+    env.audit.close()
+    env.audit = FlakyAudit(env.audit_path, clock=lambda: next(ticks))
+    env.rebuild()
+    parent = env.mint()
+    child = env.child(parent, [CAPS[READ]])
+    assert env.gateway.handle_call(child, "read_file", {"path": "reports/a"}).status == "allowed"
+    refused = env.gateway.handle_call(child, "read_file", {"path": "reports/b"})
+    assert (refused.status, refused.stage, refused.audit_seq) == ("denied", "audit", None)
+    assert env.spies["read_file"].calls == [{"path": "reports/a"}]
+    # The charge for the call that did not run came back on both levels of the chain.
+    assert (env.used(child, 0), env.used(parent, READ)) == (1, 1)
+    assert env.gateway.handle_call(child, "read_file", {"path": "reports/c"}).status == "allowed"
+    assert (env.used(child, 0), env.used(parent, READ)) == (2, 2)
+    assert [e["decision"] for e in env.entries()] == ["allow", "allow"]
+
+
+def test_refund_reaches_every_level_of_a_delegation_chain(env: Env) -> None:
+    parent = env.mint()
+    child = env.child(parent, [CAPS[READ]])
+    env.audit.fail = True
+    outcome = env.gateway.handle_call(child, "read_file", {"path": "reports/x"})
+    assert (outcome.status, outcome.stage) == ("denied", "audit")
+    assert (env.used(child, 0), env.used(parent, READ)) == (0, 0)
+    assert env.total_tool_calls() == 0
+
+
+def test_a_call_that_cannot_be_logged_is_refused_before_any_charge(
+    env: Env, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    charges: list[Any] = []
+    real_charge = env.store.charge
+
+    def counting(path: Any) -> Any:
+        charges.append(path)
+        return real_charge(path)
+
+    monkeypatch.setattr(env.store, "charge", counting)
+    seen: list[tuple[Any, ...]] = []
+
+    def never(tool: Any, args: Any, actors: Any) -> str:
+        seen.append((tool, tuple(actors)))
+        return "actors take too many bytes"
+
+    monkeypatch.setattr("toolgate.gateway.loggable", never)
+    token = env.mint()
+    outcome = env.gateway.handle_call(token, "read_file", {"path": "reports/x"})
+    assert (outcome.status, outcome.stage) == ("denied", "audit")
+    assert seen == [("read_file", ("agent:orchestrator",))]
+    assert charges == []  # not charged and refunded: never charged
+    assert env.used(token, READ) == 0 and env.total_tool_calls() == 0
+    assert env.entries()[-1]["rule"] == "audit: unloggable"
+
+
+def test_a_call_whose_tool_started_is_never_refunded(env: Env) -> None:
+    token = env.mint([{"tool": "boom", "args": {}, "max_calls": 3}])
+    outcome = env.gateway.handle_call(token, "boom", {})
+    assert outcome.status == "error"
+    assert env.spies["read_file"].calls == [{"boom": True}]  # it ran, so it stays charged
+    assert env.used(token, 0) == 1
+
+
+def test_a_refund_that_fails_leaves_the_budget_spent(
+    env: Env, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def broken(path: Any) -> bool:
+        raise OSError("store down")
+
+    monkeypatch.setattr(env.store, "refund", broken)
+    token = env.mint()
+    env.audit.fail = True
+    outcome = env.gateway.handle_call(token, "read_file", {"path": "reports/x"})
+    assert (outcome.status, outcome.stage) == ("denied", "audit")  # still an outcome, no raise
+    assert env.used(token, READ) == 1 and env.total_tool_calls() == 0
+
+
+@pytest.mark.parametrize(
+    ("after_charge", "stage", "code"),
+    [(float("nan"), "unavailable", ""), (T0 + 10_000, "grant", "expired_during_authorization")],
+)
+def test_a_clock_fault_or_expiry_right_after_the_charge_is_refunded(
+    env: Env, monkeypatch: pytest.MonkeyPatch, after_charge: float, stage: str, code: str
+) -> None:
+    token = env.mint()
+    real_charge = env.store.charge
+
+    def charge_then_move_clock(path: Any) -> Any:
+        result = real_charge(path)
+        env.clock.now = after_charge
+        return result
+
+    monkeypatch.setattr(env.store, "charge", charge_then_move_clock)
+    outcome = env.gateway.handle_call(token, "read_file", {"path": "reports/x"})
+    env.clock.now = T0
+    assert (outcome.status, outcome.stage, outcome.code) == ("denied", stage, code)
+    assert env.spies["read_file"].calls == []
+    assert env.used(token, READ) == 0  # charged, not run, given back
+    (entry,) = env.entries()
+    assert entry["decision"] == "deny"
+
+
+# ----------------------------------- 4. revocation or expiry between charge and start
+
+
+class HookedAudit(FlakyAudit):
+    """Runs `after_allow` once, right after an allow or approved entry was written."""
+
+    after_allow: Callable[[], None] | None = None
+
+    def append(self, **fields: Any) -> Any:
+        entry = super().append(**fields)
+        if fields["decision"] in ("allow", "approved") and self.after_allow is not None:
+            hook, self.after_allow = self.after_allow, None
+            hook()
+        return entry
+
+
+def hooked(tmp_path: Path) -> Env:
+    env = Env(tmp_path)
+    env.audit.close()
+    env.audit = HookedAudit(env.audit_path)
+    env.rebuild()
+    return env
+
+
+def test_revocation_landing_during_the_audit_write_stops_the_tool(tmp_path: Path) -> None:
+    env = hooked(tmp_path)
+    parent = env.mint()
+    child = env.child(parent, [CAPS[READ]])
+    env.audit.after_allow = lambda: env.authority.revoke(env.jti(parent))
+    outcome = env.gateway.handle_call(child, "read_file", {"path": "reports/x"})
+    assert (outcome.status, outcome.stage, outcome.reason) == ("denied", "token", "revoked")
+    assert env.spies["read_file"].calls == []  # the point
+    assert (env.used(child, 0), env.used(parent, READ)) == (0, 0)  # and it was refunded
+    allow, deny = env.entries()
+    assert (allow["decision"], deny["decision"]) == ("allow", "deny")
+    assert deny["rule"] == "token: revoked; allowed at seq 0 but not run"
+    assert deny["jti"] == allow["jti"] == env.jti(child)
+    assert outcome.audit_seq == 1
+
+
+def test_expiry_landing_during_the_audit_write_stops_the_tool(tmp_path: Path) -> None:
+    env = hooked(tmp_path)
+    token = env.mint(ttl=10)
+
+    def expire() -> None:
+        env.clock.now += 11
+
+    env.audit.after_allow = expire
+    outcome = env.gateway.handle_call(token, "read_file", {"path": "reports/x"})
+    assert (outcome.status, outcome.stage, outcome.reason) == ("denied", "token", "expired")
+    assert env.spies["read_file"].calls == []
+    assert env.used(token, READ) == 0
+    assert env.entries()[-1]["rule"] == "token: expired; allowed at seq 0 but not run"
+
+
+# ------------------------------------------------ 5. every path returns a CallOutcome
+
+
+class Hostile(dict):  # type: ignore[type-arg]
+    """A mapping whose every access blows up with something that is not a ValueError."""
+
+    def keys(self) -> Any:
+        raise RuntimeError("boom from keys")
+
+    def __iter__(self) -> Any:
+        raise KeyError("boom from iter")
+
+    def __getitem__(self, key: Any) -> Any:
+        raise RuntimeError("boom from getitem")
+
+    def __len__(self) -> int:
+        return 1
+
+
+@pytest.mark.parametrize("valid_token", [True, False])
+def test_a_hostile_mapping_is_a_denied_call_not_an_exception(env: Env, valid_token: bool) -> None:
+    token = env.mint() if valid_token else "junk"
+    outcome = env.gateway.handle_call(token, "read_file", MappingProxyType(Hostile()))
+    assert type(outcome) is CallOutcome
+    assert (outcome.status, outcome.stage, outcome.reason) == ("denied", "call", "malformed call")
+    assert outcome.authenticated is valid_token
+    (entry,) = env.entries()
+    assert (entry["decision"], entry["rule"]) == ("deny", "call: malformed call")
+    assert env.total_tool_calls() == 0
+    if valid_token:
+        assert env.used(token, READ) == 0
+
+
+def test_a_tool_removed_from_the_registry_mid_call_cannot_raise_after_the_charge(
+    tmp_path: Path,
+) -> None:
+    env = hooked(tmp_path)
+    token = env.mint()
+    env.audit.after_allow = lambda: env.gateway._tools.pop("read_file")
+    outcome = env.gateway.handle_call(token, "read_file", {"path": "reports/x"})
+    # The callable was taken before the charge, so the call that was checked, charged
+    # and logged is the call that ran.
+    assert type(outcome) is CallOutcome and outcome.status == "allowed"
+    assert env.spies["read_file"].calls == [{"path": "reports/x"}]
+    assert env.used(token, READ) == 1
+    assert [e["decision"] for e in env.entries()] == ["allow"]
+    later = env.gateway.handle_call(token, "read_file", {"path": "reports/x"})
+    assert (later.status, later.stage) == ("denied", "tool")
+    assert env.used(token, READ) == 1
+
+
+def test_an_unexpected_failure_inside_the_pipeline_is_a_refusal_with_an_entry(
+    env: Env, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    token = env.mint()
+
+    def broken(*a: Any, **k: Any) -> Any:
+        raise RuntimeError("bug in the queue lookup")
+
+    monkeypatch.setattr(env.gateway, "_park", broken)
+    outcome = env.gateway.handle_call(token, "send_email", {"to": "x@evil.test", "body": "b"})
+    assert (outcome.status, outcome.stage) == ("denied", "unavailable")
+    assert env.entries()[-1]["rule"] == "unavailable: internal error"
+    assert env.total_tool_calls() == 0 and env.used(token, SEND) == 0
+
+
+# ------------------------------------------------------ 8. in-flight cap and timeouts
+
+
+def test_in_flight_calls_are_capped_per_root_token(env: Env) -> None:
+    blocker = Blocker()
+    env.rebuild({"ghost": blocker}, max_in_flight_per_root=2)
+    ghost = {"tool": "ghost", "args": {}, "max_calls": 10}
+    root = env.mint([ghost, CAPS[READ]])
+    children = [env.child(root, [ghost], f"agent:{i}") for i in range(3)]
+    other_root = env.mint([ghost, CAPS[READ]])
+    results: list[CallOutcome] = []
+    threads = [
+        threading.Thread(target=lambda t=t: results.append(env.gateway.handle_call(t, "ghost", {})))
+        for t in children[:2]
+    ]
+    try:
+        for thread in threads:
+            thread.start()
+        blocker.wait_started(2)
+        assert env.gateway.in_flight(env.jti(root)) == 2
+        # A third child of the same root, and the root itself, are over the cap.
+        for token in (children[2], root):
+            refused = env.gateway.handle_call(token, "ghost", {})
+            assert (refused.status, refused.stage, refused.code) == (
+                "denied",
+                "limit",
+                "in_flight_limit",
+            )
+        assert blocker.calls == 2  # the refused calls never reached the tool
+        assert env.used(children[2], 0) == 0 and env.used(root, 0) == 2  # nor the budget
+        assert env.entries()[-1]["rule"] == "limit: in_flight"
+        # A different root is not affected.
+        assert env.gateway.handle_call(other_root, "read_file", {"path": "reports/x"}).allowed
+    finally:
+        blocker.release.set()
+        for thread in threads:
+            thread.join(10)
+    assert [r.status for r in results] == ["allowed", "allowed"]
+    assert env.gateway.in_flight(env.jti(root)) == 0
+    assert env.gateway.handle_call(children[2], "ghost", {}).status == "allowed"
+
+
+def test_a_refused_call_gives_its_in_flight_slot_back(env: Env) -> None:
+    env.rebuild(max_in_flight_per_root=1)
+    token = env.mint()
+    env.audit.fail = True
+    assert env.gateway.handle_call(token, "read_file", {"path": "reports/x"}).stage == "audit"
+    env.audit.fail = False
+    for _ in range(2):
+        assert env.gateway.handle_call(token, "read_file", {"path": "reports/x"}).allowed
+    assert env.gateway.handle_call(token, "read_file", {"path": "reports/x"}).stage == "budget"
+    assert env.gateway.handle_call(token, "boom", {}).status == "error"
+    assert env.gateway.in_flight(env.jti(token)) == 0
+
+
+def test_a_tool_that_does_not_finish_in_time_is_an_error_and_stays_charged(
+    env: Env, caplog: pytest.LogCaptureFixture
+) -> None:
+    blocker = Blocker()
+    env.rebuild({"ghost": blocker}, tool_timeout=0.05, max_in_flight_per_root=1)
+    token = env.mint([{"tool": "ghost", "args": {}, "max_calls": 5}])
+    try:
+        with caplog.at_level(logging.ERROR, logger="toolgate.gateway"):
+            outcome = env.gateway.handle_call(token, "ghost", {})
+        assert (outcome.status, outcome.stage, outcome.code) == ("error", "tool", "tool_timeout")
+        assert "may still complete in the background" in outcome.reason
+        assert outcome.result is None
+        assert blocker.calls == 1
+        # Honest accounting: it started, so it is charged, and it still holds its slot.
+        assert env.used(token, 0) == 1
+        assert env.gateway.in_flight(env.jti(token)) == 1
+        assert env.gateway.handle_call(token, "ghost", {}).code == "in_flight_limit"
+        assert [e["decision"] for e in env.entries()] == ["allow", "deny"]
+        assert any("did not finish" in r.getMessage() for r in caplog.records)
+    finally:
+        blocker.release.set()
+    wait_until(lambda: env.gateway.in_flight(env.jti(token)) == 0)
+    assert blocker.calls == 1
+
+
+def test_tools_run_normally_under_a_timeout(env: Env) -> None:
+    env.rebuild(tool_timeout=30)
+    token = env.mint()
+    assert env.gateway.handle_call(token, "read_file", {"path": "reports/x"}).result == "done"
+    assert env.gateway.handle_call(token, "aecho", {"x": 3}).result == {"x": 3}
+    assert env.gateway.handle_call(token, "boom", {}).status == "error"
+    assert env.gateway.handle_call(token, "big", {}).status == "error"
+    assert env.gateway.in_flight(env.jti(token)) == 0
+
+
+def test_limits_are_validated(env: Env) -> None:
+    for options in (
+        {"max_in_flight_per_root": 0},
+        {"max_in_flight_per_root": 1.5},
+        {"tool_timeout": 0},
+        {"tool_timeout": float("inf")},
+        {"tool_error_detail": "no"},
+        {"unverified_audit_rate": 0},
+        {"unverified_audit_burst": 0},
+    ):
+        with pytest.raises(ValueError):
+            env.rebuild(**options)
+
+
+# ------------------------------------------------- 9. unverified tokens and the log
+
+
+def test_audit_entries_for_unverified_tokens_are_rate_limited_and_summarised(env: Env) -> None:
+    env.rebuild(unverified_audit_rate=2, unverified_audit_burst=3)
+    good = env.mint()
+
+    def junk(i: int) -> CallOutcome:
+        outcome = env.gateway.handle_call(f"junk-{i}", "read_file", {"path": "reports/x"})
+        assert (outcome.status, outcome.stage, outcome.reason) == ("denied", "token", "malformed")
+        assert outcome.authenticated is False
+        return outcome
+
+    assert [junk(i).audit_seq for i in range(3)] == [0, 1, 2]  # the burst is logged
+    assert [junk(i).audit_seq for i in range(3, 10)] == [None] * 7  # refused, not logged
+    assert len(env.entries()) == 3 and env.gateway.suppressed_unverified() == 7
+    # A verified token is never limited: its decisions are all on record.
+    for path in ("reports/a", "secrets/b"):
+        assert env.gateway.handle_call(good, "read_file", {"path": path}).audit_seq is not None
+    assert len(env.entries()) == 5 and env.gateway.suppressed_unverified() == 7
+
+    env.clock.now += 1  # two entries' worth of room: the summary, then one attempt
+    assert junk(10).audit_seq == 6
+    assert junk(11).audit_seq is None
+    summary = env.entries()[5]
+    assert (summary["tool"], summary["jti"], summary["decision"]) == (
+        "audit:summary",
+        "unverified",
+        "deny",
+    )
+    assert summary["rule"] == "unverified: 7 attempts suppressed"
+    assert env.gateway.suppressed_unverified() == 1
+
+    # With no clock movement nothing more is written, however many attempts arrive.
+    for i in range(50):
+        junk(100 + i)
+    assert len(env.entries()) == 7 and env.gateway.suppressed_unverified() == 51
+    # A summary that cannot be written keeps its count; shutdown writes it.
+    env.audit.fail = True
+    env.gateway.flush()
+    assert env.gateway.suppressed_unverified() == 51
+    env.audit.fail = False
+    env.gateway.flush()
+    assert env.entries()[-1]["rule"] == "unverified: 51 attempts suppressed"
+    assert env.gateway.suppressed_unverified() == 0
+    env.gateway.flush()  # nothing pending: writes nothing
+    assert len(env.entries()) == 8
+    assert verify(env.audit_path).ok and env.total_tool_calls() == 1
+
+
+def test_a_verified_call_writes_the_pending_summary_once_there_is_room(env: Env) -> None:
+    env.rebuild(unverified_audit_rate=1, unverified_audit_burst=1)
+    good = env.mint()
+    for i in range(4):
+        env.gateway.handle_call(f"junk-{i}", "read_file", {})
+    assert env.gateway.suppressed_unverified() == 3
+    env.clock.now += 5
+    assert env.gateway.handle_call(good, "read_file", {"path": "reports/x"}).allowed
+    rules = [e["rule"] for e in env.entries()]
+    assert rules == ["token: malformed", "unverified: 3 attempts suppressed", "allow-plain"]
+
+
+def test_the_limit_can_be_turned_off(env: Env) -> None:
+    env.rebuild(unverified_audit_rate=None)
+    for i in range(150):
+        assert env.gateway.handle_call(f"junk-{i}", "read_file", {}).audit_seq == i
+
+
+# --------------------------------------------------- 13. tool exception text withheld
+
+
+def test_tool_exception_text_can_be_withheld_from_the_caller(env: Env) -> None:
+    def leaky() -> None:
+        raise ConnectionError("postgres://svc:hunter2@10.0.0.7/prod: refused, see /srv/app/db.py")
+
+    env.rebuild({"ghost": leaky}, tool_error_detail=False)
+    token = env.mint()
+    outcome = env.gateway.handle_call(token, "ghost", {})
+    assert (outcome.status, outcome.stage) == ("error", "tool")
+    assert outcome.reason == "tool raised ConnectionError; details are withheld"
+    for secret in ("hunter2", "postgres", "/srv/app"):
+        assert secret not in outcome.reason
+        assert secret not in env.audit_path.read_text()
+    assert [e["decision"] for e in env.entries()] == ["allow"]

@@ -9,11 +9,20 @@ steps, in this order, each failing closed:
   b. Verify the token and ask its grant, WITHOUT spending budget.
   c. Ask operator policy. deny ends the call. approve parks it in the
      approval queue and returns "pending"; nothing runs. allow continues.
-  d. `authority.authorize`: verify again and charge the budget, atomically
-     with the revocation check. Only calls that are about to run are charged.
-  e. Write the audit entry, THEN run the tool. If the entry cannot be
-     written the tool does not run: an unaudited action is worse than a
-     refused one.
+  d. Check that the decision can be recorded (`audit.loggable`), take one of
+     the root token's in-flight slots, then `authority.authorize`: verify
+     again and charge the budget, atomically with the revocation check. Only
+     calls that are about to run are charged.
+  e. Write the audit entry, verify the token ONCE MORE (the entry is an fsync,
+     long enough for a revocation or the expiry to land), THEN run the tool.
+     If the entry cannot be written the tool does not run: an unaudited
+     action is worse than a refused one.
+
+Budget. A call that was charged in d and then did not reach the tool (the
+entry could not be written, the last verification failed, the tool could not
+be started) gets its charge back with `authority.refund`. A call whose tool
+STARTED is never refunded, whatever happens next (it raises, it times out, its
+output is withheld): the side effect may already have happened.
 
 `Gateway.resolve_approval` runs b to e again on the STORED call when a person
 approves it, with the clock read afresh, because the token may have expired
@@ -27,18 +36,48 @@ Every decision writes exactly one entry at the moment it is made:
     outcome                          decision   rule field
     allowed                          allow      the policy rule id
     denied by policy                 deny       the policy rule id
-    denied anywhere else             deny       "<stage>: <reason>"
+    denied anywhere else             deny       "<stage>: <fixed text or code>"
     parked for approval              approve    the policy rule id
     approved and released            approved   the policy rule id (+ approver)
     approved, then refused           deny       "approved by <who>, then denied: ..."
     rejected by a person             rejected   the policy rule id (+ approver)
     approval ran out of time         deny       "approval: expired"
 
-A tool that raises does not add an entry: the "allow" entry was written
-before it ran, and the log records decisions, not tool results.
+A tool that raises or times out does not add an entry: the "allow" entry was
+written before it ran, and the log records decisions, not tool results. (A
+timeout is also reported on the Python logger "toolgate.gateway".) One path
+writes two entries: "allow", then "deny" with "token: <code>; allowed at seq
+<n> but not run", when the token stopped verifying while the allow entry was
+being written.
+
+Token lifecycle, written by `mint_token`, `exchange_token`, `revoke_token`:
+
+    token minted                     allow      "token: minted by admin"
+    token exchanged                  allow      "token: exchanged from <parent jti>"
+    exchange refused                 deny       "exchange: <code>"
+    token revoked                    allow      "token: revoked by admin"
+
+with `tool` set to "token:mint", "token:exchange" or "token:revoke", `jti`
+the new (or revoked) token id, or the parent's when an exchange is refused,
+and `args_hash` the hash of {"capabilities": [...]} for an issued token and
+of {} otherwise. Capability contents are never written.
 
 Arguments never go in the log, only their hash. Everything written is
-bounded and none of it is free text chosen by an unauthenticated caller:
+bounded and none of it is text chosen by a caller, authenticated or not.
+Every string in an entry is one of: a fixed text or code from this module, a
+TokenError or Decision code, a constraint operator name, a policy rule id or
+reason (operator configuration), a token id or actor name from a VERIFIED
+token, an approver name that passed `valid_name`, or a tool name that passed
+the filter below. In particular a grant refusal is logged as "grant: <code>",
+never with the human-readable reason, which quotes the caller's tool and
+argument names.
+
+  * Unverified tokens are rate limited in the log (a token bucket, by default
+    20 entries a second with a burst of 100). Past that the caller is still
+    refused but no entry is written for the attempt; the attempts are counted
+    and one entry "unverified: N attempts suppressed" is written when the
+    bucket next has room, or by `flush()` at shutdown. Decisions for verified
+    tokens are never limited.
 
   * Token that does not verify: jti is "unverified:" plus the first 16 hex
     digits of the SHA-256 of the presented string, actors is empty, and the
@@ -53,17 +92,18 @@ bounded and none of it is free text chosen by an unauthenticated caller:
   * Malformed call: tool as above and the hash of the empty argument set.
   * Reasons are cut to 200 characters with a visible "...[truncated]" mark.
 
-Not in the log: minting, exchanging and revoking tokens (the entry format
-describes tool calls), and requests that never present a token.
+Not in the log: requests that never present a token.
 """
 
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import hashlib
 import hmac
 import inspect
 import json
+import logging
 import math
 import re
 import threading
@@ -83,10 +123,11 @@ from toolgate.approvals import (
     request_hash,
     valid_name,
 )
-from toolgate.audit import AuditEntry, AuditLog, hash_args
-from toolgate.capability import Call
+from toolgate.audit import AuditEntry, AuditLog, hash_args, loggable
+from toolgate.capability import DECISION_CODES, Call, Decision, Grant
+from toolgate.constraints import OPS
 from toolgate.policy import ALLOW, APPROVE, DENY, Policy
-from toolgate.tokens import Authority, TokenError, Verified
+from toolgate.tokens import Authority, Authorization, EscalationError, TokenError, Verified
 
 ALLOWED, DENIED, PENDING, ERROR = "allowed", "denied", "pending", "error"
 
@@ -97,8 +138,33 @@ INVALID_TOOL = "<invalid>"
 UNVERIFIED = "unverified"
 TRUNCATED = "...[truncated]"
 
+# Fixed `tool` labels of the token lifecycle entries, and of the summary entry.
+TOKEN_MINT, TOKEN_EXCHANGE, TOKEN_REVOKE = "token:mint", "token:exchange", "token:revoke"
+AUDIT_SUMMARY = "audit:summary"
+# CallOutcome.code values set by the gateway itself (grant refusals carry a
+# capability.DECISION_CODES value instead).
+IN_FLIGHT_LIMIT, TOOL_TIMEOUT = "in_flight_limit", "tool_timeout"
+
+DEFAULT_UNVERIFIED_AUDIT_RATE = 20
+DEFAULT_UNVERIFIED_AUDIT_BURST = 100
+
 _TOOL_NAME = re.compile(r"[A-Za-z0-9_.:/-]{1,128}")
 _MAX_FINGERPRINT_INPUT = 64 * 1024
+_LOG = logging.getLogger("toolgate.gateway")
+# Reasons `Authority.authorize` gives for a refusal it made itself, as codes.
+_AUTHORIZE_CODES = {
+    "budget exhausted": "budget_exhausted",
+    "budget ledger has no record of this delegation path": "budget_unknown_path",
+    "expired during authorization": "expired_during_authorization",
+}
+
+
+class AuditUnavailable(Exception):
+    """A token was issued but could not be recorded, so it was revoked again."""
+
+
+class _NotStarted(Exception):
+    """The tool could not be started at all (no thread)."""
 
 
 @dataclass(frozen=True)
@@ -107,12 +173,17 @@ class CallOutcome:
 
     status       allowed | denied | pending | error
     stage        which step decided: call, token, grant, tool, policy,
-                 approvals, budget, audit, approval, unavailable
+                 approvals, budget, audit, approval, unavailable, limit
     reason       short text; for stage "token" it is the TokenError code
     rule         the policy rule id, when policy was the one that decided
     approval_id  set when status is pending
     result       the tool's return value (plain JSON data) when allowed
     audit_seq    seq of the audit entry written for this decision, if any
+    code         machine-readable detail where there is one, else "": a
+                 capability.DECISION_CODES value for a grant refusal,
+                 "in_flight_limit", "tool_timeout"
+    authenticated  False when the token presented did not verify; such a
+                 caller is told nothing about the log (see server.py)
     """
 
     status: str
@@ -122,6 +193,8 @@ class CallOutcome:
     result: Any = None
     audit_seq: int | None = None
     stage: str = ""
+    code: str = ""
+    authenticated: bool = True
 
     @property
     def allowed(self) -> bool:
@@ -189,14 +262,73 @@ def _run_awaitable(awaitable: Any) -> Any:
 
 @dataclass(frozen=True)
 class _Who:
-    """Attribution for an audit entry."""
+    """Attribution for an audit entry. `verified` is False for a token fingerprint."""
 
     jti: str
     actors: tuple[str, ...]
+    verified: bool = True
+
+
+def _positive_number(value: Any, what: str) -> int | float:
+    if type(value) not in (int, float) or not math.isfinite(value) or value <= 0:
+        raise ValueError(f"{what} must be a positive number")
+    return value
+
+
+def _capability_args(capabilities: Any) -> dict[str, Any]:
+    """What a lifecycle entry hashes for an issued token: its capabilities.
+
+    Only the hash reaches the log. Capabilities that cannot be written as
+    canonical JSON (a constraint value no call could carry) hash as {}.
+    """
+    try:
+        data = {"capabilities": [c.to_dict() for c in capabilities]}
+        hash_args(data)
+    except Exception:
+        return {}
+    return data
+
+
+def _grant_log(decision: Decision) -> str:
+    """The loggable form of a grant refusal: a fixed code, never `decision.reason`."""
+    code = decision.code if decision.code in DECISION_CODES else "denied"
+    if code == "constraint_failed":
+        # The reason ends "fails <op>". Only a name from the closed set of
+        # operators is copied, so nothing of the caller's can ride along.
+        op = decision.reason.rpartition(" fails ")[2]
+        if op in OPS:
+            return f"{code} ({op})"
+    return code
 
 
 class Gateway:
-    """Owns the whole pipeline. Thread safe; tools may run concurrently."""
+    """Owns the whole pipeline. Thread safe; tools may run concurrently.
+
+    Optional limits, all keyword-only. The first three default to "off" so
+    that code built on Gateway keeps its behaviour; `toolgate.server.build`
+    turns them on with the defaults in the example config.
+
+      max_in_flight_per_root  most tool executions running at once under one
+                              ROOT token (all its exchanged children count
+                              together). Over it a call is denied, stage
+                              "limit", code "in_flight_limit", nothing charged.
+                              Calls released by a person's approval count but
+                              are not refused. None: no limit.
+      tool_timeout            seconds the caller waits for a tool. The tool
+                              then runs on a thread of its own; after the
+                              timeout the outcome is an error with code
+                              "tool_timeout". A Python thread cannot be
+                              killed: the tool may still finish in the
+                              background, it keeps its in-flight slot until it
+                              does, and its budget is not refunded. None: the
+                              tool runs on the calling thread with no timeout.
+      tool_error_detail       True: a tool's exception text is returned in the
+                              outcome (cut to max_error_chars). False: only
+                              the exception type name and a fixed message.
+      unverified_audit_rate,  token bucket for audit entries about tokens that
+      unverified_audit_burst  did not verify (see the module docstring).
+                              rate None: no limit.
+    """
 
     def __init__(
         self,
@@ -209,6 +341,11 @@ class Gateway:
         clock: Callable[[], float] = time.time,
         max_output_bytes: int = MAX_OUTPUT_BYTES,
         max_error_chars: int = MAX_ERROR_CHARS,
+        max_in_flight_per_root: int | None = None,
+        tool_timeout: int | float | None = None,
+        tool_error_detail: bool = True,
+        unverified_audit_rate: int | float | None = DEFAULT_UNVERIFIED_AUDIT_RATE,
+        unverified_audit_burst: int = DEFAULT_UNVERIFIED_AUDIT_BURST,
     ) -> None:
         if type(policy) is not Policy:
             raise ValueError("policy must be a Policy")
@@ -216,6 +353,18 @@ class Gateway:
             raise ValueError("max_output_bytes must be a positive integer")
         if type(max_error_chars) is not int or max_error_chars < 1:
             raise ValueError("max_error_chars must be a positive integer")
+        if max_in_flight_per_root is not None and (
+            type(max_in_flight_per_root) is not int or max_in_flight_per_root < 1
+        ):
+            raise ValueError("max_in_flight_per_root must be a positive integer or None")
+        if tool_timeout is not None:
+            _positive_number(tool_timeout, "tool_timeout")
+        if type(tool_error_detail) is not bool:
+            raise ValueError("tool_error_detail must be true or false")
+        if unverified_audit_rate is not None:
+            _positive_number(unverified_audit_rate, "unverified_audit_rate")
+        if type(unverified_audit_burst) is not int or unverified_audit_burst < 1:
+            raise ValueError("unverified_audit_burst must be a positive integer")
         registry: dict[str, Callable[..., Any]] = {}
         for name, function in dict(tools).items():
             if loggable_tool(name) == INVALID_TOOL:
@@ -231,6 +380,22 @@ class Gateway:
         self._clock = clock
         self.max_output_bytes = max_output_bytes
         self.max_error_chars = max_error_chars
+        self.max_in_flight_per_root = max_in_flight_per_root
+        self.tool_timeout = tool_timeout
+        self.tool_error_detail = tool_error_detail
+        self.unverified_audit_rate = unverified_audit_rate
+        self.unverified_audit_burst = unverified_audit_burst
+        # One lock for the small bookkeeping below. It is never held while a
+        # tool runs; it is held across the write of a summary entry.
+        self._state = threading.Lock()
+        self._in_flight: dict[str, int] = {}
+        self._bucket = float(unverified_audit_burst)
+        self._bucket_time: float | None = None
+        self._suppressed = 0
+        # Work that failed and is tried again on the next sweep: expiry
+        # entries that could not be written, outcomes that could not be stored.
+        self._unlogged_expiries: list[Approval] = []
+        self._unfinished: list[tuple[str, CallOutcome, bool]] = []
 
     # -- configuration ------------------------------------------------------
 
@@ -252,23 +417,51 @@ class Gateway:
         """The gateway's clock, in seconds since the epoch."""
         return self._clock()
 
+    def in_flight(self, root: str) -> int:
+        """How many tool executions are running under the root token id `root`."""
+        with self._state:
+            return self._in_flight.get(root, 0)
+
+    def suppressed_unverified(self) -> int:
+        """Unverified attempts refused since the last summary entry, not yet logged."""
+        with self._state:
+            return self._suppressed
+
+    def flush(self) -> None:
+        """Write the pending "attempts suppressed" summary now. Call at shutdown.
+
+        Never raises. If the entry cannot be written the count is kept.
+        """
+        with self._state:
+            self._write_summary()
+
     # -- the one way a tool runs --------------------------------------------
 
     def handle_call(self, token: str, tool: str, args: Any) -> CallOutcome:
-        """Decide one tool call and, if everything agrees, run it."""
+        """Decide one tool call and, if everything agrees, run it.
+
+        Always returns a CallOutcome; no exception from the arguments, the
+        token, the policy, the stores or the tool escapes.
+        """
         self._sweep()
         try:
             call = Call(tool, args)
             hash_args(call.args)  # also refuses strings that cannot be encoded
-        except (ValueError, TypeError, RecursionError):
-            # The token is looked at only to say who sent the bad call.
-            try:
-                verified = self.authority.verify(token)
-                who = _Who(verified.jti, verified.actors)
-            except Exception:  # attribution only, never a decision
-                who = _Who(token_fingerprint(token), ())
-            return self._deny(who, loggable_tool(tool), {}, "call", "malformed call")
-        return self._decide(token, call)
+        except Exception:
+            # Not only ValueError: a mapping handed in from outside can raise
+            # anything at all while it is being copied. The token is looked at
+            # only to say who sent the bad call.
+            return self._deny(
+                self._attribute(token), loggable_tool(tool), {}, "call", "malformed call"
+            )
+        try:
+            return self._decide(token, call)
+        except Exception:
+            # Nothing below is expected to raise. If something does, it is
+            # still a refusal with an entry, not a traceback for the caller.
+            return self._deny(
+                self._attribute(token), call.tool, call.args, "unavailable", "internal error"
+            )
 
     def resolve_approval(self, approval_id: str, decision: str, approver: str) -> CallOutcome:
         """A person approves or rejects a pending call. Single use.
@@ -278,7 +471,9 @@ class Gateway:
         to decide. Approving releases only the stored call, after re-running
         every check; a refusal there ends the approval as denied.
         """
-        if decision not in ("approve", "reject"):
+        # Exactly the str "approve" or "reject". An object that merely
+        # compares equal to one of them is not a decision.
+        if type(decision) is not str or decision not in ("approve", "reject"):
             raise ValueError("decision must be approve or reject")
         if not valid_name(approver):
             raise ValueError("approver is not a valid name")
@@ -298,7 +493,7 @@ class Gateway:
                 audit_seq=None if entry is None else entry.seq,
                 stage="approval",
             )
-            self.approvals.finish(record.id, outcome)
+            self._finish(record.id, outcome, False)
             return outcome
         try:
             outcome = self._decide(record.token, record.call, approval=record)
@@ -306,10 +501,89 @@ class Gateway:
             failed = CallOutcome(
                 DENIED, "internal error", approval_id=record.id, stage="unavailable"
             )
-            self.approvals.finish(record.id, failed, denied=True)
+            self._finish(record.id, failed, True)
             raise
-        self.approvals.finish(record.id, outcome, denied=outcome.status == DENIED)
+        self._finish(record.id, outcome, outcome.status == DENIED)
         return outcome
+
+    # -- token lifecycle, audited -------------------------------------------
+
+    def mint_token(
+        self, sub: str, grant: Grant, actor: str, ttl: int | float
+    ) -> tuple[str, Verified]:
+        """`authority.mint`, with an audit entry. Returns (token, what it says).
+
+        Raises what `Authority.mint` raises, and AuditUnavailable if the entry
+        could not be written; the new token is revoked again in that case.
+        """
+        token = self.authority.mint(sub, grant, actor, ttl)
+        return token, self._issued(token, TOKEN_MINT, "token: minted by admin")
+
+    def exchange_token(
+        self,
+        parent_token: str,
+        child_capabilities: Any,
+        actor: str,
+        ttl: int | float,
+    ) -> tuple[str, Verified]:
+        """`authority.exchange`, with an audit entry for a success AND a refusal.
+
+        A refusal is logged under the parent token's id (or its fingerprint if
+        it does not verify) as "exchange: <code>": a TokenError code,
+        "escalation", "invalid_request" or "internal". The checker's sentence
+        is not logged; it quotes the requested tool and argument names. Raises
+        what `Authority.exchange` raises, and AuditUnavailable as `mint_token`.
+        """
+        try:
+            token = self.authority.exchange(parent_token, child_capabilities, actor, ttl)
+        except Exception as exc:
+            if isinstance(exc, TokenError):
+                code = exc.code
+            elif isinstance(exc, EscalationError):
+                code = "escalation"
+            elif isinstance(exc, (ValueError, TypeError)):
+                code = "invalid_request"
+            else:
+                code = "internal"
+            self._append(
+                self._attribute(parent_token), TOKEN_EXCHANGE, {}, "deny", f"exchange: {code}"
+            )
+            raise
+        verified = self.authority.verify(token)
+        parent = verified.chain[-1] if verified.chain else "unknown"
+        return token, self._issued(token, TOKEN_EXCHANGE, f"token: exchanged from {parent}")
+
+    def revoke_token(self, jti: str) -> AuditEntry | None:
+        """`authority.revoke`, with an audit entry. Returns the entry, or None.
+
+        The revocation is never held back by the log: if the entry cannot be
+        written the token is revoked all the same and None is returned. An id
+        that is not a plain printable name is logged as a hash of itself.
+        """
+        self.authority.revoke(jti)
+        if valid_name(jti):
+            logged = jti
+        else:
+            digest = hashlib.sha256(jti.encode("utf-8", "backslashreplace")).hexdigest()
+            logged = f"sha256:{digest[:32]}"
+        return self._append(_Who(logged, ()), TOKEN_REVOKE, {}, "allow", "token: revoked by admin")
+
+    def _issued(self, token: str, label: str, rule: str) -> Verified:
+        """Log a freshly issued token, or take it back if that is not possible."""
+        verified = self.authority.verify(token)
+        entry = self._append(
+            _Who(verified.jti, verified.actors),
+            label,
+            _capability_args(verified.grant.capabilities),
+            "allow",
+            rule,
+        )
+        if entry is None:
+            # The token string is not handed out either way.
+            with contextlib.suppress(Exception):
+                self.authority.revoke(verified.jti)
+            raise AuditUnavailable("audit log unavailable; no token was issued")
+        return verified
 
     # -- reading approvals --------------------------------------------------
 
@@ -337,6 +611,14 @@ class Gateway:
 
     # -- internals ----------------------------------------------------------
 
+    def _attribute(self, token: Any) -> _Who:
+        """Who to name in an entry: the verified token, else its fingerprint."""
+        try:
+            verified = self.authority.verify(token)
+            return _Who(verified.jti, verified.actors)
+        except Exception:  # attribution only, never a decision
+            return _Who(token_fingerprint(token), (), False)
+
     def _decide(self, token: str, call: Call, approval: Approval | None = None) -> CallOutcome:
         """Steps b to e for a fresh call, or for a stored call being approved."""
         tool, args = call.tool, call.args
@@ -345,12 +627,19 @@ class Gateway:
         # While a stored call is re-checked its token may no longer verify,
         # but who made the request was established when it was parked.
         who = (
-            _Who(token_fingerprint(token), ())
+            _Who(token_fingerprint(token), (), False)
             if approval is None
             else _Who(approval.jti, approval.actors)
         )
 
-        def deny(stage: str, reason: str, rule: str | None = None) -> CallOutcome:
+        def deny(
+            stage: str,
+            reason: str,
+            rule: str | None = None,
+            *,
+            log: str | None = None,
+            code: str = "",
+        ) -> CallOutcome:
             return self._deny(
                 who,
                 tool,
@@ -360,6 +649,8 @@ class Gateway:
                 rule=rule,
                 approver=approver,
                 approval_id=approval_id,
+                log=log,
+                code=code,
             )
 
         # b. Verify and ask the grant. Nothing is charged here.
@@ -382,8 +673,13 @@ class Gateway:
             return deny("unavailable", "clock returned an invalid time")
         granted = verified.grant.decide(call, now)
         if not granted.allowed:
-            return deny("grant", granted.reason)
-        if tool not in self._tools:
+            # The reason quotes the caller's tool and argument names: it goes
+            # back to the caller, and only the code goes to the log.
+            return deny("grant", granted.reason, log=_grant_log(granted), code=granted.code)
+        # The callable is taken now, once. A registry that changes later in
+        # this call cannot turn "known" into a KeyError after the charge.
+        function = self._tools.get(tool)
+        if function is None:
             return deny("tool", "unknown tool")
 
         # c. Operator policy.
@@ -399,31 +695,88 @@ class Gateway:
             return self._park(token, verified, call, ruling.rule_id or "", ruling.reason)
         rule = ruling.rule_id or f"policy: {ruling.effect}"
 
-        # d. Verify again and charge, in one step with the revocation check.
+        # d. Everything that can refuse without spending budget goes first:
+        # can the decision be recorded at all, and is there a free slot.
         try:
-            authorization = self.authority.authorize(token, call)
-        except TokenError as exc:
-            if exc.code == "unavailable":
-                return deny("unavailable", "token state is unavailable")
-            return deny("token", exc.code)
+            unloggable = loggable(loggable_tool(tool), args, who.actors) is not None
         except Exception:
-            return deny("unavailable", "token check failed")
-        if not authorization.decision.allowed:
-            reason = authorization.decision.reason
-            return deny("budget" if "budget" in reason else "grant", reason)
-
-        # e. Audit, then run. No entry, no execution.
-        decision = "allow" if approval is None else "approved"
-        entry = self._append(who, tool, args, decision, rule, approver)
-        if entry is None:
-            return CallOutcome(
-                DENIED,
-                "audit log unavailable; the call was not run",
-                rule=ruling.rule_id,
-                approval_id=approval_id,
-                stage="audit",
+            unloggable = True
+        if unloggable:
+            return deny(
+                "audit", "the decision cannot be recorded; the call was not run", log="unloggable"
             )
-        return self._execute(call, ruling.rule_id, approval_id, entry.seq)
+        root = verified.chain[0] if verified.chain else verified.jti
+        if not self._enter(root, force=approval is not None):
+            return deny(
+                "limit",
+                "too many calls in flight for this token; retry shortly",
+                log="in_flight",
+                code=IN_FLIGHT_LIMIT,
+            )
+        handed_over = False  # True once _execute owns the slot
+        try:
+            # Verify again and charge, in one step with the revocation check.
+            try:
+                authorization = self.authority.authorize(token, call)
+            except TokenError as exc:
+                if exc.code == "unavailable":
+                    return deny("unavailable", "token state is unavailable")
+                return deny("token", exc.code)
+            except Exception:
+                return deny("unavailable", "token check failed")
+            refused = authorization.decision
+            if not refused.allowed:
+                if refused.code in DECISION_CODES:  # the grant said no after all
+                    return deny("grant", refused.reason, log=_grant_log(refused), code=refused.code)
+                code = _AUTHORIZE_CODES.get(refused.reason, "denied")
+                stage = "budget" if code.startswith("budget") else "grant"
+                return deny(stage, refused.reason, log=code, code=code)
+
+            # e. Audit, verify once more, then run. No entry, no execution.
+            # From here until the tool starts, every refusal gives the charge
+            # back: an audit outage must not drain budgets while nothing runs.
+            decision = "allow" if approval is None else "approved"
+            entry = self._append(who, tool, args, decision, rule, approver)
+            if entry is None:
+                self._refund(authorization)
+                return CallOutcome(
+                    DENIED,
+                    "audit log unavailable; the call was not run",
+                    rule=ruling.rule_id,
+                    approval_id=approval_id,
+                    stage="audit",
+                )
+            # Writing the entry is an fsync. A revocation or the expiry can
+            # land in that time, so the token is checked one last time.
+            late = f"; allowed at seq {entry.seq} but not run"
+            try:
+                self.authority.verify(token)
+            except TokenError as exc:
+                self._refund(authorization)
+                if exc.code == "unavailable":
+                    text = "token state is unavailable"
+                    return deny("unavailable", text, log=text + late)
+                return deny("token", exc.code, log=exc.code + late)
+            except Exception:
+                self._refund(authorization)
+                return deny("unavailable", "token check failed", log="token check failed" + late)
+            handed_over = True
+            try:
+                return self._execute(
+                    function,
+                    call,
+                    ruling.rule_id,
+                    approval_id,
+                    entry.seq,
+                    lambda: self._leave(root),
+                )
+            except _NotStarted:
+                self._refund(authorization)
+                text = "the tool could not be started"
+                return deny("unavailable", text, log=text + late)
+        finally:
+            if not handed_over:
+                self._leave(root)
 
     def _park(
         self, token: str, verified: Verified, call: Call, rule: str, reason: str
@@ -439,6 +792,7 @@ class Gateway:
                 rule=rule,
                 reason=bounded(reason, MAX_REASON_CHARS),
                 now=self._clock(),
+                root=verified.chain[0] if verified.chain else verified.jti,
             )
         except QueueFull as exc:
             return self._deny(
@@ -468,23 +822,92 @@ class Gateway:
         )
 
     def _execute(
-        self, call: Call, rule: str | None, approval_id: str | None, seq: int
+        self,
+        function: Callable[..., Any],
+        call: Call,
+        rule: str | None,
+        approval_id: str | None,
+        seq: int,
+        release: Callable[[], None],
     ) -> CallOutcome:
-        def error(reason: str) -> CallOutcome:
+        """Run the tool. Calls `release` exactly once, when the tool has ended.
+
+        Nothing here is ever refunded: once the tool has started, its side
+        effect may have happened, whether it then returns, raises or is still
+        running when the caller stops waiting. The one exception is
+        _NotStarted, raised (after `release`) when no thread could be started.
+        """
+
+        def error(reason: str, code: str = "") -> CallOutcome:
             return CallOutcome(
-                ERROR, reason, rule=rule, approval_id=approval_id, audit_seq=seq, stage="tool"
+                ERROR,
+                reason,
+                rule=rule,
+                approval_id=approval_id,
+                audit_seq=seq,
+                stage="tool",
+                code=code,
             )
 
-        function = self._tools[call.tool]
-        try:
-            value = function(**plain_args(call.args))
-            if inspect.isawaitable(value):
-                value = _run_awaitable(value)
-        except Exception as exc:  # a failing tool is an error, not a deny
+        def run() -> tuple[bool, Any]:
             try:
-                text = f"{type(exc).__name__}: {exc}"
+                value = function(**plain_args(call.args))
+                if inspect.isawaitable(value):
+                    value = _run_awaitable(value)
+            except Exception as exc:  # a failing tool is an error, not a deny
+                return False, exc
+            return True, value
+
+        if self.tool_timeout is None:
+            try:
+                ok, value = run()
+            finally:
+                release()
+        else:
+            box: list[tuple[bool, Any]] = []
+            done = threading.Event()
+
+            def work() -> None:
+                try:
+                    box.append(run())
+                except BaseException as exc:  # reported to the waiting caller
+                    box.append((False, exc))
+                finally:
+                    release()
+                    done.set()
+
+            # A daemon thread: a tool that never returns must not keep the
+            # process from exiting. It cannot be killed, only abandoned.
+            thread = threading.Thread(target=work, name="toolgate-tool", daemon=True)
+            try:
+                thread.start()
             except Exception:
-                text = type(exc).__name__
+                release()
+                raise _NotStarted from None
+            if not done.wait(self.tool_timeout):
+                _LOG.error(
+                    "tool %s (audit seq %d) did not finish within %s seconds; "
+                    "it may still be running",
+                    call.tool,
+                    seq,
+                    self.tool_timeout,
+                )
+                return error(
+                    f"tool did not finish within {self.tool_timeout} seconds; it may still "
+                    "complete in the background, and its budget is not refunded",
+                    TOOL_TIMEOUT,
+                )
+            ok, value = box[0]
+        if not ok:
+            name = bounded(type(value).__name__, 128)
+            if not self.tool_error_detail:
+                # The text of a tool's exception can hold paths, hosts and
+                # connection strings. The caller learns the kind of failure.
+                return error(f"tool raised {name}; details are withheld")
+            try:
+                text = f"{name}: {value}"
+            except Exception:
+                text = name
             return error(bounded(f"tool raised {text}", self.max_error_chars))
         try:
             text = json.dumps(value, allow_nan=False, separators=(",", ":"))
@@ -505,6 +928,45 @@ class Gateway:
             stage="policy",
         )
 
+    def _enter(self, root: str, *, force: bool = False) -> bool:
+        """Take an in-flight slot for `root`. False if it has none left."""
+        with self._state:
+            running = self._in_flight.get(root, 0)
+            limit = self.max_in_flight_per_root
+            if limit is not None and running >= limit and not force:
+                return False
+            self._in_flight[root] = running + 1
+            return True
+
+    def _leave(self, root: str) -> None:
+        with self._state:
+            running = self._in_flight.get(root, 0) - 1
+            if running > 0:
+                self._in_flight[root] = running
+            else:
+                self._in_flight.pop(root, None)
+
+    def _refund(self, authorization: Authorization) -> None:
+        """Give a charge back. If that fails the budget stays spent: fail closed."""
+        with contextlib.suppress(Exception):
+            self.authority.refund(authorization)
+
+    def _finish(self, approval_id: str, outcome: CallOutcome, denied: bool) -> None:
+        """Store how an approval ended. Never raises.
+
+        By now the tool may have run, so a queue that cannot store the outcome
+        must not turn the answer into an exception. The outcome is kept and
+        stored on a later sweep: an approved record with no outcome is never
+        evicted, so giving up would leave it in the queue for good.
+        """
+        try:
+            self.approvals.finish(approval_id, outcome, denied=denied)
+        except ApprovalError:
+            pass  # gone, or already finished: nothing left to store
+        except Exception:
+            with self._state:
+                self._unfinished.append((approval_id, outcome, denied))
+
     def _deny(
         self,
         who: _Who,
@@ -516,9 +978,19 @@ class Gateway:
         rule: str | None = None,
         approver: str | None = None,
         approval_id: str | None = None,
+        log: str | None = None,
+        code: str = "",
     ) -> CallOutcome:
+        """Refuse, with one entry. `log` replaces `reason` in the entry.
+
+        `reason` goes to the caller. It is written to the log only when no
+        `log` is given, and every caller that passes none passes a fixed text
+        or a TokenError code. A reason that can quote the caller MUST come
+        with a `log`.
+        """
         reason = bounded(reason, MAX_REASON_CHARS)
-        logged = rule if stage == "policy" and rule else f"{stage}: {reason}"
+        text = reason if log is None else bounded(log, MAX_REASON_CHARS)
+        logged = rule if stage == "policy" and rule else f"{stage}: {text}"
         if approver is not None:
             logged = f"approved by {approver}, then denied: {logged}"
         entry = self._append(who, tool, args, "deny", logged)
@@ -529,6 +1001,8 @@ class Gateway:
             approval_id=approval_id,
             audit_seq=None if entry is None else entry.seq,
             stage=stage,
+            code=code,
+            authenticated=who.verified,
         )
 
     def _append(
@@ -540,7 +1014,24 @@ class Gateway:
         rule: str,
         approver: str | None = None,
     ) -> AuditEntry | None:
-        """Write one audit entry. None means it could not be written."""
+        """Write one audit entry. None means it could not be written.
+
+        An entry about a token that did not verify must first get through the
+        token bucket; one that does not is counted, not written.
+        """
+        if not who.verified and not self._admit_unverified():
+            return None
+        return self._write(who, tool, args, decision, rule, approver)
+
+    def _write(
+        self,
+        who: _Who,
+        tool: str,
+        args: Mapping[str, Any],
+        decision: str,
+        rule: str,
+        approver: str | None = None,
+    ) -> AuditEntry | None:
         try:
             return self.audit.append(
                 jti=who.jti,
@@ -554,17 +1045,106 @@ class Gateway:
         except Exception:  # the caller fails closed on None
             return None
 
+    # -- the token bucket for unverified tokens -----------------------------
+
+    def _refill(self) -> None:
+        """Add the tokens earned since the last look. Caller holds the lock."""
+        rate = self.unverified_audit_rate
+        if rate is None:
+            return
+        try:
+            now = self._clock()
+        except Exception:
+            return
+        if type(now) not in (int, float) or not math.isfinite(now):
+            return
+        if self._bucket_time is not None and now > self._bucket_time:
+            earned = (now - self._bucket_time) * rate
+            self._bucket = min(float(self.unverified_audit_burst), self._bucket + earned)
+        self._bucket_time = now  # also when the clock stepped back: nothing is earned
+
+    def _write_summary(self) -> bool:
+        """Write "N attempts suppressed" if N > 0. Caller holds the lock."""
+        if self._suppressed == 0:
+            return True
+        entry = self._write(
+            _Who(UNVERIFIED, (), False),
+            AUDIT_SUMMARY,
+            {},
+            "deny",
+            f"unverified: {self._suppressed} attempts suppressed",
+        )
+        if entry is None:
+            return False
+        self._suppressed = 0
+        return True
+
+    def _admit_unverified(self) -> bool:
+        """May one more entry about an unverified token be written now?"""
+        if self.unverified_audit_rate is None:
+            return True
+        with self._state:
+            self._refill()
+            # What was dropped earlier is accounted for before anything new.
+            if self._suppressed and self._bucket >= 1 and self._write_summary():
+                self._bucket -= 1
+            if self._bucket >= 1:
+                self._bucket -= 1
+                return True
+            self._suppressed += 1
+            return False
+
+    def _flush_suppressed(self) -> None:
+        """Write the summary if there is one and the bucket has room."""
+        if self.unverified_audit_rate is None:
+            return
+        with self._state:
+            if not self._suppressed:
+                return
+            self._refill()
+            if self._bucket >= 1 and self._write_summary():
+                self._bucket -= 1
+
+    # -- housekeeping -------------------------------------------------------
+
     def _sweep(self) -> None:
-        """Expire overdue approvals and log each one once. Never raises."""
+        """Expire overdue approvals and log each one once. Never raises.
+
+        `approvals.expire` reports a record exactly once, and by then it is
+        already marked expired. So an expiry whose entry cannot be written is
+        remembered here and written by a later sweep instead of being lost.
+        The same goes for an outcome the queue could not store.
+        """
         try:
             expired = self.approvals.expire(self._clock())
         except Exception:
-            return
-        for record in expired:
-            self._append(
+            expired = []
+        with self._state:
+            todo = self._unlogged_expiries + expired
+            unfinished = self._unfinished
+            self._unlogged_expiries, self._unfinished = [], []
+        unlogged = [
+            record
+            for record in todo
+            if self._append(
                 _Who(record.jti, record.actors),
                 record.call.tool,
                 record.call.args,
                 "deny",
                 "approval: expired",
             )
+            is None
+        ]
+        still: list[tuple[str, CallOutcome, bool]] = []
+        for approval_id, outcome, denied in unfinished:
+            try:
+                self.approvals.finish(approval_id, outcome, denied=denied)
+            except ApprovalError:
+                pass
+            except Exception:
+                still.append((approval_id, outcome, denied))
+        if unlogged or still:
+            with self._state:
+                self._unlogged_expiries = unlogged + self._unlogged_expiries
+                self._unfinished = still + self._unfinished
+        self._flush_suppressed()

@@ -65,11 +65,31 @@ deliberate act by an operator.
 
 One writer per file: appends are serialized by a lock inside the process, and
 on POSIX an exclusive `flock` stops a second process or a second `AuditLog`
-on the same file from forking the chain.
+on the same file from forking the chain. `os.fork` copies both the lock and
+the in-memory head into the child, so the log remembers the process that
+opened it and refuses to append from any other. An append that is interrupted
+between the write and the head update (an OS error, or Ctrl-C) leaves the log
+object refusing further appends until the file is reopened and re-verified.
+
+The file itself: the path must not be a symbolic link (it is opened with
+O_NOFOLLOW), and an existing log that is group- or world-writable is refused.
+
+Time. `time` never decreases along the log. The writer refuses an append whose
+clock value is lower than the previous entry's, and the verifier reports the
+first entry that goes backwards (`monotonic_time=False` turns that check off
+for logs written before the rule existed). A wall clock that steps backwards
+therefore stops appends until it catches up; that is deliberate.
+
+Checkpoints. `expected_head` means "the log ends exactly here", so a published
+head stops being usable the moment the log grows. `expected_at=(seq, hash)`
+means "the entry at this seq has this hash" and keeps working as the log
+grows: because each hash commits to everything before it, an old published
+head still proves that the prefix up to it was not rewritten. It says nothing
+about entries after it.
 
 Command line:
 
-    python -m toolgate.audit verify <path> [--head HASH]
+    python -m toolgate.audit verify <path> [--head HASH] [--checkpoint SEQ:HASH]
 
 prints `ok` or the first bad index, and exits nonzero on failure.
 """
@@ -78,10 +98,12 @@ from __future__ import annotations
 
 import argparse
 import contextlib
+import errno
 import hashlib
 import json
 import math
 import os
+import stat
 import sys
 import threading
 import time as _time
@@ -112,6 +134,9 @@ FIELDS: tuple[str, ...] = (
     "hash",
 )
 MAX_LINE_BYTES = 65_536
+# Canonical JSON of [tool, actors] may take at most half a line, which leaves the other half
+# for jti, rule and approver. `loggable` and `append` both enforce it.
+MAX_CALL_BYTES = MAX_LINE_BYTES // 2
 _MAX_DEPTH = 32
 _HEX = frozenset("0123456789abcdef")
 
@@ -281,6 +306,11 @@ def _no_float(text: str) -> Any:
 
 def _check_line(raw: bytes, index: int, prev: str) -> str:
     """Return the hash of the entry on this line, or raise _Bad with the first problem."""
+    return _check_entry(raw, index, prev)[0]
+
+
+def _check_entry(raw: bytes, index: int, prev: str) -> tuple[str, int]:
+    """Like `_check_line`, but also returns the entry's time."""
     if not raw.endswith(b"\n"):
         if len(raw) > MAX_LINE_BYTES:
             raise _Bad(f"line is longer than {MAX_LINE_BYTES} bytes")
@@ -315,20 +345,38 @@ def _check_line(raw: bytes, index: int, prev: str) -> str:
             f"stored hash {entry['hash'][:12]} does not match the entry's content "
             f"(recomputed {expected[:12]})"
         )
-    return expected
+    return expected, entry["time"]
 
 
 def _scan(stream: BinaryIO) -> tuple[VerifyResult, Head]:
     """Replay the chain. Returns the result and the head of the valid prefix."""
-    prev, index = GENESIS, 0
+    result, head, _, _ = _replay(stream)
+    return result, head
+
+
+def _replay(
+    stream: BinaryIO, *, monotonic_time: bool = True, at: int | None = None
+) -> tuple[VerifyResult, Head, int, str | None]:
+    """Replay the chain: the result, the head and last time of the valid prefix, and the
+    hash of entry `at` if the valid prefix reaches it."""
+    prev, index, last_time = GENESIS, 0, 0
+    found = GENESIS if at == -1 else None
     while True:
         raw = stream.readline(MAX_LINE_BYTES + 1)
         if not raw:
-            return VerifyResult(True, index, None, None), Head(index - 1, prev)
+            return VerifyResult(True, index, None, None), Head(index - 1, prev), last_time, found
         try:
-            prev = _check_line(raw, index, prev)
+            digest, when = _check_entry(raw, index, prev)
+            if monotonic_time and when < last_time:
+                raise _Bad(
+                    f"time goes backwards: {when} is earlier than the previous entry's {last_time}"
+                )
         except _Bad as bad:
-            return VerifyResult(False, index, index, str(bad)), Head(index - 1, prev)
+            result = VerifyResult(False, index, index, str(bad))
+            return result, Head(index - 1, prev), last_time, found
+        prev, last_time = digest, when
+        if index == at:
+            found = digest
         index += 1
 
 
@@ -367,25 +415,118 @@ def _check_head(result: VerifyResult, head: Head, expected_head: str | Head | No
     return result
 
 
-def verify(path: str | Path, expected_head: str | Head | None = None) -> VerifyResult:
+def _checkpoint(expected_at: tuple[int, str] | Head | None) -> tuple[int, str] | None:
+    if expected_at is None:
+        return None
+    if type(expected_at) is Head:
+        expected_at = (expected_at.seq, expected_at.hash)
+    if type(expected_at) is not tuple or len(expected_at) != 2:
+        raise ValueError("expected_at must be a (seq, hash) pair")
+    seq, digest = expected_at
+    if type(seq) is not int or seq < -1 or not _is_hash(digest):
+        raise ValueError("expected_at must be (seq, 64 character lowercase hex hash)")
+    return seq, digest
+
+
+def _check_at(
+    result: VerifyResult, head: Head, checkpoint: tuple[int, str] | None, found: str | None
+) -> VerifyResult:
+    if not result.ok or checkpoint is None:
+        return result
+    seq, digest = checkpoint
+    if seq > head.seq or found is None:
+        problem = (
+            f"the checkpoint is entry {seq} but the log ends at entry {head.seq}: "
+            "entries were removed from the end"
+        )
+    elif found != digest:
+        problem = (
+            f"every entry is consistent, but entry {seq} has hash {found[:12]} and the "
+            f"checkpoint says {digest[:12]}: the log was rebuilt at or before entry {seq}"
+        )
+    else:
+        return result
+    return VerifyResult(False, result.entries, None, problem)
+
+
+def verify(
+    path: str | Path,
+    expected_head: str | Head | None = None,
+    *,
+    expected_at: tuple[int, str] | None = None,
+    monotonic_time: bool = True,
+) -> VerifyResult:
     """Replay the log at `path` and report the first bad entry.
 
     Without `expected_head` this proves internal consistency only: truncation
     of the tail and a full rebuild of the chain both pass. Pass the head hash
     (or `Head`) that was recorded somewhere trusted to detect those too.
+
+    `expected_head` must be the log's LAST entry. `expected_at=(seq, hash)` is
+    a checkpoint instead: the entry at `seq` must have that hash, and the log
+    may have grown past it. An old published head used this way keeps proving
+    that the prefix up to it was not rewritten. `monotonic_time` also reports
+    the first entry whose `time` is lower than the entry before it.
     """
-    return _verify(path, expected_head)[0]
+    return _verify(path, expected_head, expected_at, monotonic_time)[0]
 
 
-def _verify(path: str | Path, expected_head: str | Head | None) -> tuple[VerifyResult, Head]:
+def _verify(
+    path: str | Path,
+    expected_head: str | Head | None,
+    expected_at: tuple[int, str] | None = None,
+    monotonic_time: bool = True,
+) -> tuple[VerifyResult, Head]:
     _expected(expected_head)  # reject a malformed head before touching the file
+    checkpoint = _checkpoint(expected_at)
     try:
         with open(path, "rb") as stream:
-            result, head = _scan(stream)
+            result, head, _, found = _replay(
+                stream,
+                monotonic_time=monotonic_time,
+                at=None if checkpoint is None else checkpoint[0],
+            )
     except OSError as exc:
         problem = f"cannot read the log: {exc.strerror or exc}"
         return VerifyResult(False, 0, None, problem), Head(-1, GENESIS)
-    return _check_head(result, head, expected_head), head
+    result = _check_head(result, head, expected_head)
+    return _check_at(result, head, checkpoint, found), head
+
+
+# ------------------------------------------------------------------- loggability
+
+
+def _call_size_problem(tool: str, actors: Sequence[str]) -> str | None:
+    size = len(canonical_json([tool, list(actors)]))
+    if size > MAX_CALL_BYTES:
+        return f"tool and actors take {size} bytes as JSON, more than {MAX_CALL_BYTES}"
+    return None
+
+
+def loggable(tool: Any, args: Any, actors: Any) -> str | None:
+    """None if `AuditLog.append` would accept this tool, arguments and actor chain,
+    otherwise a short reason. Writes nothing and needs no log.
+
+    A gateway calls this before any side effect, so a call that could not be
+    recorded is denied instead of being run and then failing to log. It covers
+    the three values a caller controls. The other fields (jti, rule, approver)
+    come from the gateway itself; the answer holds as long as their canonical
+    JSON together stays under 32,000 bytes, because `tool` and `actors` are
+    limited to `MAX_CALL_BYTES` and a whole line to `MAX_LINE_BYTES`.
+    """
+    if type(actors) not in (list, tuple):
+        return "actors must be a list of strings"
+    try:
+        hash_args(args)
+    except ValueError as exc:
+        return f"arguments cannot be hashed: {str(exc)[:120]}"
+    if not _is_text(tool):
+        return "tool must be a string"
+    if not tool:
+        return "tool must not be empty"
+    if not all(_is_text(a) for a in actors):
+        return "actors must be a list of strings"
+    return _call_size_problem(tool, actors)
 
 
 # ------------------------------------------------------------------------ writer
@@ -412,11 +553,23 @@ class AuditLog:
         self._lock = threading.Lock()
         self._broken: str | None = None
         self._fd: int | None = None
+        self._pid = os.getpid()
+        flags = os.O_RDWR | os.O_APPEND | os.O_CREAT | getattr(os, "O_NOFOLLOW", 0)
         try:
-            fd = os.open(self._path, os.O_RDWR | os.O_APPEND | os.O_CREAT, 0o600)
+            fd = os.open(self._path, flags, 0o600)
         except OSError as exc:
+            if exc.errno == errno.ELOOP:
+                raise AuditError(
+                    "cannot open the log: the path is a symbolic link, which is refused"
+                ) from exc
             raise AuditError(f"cannot open the log: {exc.strerror or exc}") from exc
         try:
+            mode = stat.S_IMODE(os.fstat(fd).st_mode)
+            if mode & 0o022:
+                raise AuditError(
+                    f"refusing to open a log that is group- or world-writable (mode {mode:#o}); "
+                    "remove those permissions, for example chmod 600"
+                )
             if fcntl is not None:
                 try:
                     fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
@@ -424,7 +577,7 @@ class AuditLog:
                     raise AuditError("the log is already open for writing elsewhere") from None
             # Read through the locked descriptor, so the file checked is the file written.
             with os.fdopen(os.dup(fd), "rb") as stream:
-                result, head = _scan(stream)
+                result, head, last_time, _ = _replay(stream)
             result = _check_head(result, head, expected_head)
             if not result.ok:
                 at = "" if result.first_bad_index is None else f"entry {result.first_bad_index}: "
@@ -436,6 +589,7 @@ class AuditLog:
             raise
         self._fd = fd
         self._head = head
+        self._last_time = last_time
 
     @property
     def path(self) -> Path:
@@ -460,8 +614,11 @@ class AuditLog:
         """Write one entry, flushed and fsynced before returning.
 
         Raises ValueError for a malformed entry (nothing is written) and
-        AuditError if the write fails. After a failed write the log object
-        refuses further appends, because the state of the file is unknown.
+        AuditError if the write fails. After a failed or interrupted write the
+        log object refuses further appends, because the state of the file is
+        unknown. AuditError is also raised, with nothing written, in a process
+        other than the one that opened the log (after a fork) and when the
+        clock returns a time earlier than the previous entry's.
         """
         if type(actors) not in (list, tuple):
             raise ValueError("actors must be a list of strings")
@@ -469,6 +626,12 @@ class AuditLog:
         with self._lock:
             if self._fd is None:
                 raise AuditError("the log is closed")
+            if os.getpid() != self._pid:
+                raise AuditError(
+                    f"the log was opened by process {self._pid} and this is process "
+                    f"{os.getpid()} (a fork); two processes appending would fork the chain, "
+                    "so open the log again in the process that should write"
+                )
             if self._broken:
                 raise AuditError(f"the log is unusable after a failed write: {self._broken}")
             fields: dict[str, Any] = {
@@ -487,6 +650,14 @@ class AuditLog:
             problem = _field_problem(fields)
             if problem:
                 raise ValueError(problem)
+            problem = _call_size_problem(tool, fields["actors"])
+            if problem:
+                raise ValueError(problem)
+            if fields["time"] < self._last_time:
+                raise AuditError(
+                    f"the clock went backwards: it returned {fields['time']} and the previous "
+                    f"entry's time is {self._last_time}; nothing was written"
+                )
             fields["hash"] = entry_hash(fields)
             line = canonical_json(fields) + b"\n"
             if len(line) > MAX_LINE_BYTES:
@@ -499,14 +670,26 @@ class AuditLog:
             except OSError as exc:
                 self._broken = str(exc)
                 raise AuditError(f"could not write the entry: {exc}") from exc
+            except BaseException as exc:
+                # Interrupted between the write and the head update: the entry may be on
+                # disk while the head here is stale. Appending again would repeat a seq.
+                self._broken = f"interrupted by {type(exc).__name__}; reopen the log"
+                raise
             self._head = Head(fields["seq"], fields["hash"])
+            self._last_time = fields["time"]
             fields["actors"] = tuple(fields["actors"])
             return AuditEntry(**fields)
 
     @staticmethod
-    def verify(path: str | Path, expected_head: str | Head | None = None) -> VerifyResult:
+    def verify(
+        path: str | Path,
+        expected_head: str | Head | None = None,
+        *,
+        expected_at: tuple[int, str] | None = None,
+        monotonic_time: bool = True,
+    ) -> VerifyResult:
         """Same as the module-level `verify`."""
-        return verify(path, expected_head)
+        return verify(path, expected_head, expected_at=expected_at, monotonic_time=monotonic_time)
 
     def close(self) -> None:
         with self._lock:
@@ -531,6 +714,18 @@ class AuditLog:
 # --------------------------------------------------------------------------- CLI
 
 
+def _say(text: str) -> None:
+    """Print one line; a reader that has gone away (`| true`, `| head`) is not an error."""
+    try:
+        print(text, flush=True)
+    except BrokenPipeError:
+        # Point stdout at /dev/null so the interpreter's final flush stays quiet too.
+        with contextlib.suppress(OSError, ValueError):
+            devnull = os.open(os.devnull, os.O_WRONLY)
+            os.dup2(devnull, sys.stdout.fileno())
+            os.close(devnull)
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="python -m toolgate.audit")
     commands = parser.add_subparsers(dest="command", required=True)
@@ -539,18 +734,44 @@ def main(argv: Sequence[str] | None = None) -> int:
     )
     check.add_argument("path")
     check.add_argument("--head", help="trusted head hash; also detects truncation and rebuild")
+    check.add_argument(
+        "--checkpoint",
+        metavar="SEQ:HASH",
+        help="trusted hash of the entry at SEQ; the log may have grown since, but a rewrite "
+        "of anything up to SEQ is detected",
+    )
     options = parser.parse_args(argv)
     if options.head is not None and not _is_hash(options.head):
         parser.error("--head must be 64 lowercase hex characters")
-    result, head = _verify(options.path, options.head)
+    checkpoint = None
+    if options.checkpoint is not None:
+        seq, _, digest = options.checkpoint.partition(":")
+        if not (seq.isascii() and seq.isdigit() and len(seq) <= 18 and _is_hash(digest)):
+            parser.error("--checkpoint must be SEQ:HASH, a number and 64 lowercase hex characters")
+        checkpoint = (int(seq), digest)
+    result, head = _verify(options.path, options.head, checkpoint)
     if result.ok:
-        note = "" if options.head else " (internal consistency only: no --head given)"
-        print(f"ok: {result.entries} entries, head {head.hash}{note}")
+        if result.entries == 0 and not options.head and checkpoint is None:
+            _say(
+                "ok: 0 entries (empty log; truncation to empty is only detectable with "
+                "--head or --checkpoint)"
+            )
+            return 0
+        if options.head:
+            note = ""
+        elif checkpoint is not None:
+            note = (
+                f" (entry {checkpoint[0]} matches the checkpoint; entries after it are "
+                "checked for internal consistency only: no --head given)"
+            )
+        else:
+            note = " (internal consistency only: no --head given)"
+        _say(f"ok: {result.entries} entries, head {head.hash}{note}")
         return 0
     if result.first_bad_index is None:
-        print(f"FAILED: {result.problem}")
+        _say(f"FAILED: {result.problem}")
     else:
-        print(f"FAILED at entry {result.first_bad_index}: {result.problem}")
+        _say(f"FAILED at entry {result.first_bad_index}: {result.problem}")
     return 1
 
 

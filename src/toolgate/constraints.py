@@ -93,7 +93,7 @@ class Constraint:
             if not _is_scalar(self.value):
                 raise ValueError("eq needs a string, bool or finite number")
         elif self.op == "in":
-            if not isinstance(self.value, (list, tuple, set, frozenset)):
+            if type(self.value) not in (list, tuple):
                 raise ValueError("in needs a non-empty list of values")
             object.__setattr__(self, "value", tuple(self.value))  # our own plain tuple
             if not self.value:

@@ -18,11 +18,23 @@ formula over a value v:
     glob g   v is S and s(v) is in the regular language of g
     any      true
 
-What a result here means: an `unsat` answer is a proof about these formulas.
-The Python implementation is tied to the formulas by differential tests, not
-by proof. Z3 strings are sequences of Unicode code points up to its own limit;
-the model assumes glob treats every character alike, which holds because "*"
-is the only special character.
+What a result here means, and what it does not:
+
+  * An `unsat` answer is a proof about these formulas. The Python code is tied
+    to the formulas by differential tests, not by proof.
+  * The model is deliberately at least as permissive as the code, so "no
+    escalation in the model" carries over to the code. N is every rational,
+    a superset of ints and finite floats. Call validation (plain JSON types,
+    nesting depth), expiry and call budgets are not modeled; each only removes
+    calls on the Python side.
+  * The other direction is not exact. Because N is the rationals, the solver
+    can find an "escalation" at a number between two adjacent floats that no
+    Python value can hit. Every witness is therefore replayed through the real
+    code, and a witness that does not replay raises Inconclusive.
+  * Z3 strings stop at code point 0x2FFFF. Constraint literals above that
+    raise Inconclusive. Glob treats every character alike ("*" is the only
+    special one), so the missing characters cannot change an inclusion answer.
+  * Timeouts and `unknown` raise Inconclusive. Nothing is ever guessed.
 """
 
 from __future__ import annotations
@@ -36,6 +48,10 @@ from toolgate.capability import Call, Capability, Grant
 from toolgate.constraints import Constraint
 
 TIMEOUT_MS = 30_000
+
+
+class Inconclusive(RuntimeError):
+    """The solver gave no usable answer: neither a proof nor a replayable witness."""
 
 
 def _make_value_sort() -> z3.DatatypeSortRef:
@@ -60,7 +76,7 @@ def string_lit(text: str) -> z3.SeqRef:
     would otherwise read a literal backslash-u sequence in the text as an escape.
     """
     if any(ord(ch) > MAX_CODE_POINT for ch in text):
-        raise ValueError("character outside the range of the solver's string theory")
+        raise Inconclusive("character outside the range of the solver's string theory")
     return z3.StringVal("".join(f"\\u{{{ord(ch):x}}}" for ch in text))
 
 
@@ -107,6 +123,23 @@ def holds(c: Constraint, v: z3.ExprRef) -> z3.BoolRef:
     raise ValueError(f"unknown operator {c.op!r}")
 
 
+def not_holds(c: Constraint, v: z3.ExprRef) -> z3.BoolRef:
+    """The negation of holds(c, v), with glob written as membership in the
+    complement language. The solver decides that form far faster than a
+    negated membership."""
+    if c.op == "glob":
+        return z3.Or(z3.Not(Value.is_S(v)), z3.InRe(Value.s(v), z3.Complement(glob_regex(c.value))))
+    return z3.Not(holds(c, v))
+
+
+def _child_not_parent(parent: Constraint, child: Constraint, v: z3.ExprRef) -> z3.BoolRef:
+    """'child accepts v and parent rejects v'."""
+    if parent.op == "glob" and child.op == "glob":
+        both = z3.Intersect(glob_regex(child.value), z3.Complement(glob_regex(parent.value)))
+        return z3.And(Value.is_S(v), z3.InRe(Value.s(v), both))
+    return z3.And(holds(child, v), not_holds(parent, v))
+
+
 def _solver() -> z3.Solver:
     s = z3.Solver()
     s.set("timeout", TIMEOUT_MS)
@@ -115,12 +148,15 @@ def _solver() -> z3.Solver:
 
 def _check(s: z3.Solver) -> bool:
     """True if satisfiable, False if unsatisfiable. Never guesses on 'unknown'."""
-    r = s.check()
+    try:
+        r = s.check()
+    except (z3.Z3Exception, ValueError, OverflowError) as e:
+        raise Inconclusive(f"solver error: {e}") from e
     if r == z3.sat:
         return True
     if r == z3.unsat:
         return False
-    raise RuntimeError(f"solver returned {r}: {s.reason_unknown()}")
+    raise Inconclusive(f"solver returned {r}: {s.reason_unknown()}")
 
 
 class _NoWitness:
@@ -135,14 +171,17 @@ def to_python(v: z3.ExprRef) -> Any:
     """Turn a model value back into a Python value. Other becomes None.
 
     A non-integer rational is converted to the nearest float, which may not be
-    exactly the solver's number; callers that replay a witness must re-check it.
+    exactly the solver's number, so every caller replays the result in Python.
     """
     if z3.is_true(z3.simplify(Value.is_B(v))):
         return z3.is_true(z3.simplify(Value.b(v)))
     if z3.is_true(z3.simplify(Value.is_N(v))):
         q = z3.simplify(Value.n(v))
         f = Fraction(q.numerator_as_long(), q.denominator_as_long())
-        return f.numerator if f.denominator == 1 else float(f)
+        try:
+            return f.numerator if f.denominator == 1 else float(f)
+        except OverflowError as e:
+            raise Inconclusive("witness is not a representable number") from e
     if z3.is_true(z3.simplify(Value.is_S(v))):
         text = z3.simplify(Value.s(v))
         length = z3.simplify(z3.Length(text)).as_long()
@@ -152,21 +191,30 @@ def to_python(v: z3.ExprRef) -> Any:
 
 
 def find_escalation(parent: Constraint, child: Constraint) -> Any:
-    """A value the child constraint accepts and the parent rejects.
+    """A Python value the child constraint accepts and the parent rejects.
 
-    Returns NO_WITNESS if the solver proves there is none, in which case the
-    child is truly at least as strict as the parent. Argument names are ignored.
+    Returns NO_WITNESS if the solver proves the formulas admit none. Compare
+    with `is NO_WITNESS`: None, 0, False and "" are all legitimate witnesses.
+    Raises Inconclusive on a timeout or a witness that fails to replay.
+    Argument names are ignored.
     """
     v = z3.Const("v", Value)
     s = _solver()
-    s.add(holds(child, v), z3.Not(holds(parent, v)))
+    try:
+        s.add(_child_not_parent(parent, child, v))
+    except (z3.Z3Exception, ValueError, OverflowError) as e:
+        raise Inconclusive(f"cannot model constraint: {e}") from e
     if not _check(s):
         return NO_WITNESS
-    return to_python(s.model().eval(v, model_completion=True))
+    w = to_python(s.model().eval(v, model_completion=True))
+    if not (child.holds(w) and not parent.holds(w)):
+        raise Inconclusive(f"witness {w!r} exists in the model but does not replay in Python")
+    return w
 
 
 def constraint_included(parent: Constraint, child: Constraint) -> bool:
-    """Exact answer: does the parent accept every value the child accepts?"""
+    """Does the parent accept every value the child accepts? Proven in the
+    model when True; backed by a replayed Python witness when False."""
     return find_escalation(parent, child) is NO_WITNESS
 
 
@@ -180,10 +228,25 @@ def _capability_formula(
     return z3.And(parts)
 
 
-def find_grant_escalation(parent: Grant, child: Grant) -> Call | None:
-    """A call the child grant allows and the parent denies, or None if proven none.
+def _not_capability_formula(
+    cap: Capability, present: dict[str, z3.BoolRef], value: dict[str, z3.ExprRef]
+) -> z3.BoolRef:
+    """The negation of _capability_formula, pushed inward so globs use complements."""
+    names = cap.arg_names
+    parts = [z3.Not(present[a]) if a in names else present[a] for a in present]
+    parts += [not_holds(c, value[c.arg]) for c in cap.constraints]
+    return z3.Or(parts)
 
-    Expiry and call budgets are not modeled here; this is the single-call
+
+def find_grant_escalation(parent: Grant, child: Grant) -> Call | None:
+    """A call the child grant allows and the parent denies, or None if the
+    solver proves the formulas admit none.
+
+    A returned call has been replayed through the real Grant.allows. Raises
+    Inconclusive on a timeout or when the model's witness does not replay
+    (possible when two parent capabilities bracket a gap containing no float).
+    Expiry and call budgets are not modeled here, so "no escalation" is NOT
+    the same as "check_attenuation would accept"; this is the single-call
     question only. The symbolic call has one presence flag and one value per
     argument name used by either grant, plus one extra name standing for every
     argument neither grant mentions (they all behave alike: they must be absent).
@@ -200,8 +263,11 @@ def find_grant_escalation(parent: Grant, child: Grant) -> Call | None:
         present = {a: z3.Bool(f"present_{i}") for i, a in enumerate(names)}
         value = {a: z3.Const(f"value_{i}", Value) for i, a in enumerate(names)}
         s = _solver()
-        s.add(z3.Or([_capability_formula(c, present, value) for c in c_caps]))
-        s.add(z3.Not(z3.Or([_capability_formula(c, present, value) for c in p_caps])))
+        try:
+            s.add(z3.Or([_capability_formula(c, present, value) for c in c_caps]))
+            s.add(*[_not_capability_formula(c, present, value) for c in p_caps])
+        except (z3.Z3Exception, ValueError, OverflowError) as e:
+            raise Inconclusive(f"cannot model grant: {e}") from e
         if _check(s):
             m = s.model()
             args = {
@@ -209,10 +275,15 @@ def find_grant_escalation(parent: Grant, child: Grant) -> Call | None:
                 for a in names
                 if z3.is_true(m.eval(present[a], model_completion=True))
             }
-            return Call(tool, args)
+            call = Call(tool, args)
+            now = min(parent.expires_at, child.expires_at) - 1
+            if not child.allows(call, now) or parent.allows(call, now):
+                raise Inconclusive(f"witness {call!r} does not replay in Python")
+            return call
     return None
 
 
 def grant_included(parent: Grant, child: Grant) -> bool:
-    """Exact answer to the single-call question, ignoring expiry and budgets."""
+    """The single-call question, ignoring expiry and budgets. True is a proof
+    in the model; False is backed by a replayed Python witness."""
     return find_grant_escalation(parent, child) is None

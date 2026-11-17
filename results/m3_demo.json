@@ -122,7 +122,7 @@
       "outcome": "allowed",
       "reason": "ok",
       "rule": "allow-file-reads",
-      "audit_seq": 0
+      "audit_seq": 3
     },
     {
       "step": 5,
@@ -133,7 +133,7 @@
       "outcome": "denied",
       "reason": "argument 'path' fails glob",
       "rule": null,
-      "audit_seq": 1
+      "audit_seq": 4
     },
     {
       "step": 6,
@@ -144,7 +144,7 @@
       "outcome": "denied",
       "reason": "Agents never delete files, whatever the user delegated.",
       "rule": "deny-file-delete",
-      "audit_seq": 2
+      "audit_seq": 5
     },
     {
       "step": 7,
@@ -155,7 +155,7 @@
       "outcome": "pending",
       "reason": "Mail to recipients outside example.com needs approval.",
       "rule": "approve-external-email",
-      "audit_seq": 3
+      "audit_seq": 6
     },
     {
       "step": 8,
@@ -213,7 +213,7 @@
       "outcome": "allowed",
       "reason": "ok",
       "rule": "approve-external-email",
-      "audit_seq": 4
+      "audit_seq": 7
     },
     {
       "step": 12,
@@ -235,7 +235,7 @@
       "outcome": "allowed",
       "reason": "ok",
       "rule": "approve-external-email",
-      "audit_seq": 4,
+      "audit_seq": 7,
       "result": {
         "sent_to": "partner@other.example",
         "subject": "Q3 summary"
@@ -261,7 +261,7 @@
       "outcome": "denied",
       "reason": "revoked",
       "rule": null,
-      "audit_seq": 5
+      "audit_seq": null
     },
     {
       "step": 16,
@@ -275,17 +275,63 @@
       "audit_seq": null,
       "verify": {
         "ok": true,
-        "entries": 6,
+        "entries": 10,
         "first_bad_index": null,
         "problem": null,
         "head": {
-          "seq": 5,
-          "hash": "d489af4f17247499c0e242b4d9fec0fd94f22dde1963c171f33e1926f0ac4fd2"
+          "seq": 9,
+          "hash": "6dc759b7abdff8da6b25615144c349a75f6f43782e3ef8893816dec66219bfd3"
         }
       }
     }
   ],
   "audit_log": [
+    {
+      "actors": [
+        "agent:orchestrator"
+      ],
+      "approver": null,
+      "args_hash": "d8a15a278d2eec9198d247efff1630b6c9db7446daf45f8c792fcca246a8a621",
+      "decision": "allow",
+      "hash": "4e1c11173f0e63083995d59c4702dccc247bc19ea998a0bb8686a18aa73b512c",
+      "jti": "tok-1",
+      "prev": "9fbdce0679c190589bbae3f428600ba32cf75a2fc29c42ac125d6eb02e097ee5",
+      "rule": "token: minted by admin",
+      "seq": 0,
+      "time": 1794873600000000000,
+      "tool": "token:mint"
+    },
+    {
+      "actors": [
+        "agent:orchestrator"
+      ],
+      "approver": null,
+      "args_hash": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+      "decision": "deny",
+      "hash": "80cff0686579802188f42919ad37f447ad407d1e620f237614097c1d571bc8ae",
+      "jti": "tok-1",
+      "prev": "4e1c11173f0e63083995d59c4702dccc247bc19ea998a0bb8686a18aa73b512c",
+      "rule": "exchange: escalation",
+      "seq": 1,
+      "time": 1794873600001000000,
+      "tool": "token:exchange"
+    },
+    {
+      "actors": [
+        "agent:researcher",
+        "agent:orchestrator"
+      ],
+      "approver": null,
+      "args_hash": "9517628488b0610cbbcaa3a99ef3f5e9196079e98cfc6cfd0fc77e1fa6f78442",
+      "decision": "allow",
+      "hash": "d53ac3be6fc4e7084a0a8207185672615f9aa81b4125330f0b6020c64e246219",
+      "jti": "tok-2",
+      "prev": "80cff0686579802188f42919ad37f447ad407d1e620f237614097c1d571bc8ae",
+      "rule": "token: exchanged from tok-1",
+      "seq": 2,
+      "time": 1794873600002000000,
+      "tool": "token:exchange"
+    },
     {
       "actors": [
         "agent:researcher",
@@ -294,12 +340,12 @@
       "approver": null,
       "args_hash": "4f4c77bcae9dd32088e8422401dbd7e26cb8b6da14caa4aa6f3f09bf20aaea5c",
       "decision": "allow",
-      "hash": "643b50742aae484b3c14739a82b227589446d7f5062fc366264d1eb3f82c15ea",
+      "hash": "2d45145c2721baa831ab7f186ef91375a7b3c27aae5757707e0cdf53d027c4b8",
       "jti": "tok-2",
-      "prev": "9fbdce0679c190589bbae3f428600ba32cf75a2fc29c42ac125d6eb02e097ee5",
+      "prev": "d53ac3be6fc4e7084a0a8207185672615f9aa81b4125330f0b6020c64e246219",
       "rule": "allow-file-reads",
-      "seq": 0,
-      "time": 1794873600000000000,
+      "seq": 3,
+      "time": 1794873600003000000,
       "tool": "read_file"
     },
     {
@@ -310,12 +356,12 @@
       "approver": null,
       "args_hash": "7dad1cbcb6883bb081e0df901929fe451e8cb8233f294d270a06a63a67123899",
       "decision": "deny",
-      "hash": "23f5b9c784f82c99c37a7059bcee4a1671d4ea09c2f1e688366e8d3a82fc4c6f",
+      "hash": "2fa9fd694a20f2fd74f5f2ac1225f398862c13ddc108586b450a8a8f67f6dc4d",
       "jti": "tok-2",
-      "prev": "643b50742aae484b3c14739a82b227589446d7f5062fc366264d1eb3f82c15ea",
-      "rule": "grant: argument 'path' fails glob",
-      "seq": 1,
-      "time": 1794873600001000000,
+      "prev": "2d45145c2721baa831ab7f186ef91375a7b3c27aae5757707e0cdf53d027c4b8",
+      "rule": "grant: constraint_failed (glob)",
+      "seq": 4,
+      "time": 1794873600004000000,
       "tool": "read_file"
     },
     {
@@ -326,12 +372,12 @@
       "approver": null,
       "args_hash": "4f4c77bcae9dd32088e8422401dbd7e26cb8b6da14caa4aa6f3f09bf20aaea5c",
       "decision": "deny",
-      "hash": "eb9b3a7c872c8194ccc970226a0d2bf1ca635277b1495ea57a87a80aec4ebf54",
+      "hash": "0851d4d2b70b5c4ca41c86c56ec132289b0b00f594d74ed39b9e35f1dba38a22",
       "jti": "tok-2",
-      "prev": "23f5b9c784f82c99c37a7059bcee4a1671d4ea09c2f1e688366e8d3a82fc4c6f",
+      "prev": "2fa9fd694a20f2fd74f5f2ac1225f398862c13ddc108586b450a8a8f67f6dc4d",
       "rule": "deny-file-delete",
-      "seq": 2,
-      "time": 1794873600002000000,
+      "seq": 5,
+      "time": 1794873600005000000,
       "tool": "delete_file"
     },
     {
@@ -342,12 +388,12 @@
       "approver": null,
       "args_hash": "163cd1669861f014a10d09a8d72aad3118f9da387b5d62e776cef7f524c616d9",
       "decision": "approve",
-      "hash": "9c7861e3b3d56687543c4bb4374352bd4e6f1686dcc011cd4558b2fba37bd61f",
+      "hash": "633968b13e0c94c52b445c7b0b3a02a78ab9e6fbbd07120ea7a2a00d7cc650cb",
       "jti": "tok-2",
-      "prev": "eb9b3a7c872c8194ccc970226a0d2bf1ca635277b1495ea57a87a80aec4ebf54",
+      "prev": "0851d4d2b70b5c4ca41c86c56ec132289b0b00f594d74ed39b9e35f1dba38a22",
       "rule": "approve-external-email",
-      "seq": 3,
-      "time": 1794873600003000000,
+      "seq": 6,
+      "time": 1794873600006000000,
       "tool": "send_email"
     },
     {
@@ -358,35 +404,48 @@
       "approver": "alice@example.com",
       "args_hash": "163cd1669861f014a10d09a8d72aad3118f9da387b5d62e776cef7f524c616d9",
       "decision": "approved",
-      "hash": "57df3346336a8fb989e7d8694ca16dad7f35767ca9e8810b64a4230f951bfd56",
+      "hash": "c227ed6876a1a969b2381af7e8c22ee3eb8cf95d26959c6d767db6c69fc30148",
       "jti": "tok-2",
-      "prev": "9c7861e3b3d56687543c4bb4374352bd4e6f1686dcc011cd4558b2fba37bd61f",
+      "prev": "633968b13e0c94c52b445c7b0b3a02a78ab9e6fbbd07120ea7a2a00d7cc650cb",
       "rule": "approve-external-email",
-      "seq": 4,
-      "time": 1794873600004000000,
+      "seq": 7,
+      "time": 1794873600007000000,
       "tool": "send_email"
+    },
+    {
+      "actors": [],
+      "approver": null,
+      "args_hash": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+      "decision": "allow",
+      "hash": "2194ed19b51aebe90f11109374041e34f29c38141278a20ab85707294ac1d62a",
+      "jti": "tok-1",
+      "prev": "c227ed6876a1a969b2381af7e8c22ee3eb8cf95d26959c6d767db6c69fc30148",
+      "rule": "token: revoked by admin",
+      "seq": 8,
+      "time": 1794873600008000000,
+      "tool": "token:revoke"
     },
     {
       "actors": [],
       "approver": null,
       "args_hash": "4f4c77bcae9dd32088e8422401dbd7e26cb8b6da14caa4aa6f3f09bf20aaea5c",
       "decision": "deny",
-      "hash": "d489af4f17247499c0e242b4d9fec0fd94f22dde1963c171f33e1926f0ac4fd2",
+      "hash": "6dc759b7abdff8da6b25615144c349a75f6f43782e3ef8893816dec66219bfd3",
       "jti": "unverified:41170490019d165f",
-      "prev": "57df3346336a8fb989e7d8694ca16dad7f35767ca9e8810b64a4230f951bfd56",
+      "prev": "2194ed19b51aebe90f11109374041e34f29c38141278a20ab85707294ac1d62a",
       "rule": "token: revoked",
-      "seq": 5,
-      "time": 1794873600005000000,
+      "seq": 9,
+      "time": 1794873600009000000,
       "tool": "read_file"
     }
   ],
   "audit_verify": {
     "ok": true,
-    "entries": 6,
+    "entries": 10,
     "first_bad_index": null,
     "problem": null,
-    "head_seq": 5,
-    "head_hash": "d489af4f17247499c0e242b4d9fec0fd94f22dde1963c171f33e1926f0ac4fd2"
+    "head_seq": 9,
+    "head_hash": "6dc759b7abdff8da6b25615144c349a75f6f43782e3ef8893816dec66219bfd3"
   },
   "tool_executions": {
     "read_file": 1,

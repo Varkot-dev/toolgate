@@ -13,7 +13,8 @@ The same story as tests/test_server_e2e.py, told through the real HTTP app
      the same id is refused
   5. the agent polls and gets the result
   6. the admin revokes the PARENT token and the child's next call is 401
-  7. the audit log verifies and holds one entry per decision
+  7. the audit log verifies and holds one entry per decision, minting,
+     exchanging and revoking tokens included
 
 The policy is the repo's config/policy.example.yaml. The run is deterministic:
 the signing key comes from a fixed public string, the clock is fixed, token
@@ -73,6 +74,19 @@ CHILD_CAPS = [
     {"tool": "delete_file", "args": {"path": {"any": True}}, "max_calls": 1},
 ]
 MAIL = {"to": "partner@other.example", "subject": "Q3 summary", "body": "Revenue is up 4%."}
+# (tool, decision) of every audit entry the story must leave, in order.
+EXPECTED_DECISIONS = [
+    ("token:mint", "allow"),
+    ("token:exchange", "deny"),
+    ("token:exchange", "allow"),
+    ("read_file", "allow"),
+    ("read_file", "deny"),
+    ("delete_file", "deny"),
+    ("send_email", "approve"),
+    ("send_email", "approved"),
+    ("token:revoke", "allow"),
+    ("read_file", "deny"),
+]
 
 
 class Tools:
@@ -317,16 +331,24 @@ def main() -> None:
         who = " <- ".join(entry["actors"]) or "-"
         approver = f"  approver={entry['approver']}" if entry["approver"] else ""
         print(
-            f"  #{entry['seq']} {entry['decision']:<9} {entry['tool']:<12} "
+            f"  #{entry['seq']} {entry['decision']:<9} {entry['tool']:<14} "
             f"{entry['jti']:<6} {who:<36} {entry['rule']}{approver}"
         )
     print(f"\nOffline verify against the head hash: {'ok' if offline.ok else 'FAILED'}")
     print(f"Tools really ran: {tools.ran}")
 
+    # Every decision of the story, in order: issuing and revoking tokens are
+    # decisions too. The response no longer gives a caller whose token did not
+    # verify an audit_seq (the last call), so the log is compared with the
+    # story itself rather than with the seqs the responses reported.
+    decisions = [(e["tool"], e["decision"]) for e in entries]
+    # (A poll of a decided approval reports the seq of the decision it shows.)
+    reported = {s["audit_seq"] for s in steps if s["audit_seq"] is not None}
     checks = {
         "audit_verifies": offline.ok,
-        "one_entry_per_decision": offline.entries
-        == len({s["audit_seq"] for s in steps if s["audit_seq"] is not None}),
+        "one_entry_per_decision": decisions == EXPECTED_DECISIONS
+        and offline.entries == len(EXPECTED_DECISIONS)
+        and all(0 <= seq < offline.entries for seq in reported),
         "email_not_sent_before_approval": sent_before_approval == 0,
         "email_sent_exactly_once": tools.ran["send_email"] == 1,
         "file_read_exactly_once": tools.ran["read_file"] == 1,

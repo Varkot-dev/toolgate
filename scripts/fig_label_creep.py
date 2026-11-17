@@ -68,8 +68,8 @@ def main() -> None:
                 return c
         return BASELINE
 
-    ax1 = fig.add_axes((0.17, 0.1, 0.17, 0.72))
-    ax2 = fig.add_axes((0.36, 0.1, 0.13, 0.72))
+    ax1 = fig.add_axes((0.17, 0.15, 0.17, 0.67))
+    ax2 = fig.add_axes((0.36, 0.15, 0.13, 0.67))
     for ax, field, title, limit, fmt in (
         (ax1, "attacks_succeeded", "attacks that succeeded\n(of 18, fewer is better)", 18, "{:d}"),
         (
@@ -96,7 +96,7 @@ def main() -> None:
     ax1.set_yticks(y, [n.replace("-rubber-stamp", " (rubber stamp)") for n in names], fontsize=11.5)
     ax2.set_yticks([])
 
-    ax3 = fig.add_axes((0.58, 0.1, 0.38, 0.72))
+    ax3 = fig.add_axes((0.58, 0.15, 0.38, 0.67))
     creep = data["configurations"]
     for key, label, c in SERIES:
         steps = [s for s in creep[key]["by_step"] if s["fraction_values_untrusted"] is not None]

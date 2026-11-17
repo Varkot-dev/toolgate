@@ -154,14 +154,14 @@ Be precise about the claim: the solver proves the rules as modeled. The Python i
 |---|---|---|
 | M0 (done 2026-11-17) | Capability model: constraints, capabilities, grants, `allows(call)`, attenuation check | Hypothesis property tests pass on 10,000+ generated cases; every row of the attenuation table has a unit test |
 | M0b (done 2026-11-17) | Solver verification of the attenuation rules (section 3.9) with Z3, plus differential tests against the Python checker | Every table row returns unsatisfiable for the escalation query; the completeness gap is measured and reported |
-| M1 | Tokens: mint, verify, exchange, revoke with ancestor chain, depth limit | Tests cover expired, wrong audience, bad signature, revoked ancestor and an attempted escalation |
-| M1b | Offline attenuation (section 3.8): HMAC chain first, then the Ed25519 chain | Tests show a holder can add a restriction offline, cannot remove one, and a modified chain fails verification |
-| M2 | Policy engine and hash-chained audit log with `verify` | Editing any log line is detected at the correct index |
+| M1 (done 2026-11-17) | Tokens: mint, verify, exchange, revoke with ancestor chain, depth limit | Tests cover expired, wrong audience, bad signature, revoked ancestor and an attempted escalation |
+| M1b (done 2026-11-17) | Offline attenuation (section 3.8): HMAC chain first, then the Ed25519 chain | Tests show a holder can add a restriction offline, cannot remove one, and a modified chain fails verification |
+| M2 (done 2026-11-17) | Policy engine and hash-chained audit log with `verify` | Editing any log line is detected at the correct index |
 | M3 (done 2026-11-17) | Gateway service (FastAPI): `/token`, `/token/exchange`, `/call`, `/approvals`, `/audit/verify` | An end-to-end test drives a scripted client through allow, deny and approve |
 | M4 (done 2026-11-17) | MCP proxy mode in front of a simple real MCP server, following the current spec | An MCP client connected through the gateway sees and can call only permitted tools |
 | M4b (done 2026-11-17) | Provenance (section 3.7): session labels, then value labels with handles, then plan-then-execute mode | Tests show labels propagate correctly through derived values; label creep is measured on the sandbox tasks |
-| M5 | Agent demo: a Gemini or local model with email, calendar and file tools in a sandbox, run with and without the gateway | A results table produced by a script comparing four configurations (no gateway, argument constraints only, plus session labels, plus value labels): unintended tool calls, normal tasks still completed, and approvals requested |
-| M6 | Measurement and polish: added latency per call (p50, p99), throughput, README, demo recording | README complete, repo ready to make public |
+| M5 (scripted half done 2026-11-17; real-model run not done) | Agent demo: a Gemini or local model with email, calendar and file tools in a sandbox, run with and without the gateway | A results table produced by a script comparing four configurations (no gateway, argument constraints only, plus session labels, plus value labels): unintended tool calls, normal tasks still completed, and approvals requested |
+| M6 (done 2026-11-17) | Measurement and polish: added latency per call (p50, p99), throughput, README, demo recording | README complete, repo ready to make public |
 
 Order of work: M0, M0b, M1, M1b, M2, M3, M4, M4b, M5, M6. The project is worth showing from M3 onward; each later milestone adds a distinct talking point.
 
@@ -312,3 +312,9 @@ One admin-only page, off by default. A browser signs in with the admin key once 
 2. **Writing a file is sending data.** Data written to a directory is later readable by that directory's readers, so a write that would widen who can read the data now needs approval (a `readers_include` rule on the content, like a recipient check on email). Remaining limit: labels do not travel with files, so untrusted text written to a private folder reads back as trusted.
 3. **Canonicalization tightened.** Refused rather than repaired: numeric, hex and short IP hosts, trailing dots, odd ports, escapes that survive one decoding, a trailing slash on paths, and wildcard or source-routing characters in email addresses. Default ports are removed because that is unambiguous.
 4. **No results moved.** The sandbox tasks did not exercise these shapes, so the results table is unchanged; two runs remain byte-identical.
+
+### 2026-11-17, M6 (measurement and README)
+
+1. **One script regenerates every number.** `scripts/reproduce_all.sh` runs every results and figure script in order. On the final run every deterministic output was byte-identical to the committed one (only timing fields moved); the latency results and the dashboard screenshots vary by design.
+2. **The README cites a file and key for every number**, says "scripted agents" wherever protection numbers appear, reports latency for a reused (warm) and a fresh (cold) token separately, and lists what the system does not do.
+3. **Not done: a real-model run of the agent evaluation (M5).** It needs an API key from the owner. Until then the README says plainly that no real model was tested. The repository stays private until the owner publishes it.

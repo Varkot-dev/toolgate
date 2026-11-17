@@ -5,29 +5,50 @@ garbage collector left on as it is in production and run once before each
 timed loop):
 
   1. pipeline     `Gateway.handle_call` for an allowed call to a no-op tool,
-                  minus the median cost of calling that tool directly. With
-                  MemoryStore and SqliteStore (a file in a temp dir), audit
-                  fsync on (the default) and, labeled separately, with the
-                  audit log's os.fsync replaced by a no-op. Also a call the
-                  grant denies and a call operator policy denies, and the
+                  minus the median cost of calling that tool directly. The
+                  main configuration (MemoryStore, audit fsync on) and its
+                  fsync-off twin are each measured twice:
+                    warm  one token reused for every call. After the first
+                          call its signature-checked parse is in the verify
+                          cache, so every timed call is a cache hit. This is
+                          the common case: an agent makes many calls with one
+                          token.
+                    cold  a distinct, freshly minted token for every call
+                          (minted outside the timed region, with
+                          Authority.mint, which does not fill the cache), so
+                          every call pays the full signature check.
+                  Also, warm only: SqliteStore (a file in a temp dir), a call
+                  the grant denies, a call operator policy denies, and the
                   in-process configuration the HTTP server uses (tool on its
-                  own thread with a timeout).
-  2. stages       the public components of the pipeline timed one by one with
-                  the same inputs: component timings, which need not sum to
-                  the pipeline (the pipeline calls verify three times, and
-                  caches, branches and the tool dispatch differ).
-  3. depth        handle_call, verify and the budget charge for a token at the
-                  end of a delegation chain of 0 to 4 exchanges.
+                  own thread with a timeout). An untimed pass after each
+                  warm/cold run counts signature checks to confirm the mode.
+  2. stages       the components of the current pipeline timed one by one
+                  with the same inputs: verify cold (signature checked) and
+                  warm (cache hit), recheck (expiry and revocation only),
+                  authorize (recheck, grant decide and budget charge), audit
+                  append with fsync on and off, policy decide, grant decide,
+                  call construction and the tool run. handle_call verifies
+                  once (step b), then authorize rechecks and charges (step d),
+                  then it rechecks once more after the audit append (step e).
+                  Component timings need not sum to the pipeline.
+  3. depth        handle_call (warm and cold), verify (warm and cold) and the
+                  budget charge for a token at the end of a delegation chain
+                  of 0 to 4 exchanges. Cold here cycles a pool of distinct
+                  tokens larger than the verify cache, so every call misses.
   4. policy_size  Policy.decide for generated policies of 10, 100 and 1000
                   rules (seeded), on a call no deny rule matches, so every
                   rule is evaluated.
   5. throughput   calls per second for 1, 4 and 16 threads in-process (one
-                  process, one GIL), and over HTTP against the real FastAPI
-                  app on uvicorn (a separate process, localhost, keep-alive)
-                  for 1 and 16 concurrent clients, each for a fixed duration.
+                  process, one GIL), warm (one token per thread) and cold
+                  (each thread cycles its own pool of distinct tokens, larger
+                  than the verify cache), and over HTTP against the real
+                  FastAPI app on uvicorn (a separate process, localhost,
+                  keep-alive) for 1 and 16 concurrent clients, warm only,
+                  each for a fixed duration.
   6. mcp          one tools/call through the MCP proxy in front of the example
                   MCP server, against the same call made to that server
-                  directly. In-process ASGI transport, no socket.
+                  directly, warm (one token). In-process ASGI transport, no
+                  socket.
 
 Honest framing: one machine, a shared cloud container that is not isolated
 from its neighbours, so the numbers are indicative only and vary run to run.
@@ -74,7 +95,7 @@ from toolgate.capability import Call, Capability, Grant
 from toolgate.gateway import Gateway, plain_args
 from toolgate.policy import Policy
 from toolgate.store import MemoryStore, SqliteStore
-from toolgate.tokens import Authority
+from toolgate.tokens import DEFAULT_VERIFY_CACHE_SIZE, Authority, Verified
 
 ROOT = Path(__file__).resolve().parent.parent
 POLICY_FILE = ROOT / "config" / "policy.example.yaml"
@@ -108,6 +129,12 @@ COUNTS = {
     "mcp_warmup": (30, 3),
 }
 DURATIONS = {"threads": (3.0, 0.3), "http": (5.0, 0.5)}
+# Cold runs that cycle a pool (depth, throughput) use pools of this many
+# distinct tokens per stream. With an LRU cache smaller than the pool, a token
+# comes round again only after more distinct tokens than the cache holds, so
+# every call misses. (Checked by the signature counts in the output.)
+COLD_POOL = 2 * DEFAULT_VERIFY_CACHE_SIZE
+MODE_CHECK_CALLS = (200, 10)  # untimed calls per warm/cold signature-count check
 
 
 def noop(path: str) -> None:
@@ -199,6 +226,7 @@ class Rig:
         store: str = "memory",
         depth: int = 0,
         policy: Policy | None = None,
+        max_children: int = 64,
         **gateway_options: Any,
     ) -> None:
         directory.mkdir(parents=True, exist_ok=True)
@@ -210,7 +238,12 @@ class Rig:
             raise ValueError(store)
         ids = itertools.count(1)
         self.authority = Authority(
-            signing_key(), ISSUER, AUDIENCE, self.store, new_id=lambda: f"tok-{next(ids)}"
+            signing_key(),
+            ISSUER,
+            AUDIENCE,
+            self.store,
+            new_id=lambda: f"tok-{next(ids)}",
+            max_children=max_children,
         )
         self.audit = AuditLog(directory / "audit.jsonl")
         self.policy = policy if policy is not None else Policy.from_file(POLICY_FILE)
@@ -231,10 +264,71 @@ class Rig:
             token, _ = self.gateway.exchange_token(token, CAPS, f"agent:sub{level + 1}", 900)
         return token
 
+    def fresh_tokens(self, count: int, parent: str | None = None) -> list[str]:
+        """`count` distinct tokens that the verify cache has never seen.
+
+        Root tokens from Authority.mint, or children of `parent` from
+        Authority.exchange. Neither puts the new token in the verify cache
+        (Gateway.mint_token would: it verifies the token to log it), and
+        neither writes the audit log, so the timed calls start from a clean
+        cache and the audit file is the same as in the warm runs.
+        """
+        if parent is None:
+            grant = Grant(tuple(Capability.from_dict(c) for c in CAPS), time.time() + 3600)
+            return [
+                self.authority.mint("user:bench", grant, "agent:bench", 900) for _ in range(count)
+            ]
+        return [
+            self.authority.exchange(parent, CAPS, f"agent:cold{i}", 900) for i in range(count)
+        ]
+
     def close(self) -> None:
         self.audit.close()
         if isinstance(self.store, SqliteStore):
             self.store.close()
+
+
+@contextlib.contextmanager
+def counting_signatures(authority: Authority) -> Iterator[list[int]]:
+    """Count the signature checks `authority` makes. Untimed passes only.
+
+    Wraps the private Authority._check_signature, which every cache miss
+    calls exactly once and a cache hit never calls.
+    """
+    counter = [0]
+    real = authority._check_signature
+
+    def counted(token: Any) -> bytes:
+        counter[0] += 1
+        return real(token)
+
+    authority._check_signature = counted  # type: ignore[method-assign]
+    try:
+        yield counter
+    finally:
+        del authority._check_signature
+
+
+def mode_check(rig: Rig, stream: list[str], expect_cold: bool) -> dict[str, Any]:
+    """Untimed: one handle_call per token in `stream`, counting signature checks.
+
+    Warm expects none (the stream's token was verified before); cold expects
+    one per call. Raises SystemExit if the count is anything else.
+    """
+    tool, args = ALLOWED
+    with counting_signatures(rig.authority) as counter:
+        for token in stream:
+            if rig.gateway.handle_call(token, tool, args).status != "allowed":
+                raise SystemExit("mode check: a call was not allowed")
+    expected = len(stream) if expect_cold else 0
+    if counter[0] != expected:
+        raise SystemExit(f"mode check: {counter[0]} signature checks, expected {expected}")
+    return {"calls": len(stream), "signature_checks": counter[0]}
+
+
+def cycled(pool: list[str], count: int, start: int = 0) -> list[str]:
+    """`count` tokens taken round-robin from `pool`, starting at index `start`."""
+    return [pool[(start + i) % len(pool)] for i in range(count)]
 
 
 def is_allowed(outcome: Any) -> bool:
@@ -256,76 +350,82 @@ def direct_baseline(c: dict[str, int]) -> dict[str, Any]:
     return summarize(samples)
 
 
-def bench_pipeline(scratch: Path, c: dict[str, int], direct_p50: float) -> dict[str, Any]:
+TOKEN_MODES = {
+    "warm": "one token reused for every call; after the first call every verify is a "
+    "verify-cache hit (no signature check)",
+    "cold": "a distinct token, freshly minted outside the timed region, for every call; "
+    "every verify checks the Ed25519 signature",
+}
+
+
+def bench_pipeline(
+    scratch: Path, c: dict[str, int], direct_p50: float, check_calls: int
+) -> dict[str, Any]:
+    server_options = {"tool_timeout": 30, "max_in_flight_per_root": 8, "tool_error_detail": False}
     configs = [
-        # name, store, fsync, call, check, count key, gateway options, note
-        ("memory_fsync_on", "memory", True, ALLOWED, is_allowed, "pipeline", {}, "main"),
-        ("memory_fsync_off", "memory", False, ALLOWED, is_allowed, "pipeline", {}, ""),
-        ("sqlite_fsync_on", "sqlite", True, ALLOWED, is_allowed, "pipeline_sqlite", {}, ""),
-        ("sqlite_fsync_off", "sqlite", False, ALLOWED, is_allowed, "pipeline_sqlite", {}, ""),
-        (
-            "memory_fsync_on_grant_denied",
-            "memory",
-            True,
-            GRANT_DENIED,
-            denied_at("grant"),
-            "pipeline_denied",
-            {},
-            "",
-        ),
-        (
-            "memory_fsync_on_policy_denied",
-            "memory",
-            True,
-            POLICY_DENIED,
-            denied_at("policy"),
-            "pipeline_denied",
-            {},
-            "",
-        ),
-        (
-            "memory_fsync_on_server_options",
-            "memory",
-            True,
-            ALLOWED,
-            is_allowed,
-            "pipeline_denied",
-            {"tool_timeout": 30, "max_in_flight_per_root": 8, "tool_error_detail": False},
-            "",
-        ),
-    ]
+        # name, store, fsync, token mode, call, check, count key, gateway options
+        ("memory_fsync_on_warm", "memory", True, "warm", ALLOWED, is_allowed, "pipeline", {}),
+        ("memory_fsync_on_cold", "memory", True, "cold", ALLOWED, is_allowed, "pipeline", {}),
+        ("memory_fsync_off_warm", "memory", False, "warm", ALLOWED, is_allowed, "pipeline", {}),
+        ("memory_fsync_off_cold", "memory", False, "cold", ALLOWED, is_allowed, "pipeline", {}),
+        ("sqlite_fsync_on_warm", "sqlite", True, "warm", ALLOWED, is_allowed, "pipeline_sqlite",
+         {}),
+        ("sqlite_fsync_off_warm", "sqlite", False, "warm", ALLOWED, is_allowed, "pipeline_sqlite",
+         {}),
+        ("memory_fsync_on_warm_grant_denied", "memory", True, "warm", GRANT_DENIED,
+         denied_at("grant"), "pipeline_denied", {}),
+        ("memory_fsync_on_warm_policy_denied", "memory", True, "warm", POLICY_DENIED,
+         denied_at("policy"), "pipeline_denied", {}),
+        ("memory_fsync_on_warm_server_options", "memory", True, "warm", ALLOWED, is_allowed,
+         "pipeline_denied", server_options),
+    ]  # fmt: skip
+    keep = ("memory_fsync_on_warm", "memory_fsync_on_cold")
     out: dict[str, Any] = {}
-    keep_samples: list[float] = []
-    for name, store, fsync, (tool, args), check, key, options, note in configs:
+    for name, store, fsync, mode, (tool, args), check, key, options in configs:
         rig = Rig(scratch / f"pipeline-{name}", store=store, **options)
+        n, w = c[key], c["warmup"]
         try:
+            # The token stream is built before anything is timed. Warm: the
+            # rig's token, already verified once when it was minted. Cold: one
+            # never-seen token per call, warm-up calls included.
+            stream = [rig.token] * (w + n) if mode == "warm" else rig.fresh_tokens(w + n)
+            next_token = iter(stream).__next__
             with audit_fsync(fsync):
                 samples = sample(
-                    lambda rig=rig, tool=tool, args=args: rig.gateway.handle_call(
-                        rig.token, tool, args
+                    lambda rig=rig, tool=tool, args=args, next_token=next_token: (
+                        rig.gateway.handle_call(next_token(), tool, args)
                     ),
-                    c[key],
-                    c["warmup"],
+                    n,
+                    w,
                     check,
                 )
+                checked = None
+                if tool == ALLOWED[0] and args == ALLOWED[1] and not options:
+                    more = [rig.token] * check_calls if mode == "warm" else rig.fresh_tokens(
+                        check_calls
+                    )
+                    checked = mode_check(rig, more, mode == "cold")
         finally:
             rig.close()
-        added = [s - direct_p50 for s in samples]
+        added = [x - direct_p50 for x in samples]
         out[name] = {
             "store": store,
             "audit_fsync": "on" if fsync else "off (os.fsync replaced by a no-op)",
+            "token": mode,
+            "token_note": TOKEN_MODES[mode],
             "call": {"tool": tool, "args": args},
             "gateway_options": options,
             "handle_call": summarize(samples),
             "added": summarize(added),
         }
+        if checked is not None:
+            out[name]["signature_check_count"] = checked
+        if name in keep:
+            out[name]["added_samples_us"] = [round(x, 1) for x in added]
         print(
-            f"  {name:34} added p50 {out[name]['added']['p50_us']:9.1f} us   "
+            f"  {name:38} added p50 {out[name]['added']['p50_us']:9.1f} us   "
             f"p99 {out[name]['added']['p99_us']:9.1f} us"
         )
-        if note == "main":
-            keep_samples = added
-    out["memory_fsync_on"]["added_samples_us"] = [round(s, 1) for s in keep_samples]
     return out
 
 

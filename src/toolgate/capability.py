@@ -14,6 +14,7 @@ and an argument nobody thought about (say `bcc`) is refused, not waved through.
 from __future__ import annotations
 
 import math
+import re
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from types import MappingProxyType
@@ -24,27 +25,81 @@ from toolgate.constraints import Constraint
 _MISSING = object()
 _MAX_DEPTH = 32
 
+# Limits on what a Call may carry. Each one exists so that every Call that can
+# be built can also be written to the audit log (see the Call docstring).
 
-def _plain(value: Any, depth: int = 0) -> Any:
+# An integer argument must satisfy abs(n) < 2**MAX_INT_BITS. The audit log
+# writes integers in decimal, and Python refuses to convert an int of more than
+# 4300 digits to a string. 2**4096 has 1234 digits, well under that limit.
+MAX_INT_BITS = 4096
+# Longest tool name and longest argument name (at any depth), in characters.
+MAX_NAME_LENGTH = 256
+# Most arguments at one level: the top level or any nested object.
+MAX_ARGS_PER_LEVEL = 256
+# Most nodes in the arguments as a whole. Every scalar and every container
+# counts as one node, including the top-level arguments object itself.
+MAX_ARG_NODES = 10_000
+
+# A lone surrogate (U+D800 to U+DFFF) cannot be encoded as UTF-8.
+_SURROGATE = re.compile("[\ud800-\udfff]")
+
+
+def _check_text(value: str, what: str) -> None:
+    if _SURROGATE.search(value):
+        raise ValueError(f"{what} contains a surrogate code point")
+
+
+def _check_name(name: str, what: str) -> None:
+    if len(name) > MAX_NAME_LENGTH:
+        raise ValueError(f"{what} is longer than {MAX_NAME_LENGTH} characters")
+    _check_text(name, what)
+
+
+def _plain(value: Any, depth: int = 0, budget: list[int] | None = None) -> Any:
     """Copy JSON-like data into fresh builtin objects, rejecting anything else.
 
     Only exact builtin types pass: a subclass of str or dict can override
     hashing, equality or iteration and show the checker one thing and the
-    tool another.
+    tool another. Values the audit log could not record are rejected too:
+    non-finite floats, strings with surrogates, integers of MAX_INT_BITS bits
+    or more, and data past the name, width and node limits above.
+
+    `budget` is a one-item list holding how many nodes may still be visited.
+    It is shared by the whole walk, so the limit is on the total.
     """
+    if budget is None:
+        budget = [MAX_ARG_NODES]
+    budget[0] -= 1
+    if budget[0] < 0:
+        raise ValueError(f"arguments contain more than {MAX_ARG_NODES} values")
     if depth > _MAX_DEPTH:
         raise ValueError("arguments are nested too deeply")
     t = type(value)
-    if value is None or t in (bool, int, float, str):
+    if value is None or t is bool:
+        return value
+    if t is int:
+        # bit_length() > MAX_INT_BITS is the same as abs(value) >= 2**MAX_INT_BITS
+        if value.bit_length() > MAX_INT_BITS:
+            raise ValueError(f"integer argument needs more than {MAX_INT_BITS} bits")
+        return value
+    if t is float:
+        if not math.isfinite(value):
+            raise ValueError("NaN and infinity are not permitted in arguments")
+        return value
+    if t is str:
+        _check_text(value, "string argument")
         return value
     if t in (list, tuple):
-        return tuple(_plain(v, depth + 1) for v in value)
+        return tuple(_plain(v, depth + 1, budget) for v in value)
     if t is dict:
+        if len(value) > MAX_ARGS_PER_LEVEL:
+            raise ValueError(f"more than {MAX_ARGS_PER_LEVEL} arguments at one level")
         out = {}
         for k, v in value.items():
             if type(k) is not str:
                 raise ValueError("argument names must be strings")
-            out[k] = _plain(v, depth + 1)
+            _check_name(k, "argument name")
+            out[k] = _plain(v, depth + 1, budget)
         return MappingProxyType(out)
     raise ValueError(f"unsupported argument type {t.__name__}")
 
@@ -61,6 +116,23 @@ class Call:
     builtin JSON types (lists become tuples). The gateway must decide on this
     copy and forward this copy, so what was checked is what runs. Anything that
     is not plain JSON data raises ValueError, which the gateway treats as deny.
+
+    Rule: every Call that can be built can be recorded in the audit log.
+    Reason: the gateway decides on Calls and logs each decision, and the log
+    refuses data it cannot write as canonical JSON. If a Call could hold such
+    data, an attacker could send it on purpose and make attempts that leave no
+    record. So construction also raises ValueError for:
+
+      * a float that is NaN, inf or -inf, anywhere in the arguments
+      * a surrogate code point (U+D800 to U+DFFF) in the tool name, in an
+        argument name or in a string value, at any depth
+      * an integer n with abs(n) >= 2**MAX_INT_BITS
+      * a tool name or argument name longer than MAX_NAME_LENGTH characters
+      * more than MAX_ARGS_PER_LEVEL arguments at one level
+      * more than MAX_ARG_NODES values in total (scalars and containers)
+
+    Constraint values are not limited this way. A constraint literal that no
+    Call can carry (a surrogate string, a huge integer) simply never matches.
     """
 
     tool: str
@@ -69,6 +141,7 @@ class Call:
     def __post_init__(self) -> None:
         if type(self.tool) is not str or not self.tool:
             raise ValueError("tool name must be a non-empty string")
+        _check_name(self.tool, "tool name")
         if type(self.args) not in (dict, MappingProxyType):
             raise ValueError("arguments must be a dict")
         object.__setattr__(self, "args", _plain(dict(self.args)))

@@ -1,8 +1,19 @@
 """Capabilities and grants: fail-closed decisions and (de)serialization."""
 
+import json
+
 import pytest
 
-from toolgate.capability import Call, Capability, Decision, Grant
+from toolgate.capability import (
+    MAX_ARG_NODES,
+    MAX_ARGS_PER_LEVEL,
+    MAX_INT_BITS,
+    MAX_NAME_LENGTH,
+    Call,
+    Capability,
+    Decision,
+    Grant,
+)
 from toolgate.constraints import Constraint
 
 NAN = float("nan")
@@ -119,8 +130,14 @@ def test_call_with_non_string_argument_name_cannot_be_built():
 
 def test_decide_any_admits_an_argument_with_any_value():
     cap = send_email_cap()
-    for subject in ["hi", "", 0, None, True, NAN, ["a"], {"k": "v"}]:
+    for subject in ["hi", "", 0, None, True, ["a"], {"k": "v"}]:
         assert cap.permits(Call("send_email", ok_args(subject=subject)))
+
+
+def test_any_cannot_admit_a_non_finite_float_because_no_such_call_exists():
+    for subject in [NAN, INF, -INF]:
+        with pytest.raises(ValueError):
+            Call("send_email", ok_args(subject=subject))
 
 
 @pytest.mark.parametrize(
@@ -132,8 +149,7 @@ def test_decide_any_admits_an_argument_with_any_value():
         ({"size": 101}, "argument 'size' fails max"),
         ({"size": "10"}, "argument 'size' fails max"),
         ({"size": True}, "argument 'size' fails max"),
-        ({"size": NAN}, "argument 'size' fails max"),
-        ({"size": INF}, "argument 'size' fails max"),
+        ({"size": 1e308}, "argument 'size' fails max"),
         ({"size": None}, "argument 'size' fails max"),
     ],
 )
@@ -228,6 +244,232 @@ def test_call_rejects_arguments_nested_too_deeply():
         deep = [deep]
     with pytest.raises(ValueError):
         Call("t", {"x": deep})
+
+
+# --- every Call that can be built can be recorded ---------------------------
+# The audit log writes canonical JSON (ASCII, no NaN). A Call it could not
+# write would be an attempt with no record, so Call refuses such data itself.
+
+SURROGATES = ["\ud800", "\udbff", "\udc00", "\udfff", "a\ud83db", "\ud83d\ude00"]
+INT_LIMIT = 2**MAX_INT_BITS
+
+
+def recordable(call):
+    """Can the audit log's encoding (canonical JSON, then UTF-8) carry this call?"""
+    plain = json.loads(json.dumps({"tool": call.tool, "args": _thaw(call.args)}, allow_nan=False))
+    json.dumps(plain, ensure_ascii=False).encode("utf-8")
+    return True
+
+
+def _thaw(value):
+    if isinstance(value, tuple):
+        return [_thaw(v) for v in value]
+    if hasattr(value, "items"):
+        return {k: _thaw(v) for k, v in value.items()}
+    return value
+
+
+def test_limits_are_the_documented_ones():
+    assert (MAX_INT_BITS, MAX_NAME_LENGTH, MAX_ARGS_PER_LEVEL, MAX_ARG_NODES) == (
+        4096,
+        256,
+        256,
+        10_000,
+    )
+    # the integer bound must stay below Python's default 4300-digit str limit
+    assert len(str(INT_LIMIT)) < 4300
+
+
+@pytest.mark.parametrize("bad", [NAN, INF, -INF])
+@pytest.mark.parametrize(
+    "wrap",
+    [
+        lambda v: {"x": v},
+        lambda v: {"x": [1, v]},
+        lambda v: {"x": {"k": v}},
+        lambda v: {"x": [{"k": [[v]]}]},
+        lambda v: {"a": 1, "b": "s", "c": (v,)},
+    ],
+)
+def test_call_rejects_non_finite_floats_at_any_depth(bad, wrap):
+    with pytest.raises(ValueError):
+        Call("t", wrap(bad))
+
+
+@pytest.mark.parametrize("x", [0.0, -0.0, 1e308, -1e308, 5e-324, 2.5])
+def test_call_accepts_finite_floats(x):
+    assert recordable(Call("t", {"x": x, "nested": [x, {"k": x}]}))
+
+
+@pytest.mark.parametrize("bad", SURROGATES)
+def test_call_rejects_surrogates_in_every_string_position(bad):
+    for build in (
+        lambda: Call(bad, {}),
+        lambda: Call("t" + bad, {}),
+        lambda: Call("t", {bad: 1}),
+        lambda: Call("t", {"x": bad}),
+        lambda: Call("t", {"x": ["ok", bad]}),
+        lambda: Call("t", {"x": {"k": bad}}),
+        lambda: Call("t", {"x": {bad: 1}}),
+        lambda: Call("t", {"x": [{"k": [{bad: None}]}]}),
+    ):
+        with pytest.raises(ValueError):
+            build()
+
+
+@pytest.mark.parametrize(
+    "text", ["", "\x00", "é", "中", "\ud7ff", "\ue000", "\U0001f600", "\U0010ffff"]
+)
+def test_call_accepts_every_other_code_point(text):
+    assert recordable(Call("t" + text, {"k" + text: text, "n": [text, {text: text}]}))
+
+
+@pytest.mark.parametrize(
+    "n",
+    [INT_LIMIT, -INT_LIMIT, INT_LIMIT + 1, 2**5000, -(10**4300)],
+    ids=["limit", "minus_limit", "limit_plus_1", "2_pow_5000", "minus_10_pow_4300"],
+)
+def test_call_rejects_integers_at_or_above_the_bound(n):
+    for args in ({"x": n}, {"x": [n]}, {"x": {"k": n}}):
+        with pytest.raises(ValueError):
+            Call("t", args)
+
+
+@pytest.mark.parametrize("n", [INT_LIMIT - 1, -(INT_LIMIT - 1), 10**400, -(2**63), 0])
+def test_call_accepts_integers_below_the_bound(n):
+    call = Call("t", {"x": n, "nested": [n]})
+    assert call.args["x"] == n
+    assert recordable(call)
+
+
+def test_call_name_length_limit():
+    longest = "n" * MAX_NAME_LENGTH
+    call = Call(longest, {longest: {longest: 1}})
+    assert recordable(call)
+    too_long = longest + "n"
+    for build in (
+        lambda: Call(too_long, {}),
+        lambda: Call("t", {too_long: 1}),
+        lambda: Call("t", {"x": {too_long: 1}}),
+        lambda: Call("t", {"x": [[{too_long: 1}]]}),
+    ):
+        with pytest.raises(ValueError):
+            build()
+    # the limit is on names: a long string VALUE is still plain data
+    assert Call("t", {"x": too_long * 10}).args["x"] == too_long * 10
+
+
+def test_call_argument_count_limit_per_level():
+    full = {f"a{i}": i for i in range(MAX_ARGS_PER_LEVEL)}
+    assert len(Call("t", full).args) == MAX_ARGS_PER_LEVEL
+    assert len(Call("t", {"x": dict(full)}).args["x"]) == MAX_ARGS_PER_LEVEL
+    over = dict(full, one_more=1)
+    for args in (over, {"x": over}, {"x": [over]}):
+        with pytest.raises(ValueError):
+            Call("t", args)
+    # the limit is on named arguments: a longer LIST is bounded by the node limit
+    assert len(Call("t", {"x": list(range(1000))}).args["x"]) == 1000
+
+
+def test_call_total_node_limit():
+    # Nodes: the arguments object (1), the list (1) and its items.
+    at_limit = {"x": [0] * (MAX_ARG_NODES - 2)}
+    assert len(Call("t", at_limit).args["x"]) == MAX_ARG_NODES - 2
+    with pytest.raises(ValueError):
+        Call("t", {"x": [0] * (MAX_ARG_NODES - 1)})
+    # Containers count too, and the total is across all levels and branches.
+    with pytest.raises(ValueError):
+        Call("t", {"x": [[]] * MAX_ARG_NODES})
+    wide = {f"a{i}": [[0] * 9] * 9 for i in range(200)}  # 1 + 200 * (1 + 9 * 10) nodes
+    with pytest.raises(ValueError):
+        Call("t", wide)
+    assert Call("t", {k: wide[k] for k in list(wide)[:100]})
+
+
+def test_call_node_limit_stops_a_shared_sublist_from_expanding():
+    # 14 levels of [x, x] is 2**14 leaves when copied, built from 15 objects.
+    bomb = 0
+    for _ in range(14):
+        bomb = [bomb, bomb]
+    with pytest.raises(ValueError):
+        Call("t", {"x": bomb})
+
+
+def test_every_refusal_is_a_value_error():
+    # ValueError, never another exception type: the gateway maps ValueError to deny.
+    for args in ({"x": NAN}, {"x": "\ud800"}, {"x": INT_LIMIT}, {"n" * 257: 1}):
+        with pytest.raises(ValueError):
+            Call("t", args)
+
+
+# --- constraint literals a Call cannot carry never match ---------------------
+# Constraint values are not limited like Call values. That opens no escalation
+# path: a literal no Call can carry is a literal no Call can equal.
+
+
+def _probe_calls():
+    values = ["", "a", "*", "a*", "\ud7ff", "\ue000", "\U0001f600", "x" * 300]
+    values += [0, 1, -1, INT_LIMIT - 1, -(INT_LIMIT - 1), 1e308, -1e308, 2.0**1023, True, False]
+    values += [None, ["a"], {"k": "v"}]
+    return [Call("t", {"x": v}) for v in values]
+
+
+@pytest.mark.parametrize("literal", SURROGATES)
+def test_constraint_with_a_surrogate_literal_matches_no_constructible_call(literal):
+    caps = [
+        Capability("t", (Constraint("x", "eq", literal),)),
+        Capability("t", (Constraint("x", "in", [literal, literal + literal]),)),
+        Capability("t", (Constraint("x", "glob", literal),)),
+        # a starred pattern still requires its literal part, surrogate included
+        Capability("t", (Constraint("x", "glob", literal + "*"),)),
+        Capability("t", (Constraint("x", "glob", "*" + literal + "*"),)),
+        Capability("t", (Constraint("x", "glob", "a*" + literal),)),
+    ]
+    for cap in caps:
+        for call in _probe_calls():
+            assert not cap.permits(call), (cap, call)
+        # the only values that would match cannot be put in a Call at all
+        for text in (literal, literal + literal, literal + "z", "a" + literal, "ab" + literal):
+            with pytest.raises(ValueError):
+                Call("t", {"x": text})
+    # a surrogate in the constraint's argument NAME: no call can name that argument
+    named = Capability("t", (Constraint(literal, "any"),))
+    assert not named.permits(Call("t", {}))
+    with pytest.raises(ValueError):
+        Call("t", {literal: 1})
+    # and a capability for a tool with a surrogate name can never be called
+    with pytest.raises(ValueError):
+        Call("t" + literal, {})
+
+
+@pytest.mark.parametrize(
+    "literal",
+    [INT_LIMIT, -INT_LIMIT, 2**5000, -(2**5000)],
+    ids=["limit", "minus_limit", "2_pow_5000", "minus_2_pow_5000"],
+)
+def test_constraint_with_a_huge_int_literal_matches_no_constructible_call(literal):
+    caps = [
+        Capability("t", (Constraint("x", "eq", literal),)),
+        Capability("t", (Constraint("x", "in", [literal, literal * 2]),)),
+    ]
+    for cap in caps:
+        for call in _probe_calls():
+            assert not cap.permits(call), (cap, call)
+        with pytest.raises(ValueError):
+            Call("t", {"x": literal})
+    # No finite float equals it either: the largest float is below 2**1024.
+    assert 1.7976931348623157e308 < 2**1024 < INT_LIMIT
+
+
+def test_huge_max_ceiling_is_only_a_ceiling():
+    # `max` with a huge ceiling admits every number a Call can carry and nothing
+    # else. That is what the grant says, not a way around it.
+    cap = Capability("t", (Constraint("x", "max", 2**5000),))
+    assert cap.permits(Call("t", {"x": INT_LIMIT - 1}))
+    assert not cap.permits(Call("t", {"x": "a"}))
+    low = Capability("t", (Constraint("x", "max", -(2**5000)),))
+    for call in _probe_calls():
+        assert not low.permits(call)
 
 
 def test_call_takes_a_private_read_only_copy_of_its_arguments():

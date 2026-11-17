@@ -8,7 +8,10 @@ credential confusion, malformed bodies, header and path tricks, and races.
 from __future__ import annotations
 
 import base64
+import hashlib
 import json
+import logging
+import os
 import secrets
 import shutil
 import socket
@@ -25,14 +28,17 @@ import uvicorn
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from test_gateway import Env  # noqa: E402
+import toolgate.server as server_module  # noqa: E402
+from test_gateway import Blocker, Env  # noqa: E402
 from toolgate.audit import verify  # noqa: E402
 from toolgate.server import (  # noqa: E402
     ConfigError,
     build,
     create_app,
     hash_admin_key,
+    is_loopback,
     load_config,
+    safe_text,
     strict_json,
 )
 
@@ -54,8 +60,8 @@ CHILD_CAPS = [
 class Live:
     """A gateway behind a real uvicorn server, plus the client-side secrets."""
 
-    def __init__(self, tmp_path: Path, **app_options: Any) -> None:
-        self.env = Env(tmp_path)
+    def __init__(self, tmp_path: Path, env: Env | None = None, **app_options: Any) -> None:
+        self.env = env if env is not None else Env(tmp_path)
         self.admin_key = secrets.token_urlsafe(32)
         app = create_app(self.env.gateway, hash_admin_key(self.admin_key), **app_options)
         config = uvicorn.Config(app, host="127.0.0.1", port=0, log_level="error", lifespan="off")
@@ -220,13 +226,25 @@ def test_scripted_client_drives_allow_deny_and_approve(live: Live) -> None:
     # The audit log verifies, and holds one entry per decision made above.
     report = http.get("/audit/verify", headers=live.admin).json()
     assert report["ok"] is True and report["problem"] is None
-    decisions = [e["decision"] for e in env.entries()]
+    decisions = [e["decision"] for e in env.entries() if not e["tool"].startswith("token:")]
     assert decisions == ["allow", "deny", "deny", "approve", "approved", "deny"]
-    assert report["entries"] == len(decisions) == 6
+    # Minting, the refused and the accepted exchange and the revocation are entries too.
+    lifecycle = [
+        (e["tool"], e["decision"], e["rule"])
+        for e in env.entries()
+        if e["tool"].startswith("token:")
+    ]
+    assert lifecycle == [
+        ("token:mint", "allow", "token: minted by admin"),
+        ("token:exchange", "deny", "exchange: escalation"),
+        ("token:exchange", "allow", f"token: exchanged from {parent['jti']}"),
+        ("token:revoke", "allow", "token: revoked by admin"),
+    ]
+    assert report["entries"] == len(decisions) + len(lifecycle) == 10
     head = http.get("/audit/head", headers=live.admin).json()
-    assert head == report["head"] and head["seq"] == 5
+    assert head == report["head"] and head["seq"] == 9
     assert verify(env.audit_path, head["hash"]).ok
-    assert env.entries()[4]["approver"] == "alice@example.com"
+    assert env.entries()[7]["approver"] == "alice@example.com"
     # No argument value and no credential ever reached the log.
     raw = env.audit_path.read_text()
     for secret in ("partner@other.test", "Q3 numbers", child["token"], live.admin_key):
@@ -405,7 +423,8 @@ def test_missing_wrong_and_tricky_authorization_headers(live: Live) -> None:
         assert response.status_code == 401, headers
         assert "www-authenticate" in response.headers
     assert live.env.total_tool_calls() == 0
-    assert live.env.entries() == []  # no credential presented properly, so nothing was decided
+    # No credential presented properly, so nothing was decided: only the mint is on record.
+    assert [e["tool"] for e in live.env.entries()] == ["token:mint"]
 
     # The scheme name is case-insensitive (RFC 9110); the credential is not.
     assert (
@@ -444,7 +463,10 @@ def test_token_problems_on_call_are_401_with_a_challenge(live: Live) -> None:
     )
     assert exchange.status_code == 401
     assert live.env.total_tool_calls() == 0
-    assert all(e["jti"].startswith("unverified:") for e in live.env.entries())
+    minted_entry, *refused = live.env.entries()
+    assert (minted_entry["tool"], minted_entry["jti"]) == ("token:mint", minted["jti"])
+    assert len(refused) == 5 and all(e["jti"].startswith("unverified:") for e in refused)
+    assert (refused[-1]["tool"], refused[-1]["rule"]) == ("token:exchange", "exchange: expired")
 
 
 def test_another_token_cannot_read_or_probe_an_approval(live: Live) -> None:
@@ -574,7 +596,7 @@ def test_malformed_bodies_are_refused_and_nothing_runs(live: Live) -> None:
         assert response.status_code == expected, (body[:60], response.text)
         assert token not in response.text
     assert live.env.total_tool_calls() == 0
-    assert live.env.entries() == []
+    assert [e["tool"] for e in live.env.entries()] == ["token:mint"]
     # The same bytes that were refused above are fine once well formed.
     assert (
         post_raw(live, token, b'{"tool":"read_file","args":{"path":"reports/x"}}').status_code
@@ -767,7 +789,7 @@ def test_concurrent_calls_and_verify_do_not_disagree(live: Live) -> None:
     assert all(r["ok"] for r in reports), [r for r in reports if not r["ok"]]
     assert len(live.env.spies["read_file"].calls) == 10  # the budget, not the 20 attempts
     final = live.http.get("/audit/verify", headers=live.admin).json()
-    assert final["ok"] and final["entries"] == 20
+    assert final["ok"] and final["entries"] == 21  # 20 calls and the mint
 
 
 # ----------------------------------------------------------------- app and config
@@ -834,7 +856,8 @@ def test_config_errors_fail_closed(tmp_path: Path) -> None:
     path = example_config(tmp_path)
     config = load_config(path)
     good = {
-        config["signing_key_env"]: base64.b64encode(bytes(32)).decode(),
+        # Not all zero: that key is itself refused now (see the startup tests below).
+        config["signing_key_env"]: base64.b64encode(bytes(range(32))).decode(),
         config["admin_key_hash_env"]: hash_admin_key("k"),
     }
     bad_environments = [
@@ -864,3 +887,437 @@ def test_config_errors_fail_closed(tmp_path: Path) -> None:
         load_config(tmp_path / "extra.yaml")
     with pytest.raises(ConfigError):
         load_config(tmp_path / "does-not-exist.yaml")
+
+
+# ====================================================================================
+# Findings from the security reviews. Each test below failed before its fix.
+# ====================================================================================
+
+GHOST = [{"tool": "ghost", "args": {}}, {"tool": "read_file", "args": {"path": {"any": True}}}]
+
+
+def serve(tmp_path: Path, tools: dict[str, Any] | None = None, **gateway_options: Any) -> Live:
+    """A live server whose gateway has other tools or limits than Env's default."""
+    env = Env(tmp_path)
+    env.rebuild(tools, **gateway_options)
+    return Live(tmp_path, env=env)
+
+
+# ------------------------------------------------------------- 8. availability
+
+
+def test_revoke_stays_prompt_while_every_shared_worker_runs_a_blocked_tool(tmp_path: Path) -> None:
+    blocker = Blocker()
+    live = serve(tmp_path, {"ghost": blocker})  # no cap and no timeout: the worst case
+    workers = 40  # FastAPI's shared pool for plain `def` endpoints
+    results: list[int] = []
+    try:
+        token = live.mint(GHOST)
+        victim = live.mint(GHOST)
+
+        def caller() -> None:
+            with httpx.Client(base_url=live.url, timeout=60) as client:
+                response = client.post(
+                    "/call", headers=live.bearer(token["token"]), json={"tool": "ghost", "args": {}}
+                )
+                results.append(response.status_code)
+
+        threads = [threading.Thread(target=caller) for _ in range(workers + 5)]
+        for thread in threads:
+            thread.start()
+        blocker.wait_started(workers)  # every shared worker is now inside the tool
+        assert blocker.calls == workers and results == []
+        try:
+            started = time.monotonic()
+            revoked = live.http.post(
+                "/token/revoke", headers=live.admin, json={"jti": victim["jti"]}, timeout=5
+            )
+            listing = live.http.get("/approvals", headers=live.admin, timeout=5)
+            head = live.http.get("/audit/head", headers=live.admin, timeout=5)
+            checked = live.http.get("/audit/verify", headers=live.admin, timeout=5)
+            elapsed = time.monotonic() - started
+            statuses = [r.status_code for r in (revoked, listing, head, checked)]
+            assert statuses == [200, 200, 200, 200]
+            assert elapsed < 3, f"admin endpoints took {elapsed:.1f}s behind blocked tools"
+            assert results == [] and blocker.calls == workers  # the tools are all still blocked
+        finally:
+            blocker.release.set()
+            for thread in threads:
+                thread.join(30)
+        assert sorted(results) == [200] * (workers + 5)
+        # The revocation made while the pool was full took effect.
+        assert live.call(victim["token"], "read_file", {"path": "x"}).status_code == 401
+    finally:
+        blocker.release.set()
+        live.close()
+
+
+def test_calls_over_the_in_flight_cap_get_429_with_retry_after(tmp_path: Path) -> None:
+    blocker = Blocker()
+    live = serve(tmp_path, {"ghost": blocker}, max_in_flight_per_root=2)
+    statuses: list[int] = []
+    try:
+        token = live.mint(GHOST)["token"]
+
+        def caller() -> None:
+            with httpx.Client(base_url=live.url, timeout=60) as client:
+                statuses.append(
+                    client.post(
+                        "/call", headers=live.bearer(token), json={"tool": "ghost", "args": {}}
+                    ).status_code
+                )
+
+        threads = [threading.Thread(target=caller) for _ in range(2)]
+        for thread in threads:
+            thread.start()
+        blocker.wait_started(2)
+        try:
+            for _ in range(20):  # a burst from the same token costs the pool nothing
+                over = live.call(token, "ghost")
+                assert over.status_code == 429 and over.headers["retry-after"] == "1"
+                assert (over.json()["status"], over.json()["code"]) == ("denied", "in_flight_limit")
+            assert blocker.calls == 2
+            assert live.env.entries()[-1]["rule"] == "limit: in_flight"
+        finally:
+            blocker.release.set()
+            for thread in threads:
+                thread.join(30)
+        assert statuses == [200, 200]
+        assert live.call(token, "ghost").status_code == 200
+    finally:
+        blocker.release.set()
+        live.close()
+
+
+def test_a_tool_that_overruns_its_timeout_is_504(tmp_path: Path) -> None:
+    blocker = Blocker()
+    live = serve(tmp_path, {"ghost": blocker}, tool_timeout=0.05)
+    try:
+        token = live.mint([{"tool": "ghost", "args": {}, "max_calls": 3}])
+        response = live.call(token["token"], "ghost")
+        assert response.status_code == 504
+        body = response.json()
+        assert (body["status"], body["code"]) == ("error", "tool_timeout") and "result" not in body
+        assert blocker.calls == 1
+        assert live.env.store.usage(token["jti"], 0) == (1, 3)  # charged, not refunded
+    finally:
+        blocker.release.set()
+        live.close()
+
+
+# ------------------------------------------------------------- 11. lone surrogates
+
+BAD = "\ud800zz"
+_CAP = {"tool": "read_file", "args": {"path": {"glob": "reports/*"}}}
+SURROGATE_CASES: list[tuple[str, str, Any]] = [
+    ("admin", "/token", {"sub": BAD, "actor": "a", "capabilities": [_CAP], "expires_in": 60}),
+    ("admin", "/token", {"sub": "u", "actor": BAD, "capabilities": [_CAP], "expires_in": 60}),
+    (
+        "admin",
+        "/token",
+        {"sub": "u", "actor": "a", "capabilities": [{"tool": BAD, "args": {}}], "expires_in": 60},
+    ),
+    (
+        "admin",
+        "/token",
+        {
+            "sub": "u",
+            "actor": "a",
+            "capabilities": [{"tool": "t", "args": {BAD: {"any": True}}}],
+            "expires_in": 60,
+        },
+    ),
+    (
+        "admin",
+        "/token",
+        {
+            "sub": "u",
+            "actor": "a",
+            "capabilities": [{"tool": "t", "args": {"p": {"eq": BAD}}}],
+            "expires_in": 60,
+        },
+    ),
+    ("admin", "/token", {"sub": "u", "actor": "a", "capabilities": [], "expires_in": 60, BAD: 1}),
+    ("admin", "/token/revoke", {"jti": BAD}),
+    ("admin", "/token/revoke", {BAD: "x"}),
+    ("admin", "/approvals/abc", {"decision": BAD, "approver": "alice"}),
+    ("admin", "/approvals/abc", {"decision": "approve", "approver": BAD}),
+    ("agent", "/token/exchange", {"capabilities": [_CAP], "actor": BAD, "expires_in": 60}),
+    (
+        "agent",
+        "/token/exchange",
+        {"capabilities": [{"tool": BAD, "args": {}}], "actor": "a", "expires_in": 60},
+    ),
+    (
+        "agent",
+        "/token/exchange",
+        {
+            "capabilities": [{"tool": "read_file", "args": {BAD: {"any": True}}}],
+            "actor": "a",
+            "expires_in": 60,
+        },
+    ),
+    (
+        "agent",
+        "/token/exchange",
+        {
+            "capabilities": [{"tool": "read_file", "args": {"path": {"glob": BAD}}}],
+            "actor": "a",
+            "expires_in": 60,
+        },
+    ),
+    (
+        "agent",
+        "/token/exchange",
+        {"capabilities": [{"tool": "read_file", BAD: 1}], "actor": "a", "expires_in": 60},
+    ),
+    ("agent", "/call", {"tool": BAD, "args": {}}),
+    ("agent", "/call", {"tool": "read_file", "args": {BAD: 1}}),
+    ("agent", "/call", {"tool": "read_file", "args": {"path": BAD}}),
+    ("agent", "/call", {"tool": "read_file", "args": {"path": ["reports/x", {"k": BAD}]}}),
+    ("agent", "/call", {"tool": "read_file", "args": {}, BAD: 1}),
+]
+
+
+@pytest.mark.parametrize(
+    ("who", "path", "body"),
+    SURROGATE_CASES,
+    ids=[f"{path}-{i}" for i, (_, path, _) in enumerate(SURROGATE_CASES)],
+)
+def test_a_lone_surrogate_in_any_string_field_is_422_never_a_5xx(
+    live: Live, who: str, path: str, body: Any
+) -> None:
+    token = live.mint()["token"]
+    before = live.env.entries()
+    raw = json.dumps(body).encode("ascii")  # the surrogate travels as the escape \\ud800
+    assert b"\\ud800" in raw
+    headers = live.admin if who == "admin" else live.bearer(token)
+    response = live.http.post(
+        path, headers={**headers, "Content-Type": "application/json"}, content=raw
+    )
+    assert response.status_code < 500, response.text
+    assert response.status_code == 422 and response.json()["error"] == "invalid_request"
+    response.content.decode("utf-8")  # and the answer itself is well-formed text
+    assert live.env.total_tool_calls() == 0
+    assert live.env.entries() == before  # refused at the door: no decision, no entry
+    assert live.http.get("/healthz").status_code == 200
+
+
+def test_error_bodies_can_always_be_encoded() -> None:
+    assert safe_text("plain") == "plain"
+    assert safe_text("a\ud800b") == "a\\ud800b"
+    error = server_module.ApiError(403, "escalation", "tool '\udfff' is not covered")
+    body = error.response().body
+    assert json.loads(body)["reason"] == "tool '\\udfff' is not covered"
+    # Whatever reaches the encoder, it does not raise.
+    rendered = server_module._Json({"reason": "x\ud800"}).body
+    assert rendered.decode("utf-8")
+
+
+# ----------------------------------------------- 12. nothing for unverified callers
+
+
+def test_unverified_callers_learn_nothing_about_the_audit_log(live: Live) -> None:
+    good = live.mint()["token"]
+    for token, body in [
+        ("abc.def.ghi", {"tool": "read_file", "args": {"path": "reports/x"}}),
+        ("junk", {"tool": "read_file", "args": {"path": "reports/x"}}),
+        ("junk", {"tool": "bad tool name", "args": {"x": 1}}),
+    ]:
+        response = live.http.post("/call", headers=live.bearer(token), json=body)
+        assert response.status_code == 401
+        assert set(response.json()) == {"status", "reason"}  # no audit_seq, no stage
+    assert len(live.env.entries()) == 4  # the entries exist; the caller is just not told
+    # A caller whose token verifies still gets both, as before.
+    denied = live.call(good, "read_file", {"path": "secrets/x"}).json()
+    assert denied["stage"] == "grant" and denied["audit_seq"] == 4
+    assert denied["code"] == "constraint_failed"
+
+
+# ---------------------------------------------- 13. tool exception text over HTTP
+
+
+def test_tool_exception_text_is_not_returned_by_a_configured_service(tmp_path: Path) -> None:
+    def leaky() -> None:
+        raise ConnectionError("postgres://svc:hunter2@10.0.0.7/prod at /srv/app/db.py")
+
+    live = serve(tmp_path, {"ghost": leaky}, tool_error_detail=False)
+    try:
+        response = live.call(live.mint(GHOST)["token"], "ghost")
+        assert response.status_code == 502
+        assert response.json()["reason"] == "tool raised ConnectionError; details are withheld"
+        assert "hunter2" not in response.text and "/srv/app" not in response.text
+    finally:
+        live.close()
+
+
+# ------------------------------------------------------ 10, 14. startup and files
+
+
+def good_environ(config: dict[str, Any], admin_key: str = "k" * 40) -> dict[str, str]:
+    return {
+        config["signing_key_env"]: base64.b64encode(bytes(range(32))).decode(),
+        config["admin_key_hash_env"]: hash_admin_key(admin_key),
+    }
+
+
+def close(gateway: Any) -> None:
+    gateway.audit.close()
+    if hasattr(gateway.authority.store, "close"):
+        gateway.authority.store.close()
+
+
+def test_build_applies_the_service_limits_by_default(tmp_path: Path) -> None:
+    config = load_config(example_config(tmp_path))
+    _, gateway, settings = build(config, good_environ(config), tmp_path)
+    try:
+        assert gateway.max_in_flight_per_root == 8
+        assert gateway.tool_timeout == 30
+        assert gateway.tool_error_detail is False
+        assert (gateway.unverified_audit_rate, gateway.unverified_audit_burst) == (20, 100)
+        queue = gateway.approvals
+        assert (queue.max_pending_per_root, queue.max_pending_per_sub) == (10, 20)
+        assert settings == {
+            "host": "127.0.0.1",
+            "port": 8000,
+            "limit_concurrency": 256,
+            "timeout_keep_alive": 5,
+            "access_log": False,
+        }
+    finally:
+        close(gateway)
+    custom = {
+        **config,
+        "limits": {"max_in_flight_per_root": 2, "tool_timeout_seconds": 1.5},
+        "approvals": {"max_pending_per_root": 3, "max_pending_per_sub": 4},
+        "server": {"limit_concurrency": 10, "timeout_keep_alive_seconds": 2, "admin_threads": 1},
+    }
+    _, gateway, settings = build(custom, good_environ(config), tmp_path)
+    try:
+        assert (gateway.max_in_flight_per_root, gateway.tool_timeout) == (2, 1.5)
+        assert gateway.approvals.max_pending_per_root == 3
+        assert (settings["limit_concurrency"], settings["timeout_keep_alive"]) == (10, 2)
+    finally:
+        close(gateway)
+    for section, key, bad in [
+        ("limits", "max_in_flight_per_root", 0),
+        ("limits", "tool_timeout_seconds", -1),
+        ("limits", "tool_error_detail", "yes"),
+        ("limits", "unverified_audit_per_second", 0),
+        ("limits", "unverified_audit_burst", 1.5),
+        ("server", "limit_concurrency", 0),
+        ("server", "timeout_keep_alive_seconds", float("inf")),
+        ("server", "admin_threads", True),
+        ("server", "access_log", "on"),
+        ("approvals", "max_pending_per_root", 0),
+    ]:
+        with pytest.raises(ConfigError):
+            build({**config, section: {key: bad}}, good_environ(config), tmp_path / "unused")
+
+
+def test_weak_or_missing_secrets_are_refused_with_a_clear_message(tmp_path: Path) -> None:
+    config = load_config(example_config(tmp_path))
+    good = good_environ(config)
+    signing, admin = config["signing_key_env"], config["admin_key_hash_env"]
+    cases = [
+        ({admin: good[admin]}, f"environment variable {signing} is not set"),
+        ({**good, signing: "   "}, f"environment variable {signing} is not set"),
+        ({signing: good[signing]}, f"environment variable {admin} is not set"),
+        ({**good, signing: base64.b64encode(bytes(32)).decode()}, "all zero"),
+        ({**good, admin: hashlib.sha256(b"").hexdigest()}, "empty string"),
+    ]
+    for environ, message in cases:
+        with pytest.raises(ConfigError, match=message):
+            build(config, environ, tmp_path)
+    assert not (tmp_path / "audit.jsonl").exists()  # refused before anything was opened
+    env = Env(tmp_path)
+    with pytest.raises(ValueError, match="empty string"):
+        create_app(env.gateway, hashlib.sha256(b"").hexdigest())
+    env.audit.close()
+
+
+def test_build_does_not_follow_a_symlinked_audit_log(tmp_path: Path) -> None:
+    config = load_config(example_config(tmp_path))
+    target = tmp_path / "elsewhere.jsonl"
+    target.write_bytes(b"")
+    (tmp_path / "audit.jsonl").symlink_to(target)
+    with pytest.raises(ConfigError, match="symbolic link"):
+        build(config, good_environ(config), tmp_path)
+    assert target.read_bytes() == b""  # nothing was appended through the link
+
+
+def test_build_creates_a_private_store_file_and_refuses_a_shared_one(tmp_path: Path) -> None:
+    config = load_config(example_config(tmp_path))
+    config = {**config, "store": {"kind": "sqlite", "path": "toolgate.sqlite"}}
+    _, gateway, _ = build(config, good_environ(config), tmp_path)
+    close(gateway)
+    store_file = tmp_path / "toolgate.sqlite"
+    assert store_file.stat().st_mode & 0o777 == 0o600
+    assert (tmp_path / "audit.jsonl").stat().st_mode & 0o777 == 0o600
+    os.chmod(store_file, 0o644)
+    with pytest.raises(ConfigError, match="group- or world-accessible"):
+        build(config, good_environ(config), tmp_path)
+
+
+def test_main_sets_uvicorn_limits_warns_off_loopback_and_keeps_tokens_out_of_logs(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    import uvicorn as real_uvicorn
+
+    path = example_config(tmp_path)
+    config = load_config(path)
+    for name, value in good_environ(config).items():
+        monkeypatch.setenv(name, value)
+    runs: list[dict[str, Any]] = []
+    monkeypatch.setattr(real_uvicorn, "run", lambda app, **options: runs.append(options))
+
+    assert server_module.main(["--config", str(path)]) == 0
+    assert "not loopback" not in capsys.readouterr().err  # the default host is loopback
+    (options,) = runs
+    assert (options["host"], options["access_log"]) == ("127.0.0.1", False)
+    assert (options["limit_concurrency"], options["timeout_keep_alive"]) == (256, 5)
+    assert options["proxy_headers"] is False and options["server_header"] is False
+
+    exposed = tmp_path / "exposed.yaml"
+    exposed.write_text(path.read_text().replace('host: "127.0.0.1"', 'host: "0.0.0.0"') + "\n")
+    (tmp_path / "audit.jsonl").unlink()
+    assert server_module.main(["--config", str(exposed)]) == 0
+    warning = capsys.readouterr().err
+    assert "not loopback" in warning and "TLS" in warning
+    assert runs[1]["host"] == "0.0.0.0"
+
+    for host, expected in [
+        ("127.0.0.1", True),
+        ("127.8.9.1", True),
+        ("::1", True),
+        ("localhost", True),
+        ("0.0.0.0", False),
+        ("::", False),
+        ("10.0.0.5", False),
+        ("gateway.internal", False),
+    ]:
+        assert is_loopback(host) is expected, host
+
+    # If the access log is turned on, the filter main() installs drops query strings.
+    logger = logging.getLogger("uvicorn.access")
+    assert any(type(f) is server_module._NoQueryStrings for f in logger.filters)
+    record = logging.LogRecord(
+        "uvicorn.access",
+        logging.INFO,
+        "",
+        0,
+        '%s - "%s %s HTTP/%s" %d',
+        ("127.0.0.1:5", "POST", "/call?access_token=SECRETSECRET", "1.1", 400),
+        None,
+    )
+    assert server_module._NoQueryStrings().filter(record) is True
+    assert record.getMessage() == '127.0.0.1:5 - "POST /call HTTP/1.1" 400'
+    for f in [f for f in logger.filters if type(f) is server_module._NoQueryStrings]:
+        logger.removeFilter(f)
+
+
+def test_deployment_notes_exist_and_name_what_the_proxy_must_do() -> None:
+    text = (ROOT / "docs" / "DEPLOYMENT.md").read_text()
+    for topic in ("TLS", "timeout", "percent-encoded", "--checkpoint", "0600", "loopback"):
+        assert topic in text, topic
+    assert "—" not in text

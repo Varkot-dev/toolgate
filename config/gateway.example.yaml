@@ -17,6 +17,10 @@
 #                 only letters, digits and . _ ~ + / = - so that it fits in
 #                 an Authorization header unchanged.
 #
+# An all-zero signing key and the hash of an empty admin key are refused.
+# Before exposing this to anything but your own machine, read
+# docs/DEPLOYMENT.md: it lists what a reverse proxy MUST provide.
+#
 # Relative paths are resolved against the directory this file is in.
 # Unknown keys are an error, here and in every section.
 
@@ -32,12 +36,14 @@ policy_file: "policy.example.yaml"
 
 # Hash-chained audit log, one JSON entry per decision. One writer per file.
 # Check it offline with:  python -m toolgate.audit verify <path> --head <hash>
+# Created with mode 0600. A symbolic link here is refused, not followed.
 audit_log: "audit.jsonl"
 
 # Revocations and call budgets.
 #   memory   lost on restart: every token issued before the restart then
 #            fails as unknown_token (fails closed)
-#   sqlite   kept in a file; needs `path`
+#   sqlite   kept in a file; needs `path`. The file is created with mode
+#            0600, and one that group or others can access is refused.
 store:
   kind: memory
   # kind: sqlite
@@ -50,17 +56,39 @@ tokens:
 
 approvals:
   ttl_seconds: 300            # a pending approval nobody decides expires after this
-  max_pending_per_token: 5    # one agent cannot flood the queue...
+  max_pending_per_token: 5    # one token cannot flood the queue...
+  max_pending_per_root: 10    # ...nor can one root token through all the children
+                              # exchanged from it...
+  max_pending_per_sub: 20     # ...nor one principal (`sub`) through several roots...
   max_pending: 100            # ...and all agents together cannot either
   retention_seconds: 3600     # how long a decided approval stays readable by its agent
 
 limits:
   max_body_bytes: 65536       # request bodies above this are refused with 413
   max_output_bytes: 65536     # a larger tool result is withheld (502), never cut short
+  max_in_flight_per_root: 8   # tool calls running at once under one root token and
+                              # its children; over it: 429 with Retry-After, no charge
+  tool_timeout_seconds: 30    # the caller gets 504 after this. A Python thread cannot
+                              # be killed: the tool may still finish in the background,
+                              # it keeps its in-flight slot until it does, and its
+                              # budget is NOT refunded
+  tool_error_detail: false    # true returns a tool's exception text to the agent;
+                              # false returns only the exception type name
+  unverified_audit_per_second: 20   # audit entries per second for tokens that do not
+  unverified_audit_burst: 100       # verify, and the burst. Past it the caller still
+                                    # gets 401; the attempts are counted and logged as
+                                    # one "unverified: N attempts suppressed" entry
 
 server:
   host: "127.0.0.1"           # there is no TLS here: put a TLS proxy in front
   port: 8000                  # before listening on anything but loopback
+  admin_threads: 4            # workers only admin endpoints use, so revocation and
+                              # approvals stay responsive while tools are slow
+  limit_concurrency: 256      # connections and requests in flight; past it uvicorn
+                              # answers 503
+  timeout_keep_alive_seconds: 5     # idle keep-alive connections are closed after this
+  access_log: false           # uvicorn's access log. Off by default; when on, query
+                              # strings are cut out of it
 
 # Tool registry: the name agents call -> "package.module:function". The
 # function receives the call's arguments as keyword arguments and may be sync

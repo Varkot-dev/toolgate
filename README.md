@@ -15,23 +15,31 @@ A grant is a set of capabilities and an expiry. A capability names one tool and 
 ```python
 from toolgate import Call, Grant, check_attenuation
 
-parent = Grant.from_dict({
-    "expires_at": 1_800_003_600,
-    "capabilities": [{
-        "tool": "read_file",
-        "args": {"path": {"glob": "reports/*"}},
-    }],
-})
-child = Grant.from_dict({
-    "expires_at": 1_800_000_600,
-    "capabilities": [{
-        "tool": "read_file",
-        "args": {"path": {"glob": "reports/q3/*"}},
-    }],
-})
+parent = Grant.from_dict(
+    {
+        "expires_at": 1_800_003_600,
+        "capabilities": [
+            {
+                "tool": "read_file",
+                "args": {"path": {"glob": "reports/*"}},
+            }
+        ],
+    }
+)
+child = Grant.from_dict(
+    {
+        "expires_at": 1_800_000_600,
+        "capabilities": [
+            {
+                "tool": "read_file",
+                "args": {"path": {"glob": "reports/q3/*"}},
+            }
+        ],
+    }
+)
 
-check_attenuation(parent, child).ok                                           # True
-check_attenuation(child, parent).ok                                           # False
+check_attenuation(parent, child).ok  # True
+check_attenuation(child, parent).ok  # False
 child.allows(Call("read_file", {"path": "reports/q3/a.txt"}), 1_800_000_000)  # True
 child.allows(Call("read_file", {"path": "reports/q1/a.txt"}), 1_800_000_000)  # False
 ```

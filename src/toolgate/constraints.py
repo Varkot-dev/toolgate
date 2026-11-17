@@ -21,14 +21,18 @@ OPS: frozenset[str] = frozenset({"eq", "in", "max", "glob", "any"})
 
 
 def _is_number(value: Any) -> bool:
-    """True for a finite int or float. bool is not a number here."""
-    if isinstance(value, bool) or not isinstance(value, (int, float)):
-        return False
-    return math.isfinite(value)
+    """True for an int or a finite float. bool is not a number here.
+
+    Exact types only: a subclass of int, float or str could override its
+    comparison methods and lie to the checker, so subclasses are never accepted.
+    """
+    if type(value) is int:
+        return True
+    return type(value) is float and math.isfinite(value)
 
 
 def _is_scalar(value: Any) -> bool:
-    return isinstance(value, (bool, str)) or _is_number(value)
+    return type(value) in (bool, str) or _is_number(value)
 
 
 def same_value(a: Any, b: Any) -> bool:
@@ -38,9 +42,9 @@ def same_value(a: Any, b: Any) -> bool:
     number, and non-scalars (lists, dicts, None, NaN) equal nothing. Numbers
     compare by value, so 3 equals 3.0.
     """
-    if isinstance(a, bool) or isinstance(b, bool):
-        return isinstance(a, bool) and isinstance(b, bool) and a == b
-    if isinstance(a, str) and isinstance(b, str):
+    if type(a) is bool or type(b) is bool:
+        return type(a) is bool and type(b) is bool and a == b
+    if type(a) is str and type(b) is str:
         return a == b
     if _is_number(a) and _is_number(b):
         return a == b
@@ -81,17 +85,18 @@ class Constraint:
     value: Any = None
 
     def __post_init__(self) -> None:
-        if not isinstance(self.arg, str) or not self.arg:
+        if type(self.arg) is not str or not self.arg:
             raise ValueError("constraint argument name must be a non-empty string")
-        if self.op not in OPS:
+        if type(self.op) is not str or self.op not in OPS:
             raise ValueError(f"unknown operator {self.op!r}")
         if self.op == "eq":
             if not _is_scalar(self.value):
                 raise ValueError("eq needs a string, bool or finite number")
         elif self.op == "in":
-            if isinstance(self.value, (list, set, frozenset)):
-                object.__setattr__(self, "value", tuple(self.value))
-            if not isinstance(self.value, tuple) or not self.value:
+            if not isinstance(self.value, (list, tuple, set, frozenset)):
+                raise ValueError("in needs a non-empty list of values")
+            object.__setattr__(self, "value", tuple(self.value))  # our own plain tuple
+            if not self.value:
                 raise ValueError("in needs a non-empty list of values")
             if not all(_is_scalar(v) for v in self.value):
                 raise ValueError("in values must be strings, bools or finite numbers")
@@ -99,7 +104,7 @@ class Constraint:
             if not _is_number(self.value):
                 raise ValueError("max needs a finite number")
         elif self.op == "glob":
-            if not isinstance(self.value, str):
+            if type(self.value) is not str:
                 raise ValueError("glob needs a string pattern")
         elif self.value is not None:
             raise ValueError("any takes no value")
@@ -113,7 +118,7 @@ class Constraint:
         if self.op == "max":
             return _is_number(x) and x <= self.value
         if self.op == "glob":
-            return isinstance(x, str) and glob_match(self.value, x)
+            return type(x) is str and glob_match(self.value, x)
         return True  # any
 
     def finite_values(self) -> tuple[Any, ...] | None:

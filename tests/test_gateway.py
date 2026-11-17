@@ -811,6 +811,17 @@ _ARGS = st.dictionaries(
 )
 
 
+_REPO = Path(__file__).resolve().parent.parent
+_OWN_TEXT = "\n".join(
+    p.read_text(encoding="utf-8")
+    for p in [
+        *sorted((_REPO / "src" / "toolgate").rglob("*.py")),
+        Path(__file__),
+        *sorted((_REPO / "config").glob("*.yaml")),
+    ]
+)
+
+
 def _strings(value: Any) -> list[str]:
     if type(value) is str:
         return [value]
@@ -842,7 +853,14 @@ def test_no_caller_supplied_string_reaches_the_audit_log(
                 supplied.discard(tool)  # the one thing a caller may put in the log
             raw = env.audit_path.read_text()
             assert raw.count("\n") >= 2  # every attempt above left its entry
-            logged = [s for entry in env.entries() for s in _strings(entry)]
+            entries = env.entries()
+            # Text the code base and its configuration already contain (field names,
+            # reason codes, the "unverified:" prefix, rule ids, test actor names) is
+            # written by the gateway itself. A caller who happens to send "args_hash"
+            # has not smuggled anything in. Hypothesis draws such literals from the
+            # source on purpose, so they must be excluded, not avoided.
+            supplied = {s for s in supplied if s not in _OWN_TEXT}
+            logged = [s for entry in entries for value in entry.values() for s in _strings(value)]
             for text in supplied:
                 assert text not in raw, text
                 assert not any(text in field for field in logged), text

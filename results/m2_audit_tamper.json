@@ -1,0 +1,282 @@
+{
+  "clock_start_ns": 1800000000000000000,
+  "head": "648236d270e6e2806a9752008255b74f8648d7a031245e7695d8f3526bdd948c",
+  "edit": {
+    "index": 3,
+    "field": "decision",
+    "before": "approved",
+    "after": "rejected"
+  },
+  "verify_intact": {
+    "ok": true,
+    "entries": 8,
+    "first_bad_index": null,
+    "problem": null
+  },
+  "verify_edited": {
+    "ok": false,
+    "entries": 3,
+    "first_bad_index": 3,
+    "problem": "stored hash b692fb82d2c8 does not match the entry's content (recomputed 39c8e1506cd7)"
+  },
+  "intact_entries": [
+    {
+      "actors": [
+        "orchestrator",
+        "mailer"
+      ],
+      "approver": null,
+      "args_hash": "8eaed9be67cd44158e29c0ea33edc3bae6e0d38277dbead2a20713820d384c49",
+      "decision": "allow",
+      "hash": "80ae5d78f3298d4a07a64b6551471a1958105e2744ec12fecff189c2f847e384",
+      "jti": "tok-7f3a",
+      "prev": "9fbdce0679c190589bbae3f428600ba32cf75a2fc29c42ac125d6eb02e097ee5",
+      "rule": "allow-file-reads",
+      "seq": 0,
+      "time": 1800000000000000000,
+      "tool": "read_file"
+    },
+    {
+      "actors": [
+        "orchestrator",
+        "mailer"
+      ],
+      "approver": null,
+      "args_hash": "8c0d8fc8f03551165199f11265f4a703b39605dec547b1ccdf0a7966a77a3853",
+      "decision": "allow",
+      "hash": "2776cdc198c0b2c2cf6e8e3b946c6339cffc8dbfe3f3d1763f7f5f093ee01440",
+      "jti": "tok-7f3a",
+      "prev": "80ae5d78f3298d4a07a64b6551471a1958105e2744ec12fecff189c2f847e384",
+      "rule": "allow-email-read",
+      "seq": 1,
+      "time": 1800000001000000000,
+      "tool": "read_email"
+    },
+    {
+      "actors": [
+        "orchestrator",
+        "mailer"
+      ],
+      "approver": null,
+      "args_hash": "483ad8bf8911643cbe4be9e0aad69bc8051ba390eac73610413fac726593ad52",
+      "decision": "approve",
+      "hash": "f4db017756a87551c621dbadde3853c22e1f694d6bff0ce53a7c822669e7a87f",
+      "jti": "tok-7f3a",
+      "prev": "2776cdc198c0b2c2cf6e8e3b946c6339cffc8dbfe3f3d1763f7f5f093ee01440",
+      "rule": "approve-external-email",
+      "seq": 2,
+      "time": 1800000002000000000,
+      "tool": "send_email"
+    },
+    {
+      "actors": [
+        "orchestrator",
+        "mailer"
+      ],
+      "approver": "ana",
+      "args_hash": "483ad8bf8911643cbe4be9e0aad69bc8051ba390eac73610413fac726593ad52",
+      "decision": "approved",
+      "hash": "b692fb82d2c831eb05498ad016634705005ba09df2b971b1875a0cf57f12884c",
+      "jti": "tok-7f3a",
+      "prev": "f4db017756a87551c621dbadde3853c22e1f694d6bff0ce53a7c822669e7a87f",
+      "rule": "approve-external-email",
+      "seq": 3,
+      "time": 1800000003000000000,
+      "tool": "send_email"
+    },
+    {
+      "actors": [
+        "orchestrator",
+        "mailer"
+      ],
+      "approver": null,
+      "args_hash": "4129a6ea7371044598ccbc62d7b8701772d6e5f8a3b0f3eebdaf5da09c5b5b30",
+      "decision": "allow",
+      "hash": "779c2810cc2203a9790a21a635c336b8c27661eccd74fc6c90877c5ed0627de1",
+      "jti": "tok-7f3a",
+      "prev": "b692fb82d2c831eb05498ad016634705005ba09df2b971b1875a0cf57f12884c",
+      "rule": "allow-calendar-read",
+      "seq": 4,
+      "time": 1800000004000000000,
+      "tool": "get_event"
+    },
+    {
+      "actors": [
+        "orchestrator",
+        "mailer"
+      ],
+      "approver": null,
+      "args_hash": "f0889ffcb2016424d7d66c8912af4e556b33c2d5cdb74d7653adb91eac916f78",
+      "decision": "approve",
+      "hash": "878755fa58004e1e06f4925c70a39e64722195aebe9974c7eb2b22f7e4870ac4",
+      "jti": "tok-7f3a",
+      "prev": "779c2810cc2203a9790a21a635c336b8c27661eccd74fc6c90877c5ed0627de1",
+      "rule": "approve-writes-outside-drafts",
+      "seq": 5,
+      "time": 1800000005000000000,
+      "tool": "write_file"
+    },
+    {
+      "actors": [
+        "orchestrator",
+        "mailer"
+      ],
+      "approver": "ben",
+      "args_hash": "f0889ffcb2016424d7d66c8912af4e556b33c2d5cdb74d7653adb91eac916f78",
+      "decision": "rejected",
+      "hash": "70983c3ce4e6ef62990ada2a82862c38152264cbc0184b5cd0b03e213d2df02a",
+      "jti": "tok-7f3a",
+      "prev": "878755fa58004e1e06f4925c70a39e64722195aebe9974c7eb2b22f7e4870ac4",
+      "rule": "approve-writes-outside-drafts",
+      "seq": 6,
+      "time": 1800000006000000000,
+      "tool": "write_file"
+    },
+    {
+      "actors": [
+        "orchestrator",
+        "mailer"
+      ],
+      "approver": null,
+      "args_hash": "e5e29e33cf122949ad81948178e08e6d119d16be55deead1c24377f4b93cd3df",
+      "decision": "allow",
+      "hash": "648236d270e6e2806a9752008255b74f8648d7a031245e7695d8f3526bdd948c",
+      "jti": "tok-7f3a",
+      "prev": "70983c3ce4e6ef62990ada2a82862c38152264cbc0184b5cd0b03e213d2df02a",
+      "rule": "allow-file-reads",
+      "seq": 7,
+      "time": 1800000007000000000,
+      "tool": "read_file"
+    }
+  ],
+  "edited_entries": [
+    {
+      "actors": [
+        "orchestrator",
+        "mailer"
+      ],
+      "approver": null,
+      "args_hash": "8eaed9be67cd44158e29c0ea33edc3bae6e0d38277dbead2a20713820d384c49",
+      "decision": "allow",
+      "hash": "80ae5d78f3298d4a07a64b6551471a1958105e2744ec12fecff189c2f847e384",
+      "jti": "tok-7f3a",
+      "prev": "9fbdce0679c190589bbae3f428600ba32cf75a2fc29c42ac125d6eb02e097ee5",
+      "rule": "allow-file-reads",
+      "seq": 0,
+      "time": 1800000000000000000,
+      "tool": "read_file"
+    },
+    {
+      "actors": [
+        "orchestrator",
+        "mailer"
+      ],
+      "approver": null,
+      "args_hash": "8c0d8fc8f03551165199f11265f4a703b39605dec547b1ccdf0a7966a77a3853",
+      "decision": "allow",
+      "hash": "2776cdc198c0b2c2cf6e8e3b946c6339cffc8dbfe3f3d1763f7f5f093ee01440",
+      "jti": "tok-7f3a",
+      "prev": "80ae5d78f3298d4a07a64b6551471a1958105e2744ec12fecff189c2f847e384",
+      "rule": "allow-email-read",
+      "seq": 1,
+      "time": 1800000001000000000,
+      "tool": "read_email"
+    },
+    {
+      "actors": [
+        "orchestrator",
+        "mailer"
+      ],
+      "approver": null,
+      "args_hash": "483ad8bf8911643cbe4be9e0aad69bc8051ba390eac73610413fac726593ad52",
+      "decision": "approve",
+      "hash": "f4db017756a87551c621dbadde3853c22e1f694d6bff0ce53a7c822669e7a87f",
+      "jti": "tok-7f3a",
+      "prev": "2776cdc198c0b2c2cf6e8e3b946c6339cffc8dbfe3f3d1763f7f5f093ee01440",
+      "rule": "approve-external-email",
+      "seq": 2,
+      "time": 1800000002000000000,
+      "tool": "send_email"
+    },
+    {
+      "actors": [
+        "orchestrator",
+        "mailer"
+      ],
+      "approver": "ana",
+      "args_hash": "483ad8bf8911643cbe4be9e0aad69bc8051ba390eac73610413fac726593ad52",
+      "decision": "rejected",
+      "hash": "b692fb82d2c831eb05498ad016634705005ba09df2b971b1875a0cf57f12884c",
+      "jti": "tok-7f3a",
+      "prev": "f4db017756a87551c621dbadde3853c22e1f694d6bff0ce53a7c822669e7a87f",
+      "rule": "approve-external-email",
+      "seq": 3,
+      "time": 1800000003000000000,
+      "tool": "send_email"
+    },
+    {
+      "actors": [
+        "orchestrator",
+        "mailer"
+      ],
+      "approver": null,
+      "args_hash": "4129a6ea7371044598ccbc62d7b8701772d6e5f8a3b0f3eebdaf5da09c5b5b30",
+      "decision": "allow",
+      "hash": "779c2810cc2203a9790a21a635c336b8c27661eccd74fc6c90877c5ed0627de1",
+      "jti": "tok-7f3a",
+      "prev": "b692fb82d2c831eb05498ad016634705005ba09df2b971b1875a0cf57f12884c",
+      "rule": "allow-calendar-read",
+      "seq": 4,
+      "time": 1800000004000000000,
+      "tool": "get_event"
+    },
+    {
+      "actors": [
+        "orchestrator",
+        "mailer"
+      ],
+      "approver": null,
+      "args_hash": "f0889ffcb2016424d7d66c8912af4e556b33c2d5cdb74d7653adb91eac916f78",
+      "decision": "approve",
+      "hash": "878755fa58004e1e06f4925c70a39e64722195aebe9974c7eb2b22f7e4870ac4",
+      "jti": "tok-7f3a",
+      "prev": "779c2810cc2203a9790a21a635c336b8c27661eccd74fc6c90877c5ed0627de1",
+      "rule": "approve-writes-outside-drafts",
+      "seq": 5,
+      "time": 1800000005000000000,
+      "tool": "write_file"
+    },
+    {
+      "actors": [
+        "orchestrator",
+        "mailer"
+      ],
+      "approver": "ben",
+      "args_hash": "f0889ffcb2016424d7d66c8912af4e556b33c2d5cdb74d7653adb91eac916f78",
+      "decision": "rejected",
+      "hash": "70983c3ce4e6ef62990ada2a82862c38152264cbc0184b5cd0b03e213d2df02a",
+      "jti": "tok-7f3a",
+      "prev": "878755fa58004e1e06f4925c70a39e64722195aebe9974c7eb2b22f7e4870ac4",
+      "rule": "approve-writes-outside-drafts",
+      "seq": 6,
+      "time": 1800000006000000000,
+      "tool": "write_file"
+    },
+    {
+      "actors": [
+        "orchestrator",
+        "mailer"
+      ],
+      "approver": null,
+      "args_hash": "e5e29e33cf122949ad81948178e08e6d119d16be55deead1c24377f4b93cd3df",
+      "decision": "allow",
+      "hash": "648236d270e6e2806a9752008255b74f8648d7a031245e7695d8f3526bdd948c",
+      "jti": "tok-7f3a",
+      "prev": "70983c3ce4e6ef62990ada2a82862c38152264cbc0184b5cd0b03e213d2df02a",
+      "rule": "allow-file-reads",
+      "seq": 7,
+      "time": 1800000007000000000,
+      "tool": "read_file"
+    }
+  ]
+}

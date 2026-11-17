@@ -1,5 +1,5 @@
 {
-  "what_this_is": "Checker verdict against solver truth for the attenuation check. rejected_safe_gap is the completeness gap; accepted_unsafe_BUG must be 0.",
+  "what_this_is": "Checker verdict against solver truth for the attenuation check. rejected_safe_gap is the completeness gap; accepted_unsafe_BUG must be 0. `outcomes` is the current checker (with rule A); `previous_rule_set` is the checker before rule A against the same solver answers; `rule_a` is the difference.",
   "caveat": "Every count and rate in this file is a property of the universe and sampling distribution chosen here, not of real workloads. The completeness rate moves freely when the universe changes (for example, more star-free globs lower it). The only number that carries over is accepted_unsafe_BUG = 0, and that one is bounded by what was enumerated or sampled plus what the solver model covers.",
   "completeness_rate_definition": "accepted_safe / (accepted_safe + rejected_safe_gap)",
   "seed": 0,
@@ -7,12 +7,9 @@
   "inconclusive_total": 0,
   "inconclusive_note": "Pairs where smt raised Inconclusive. They are in no cell of the 2x2 tables and in no rate. Accepted ones are listed under accepted_but_inconclusive in each section.",
   "solver_retries": {
-    "first_try_inconclusive": 2,
+    "first_try_inconclusive": 0,
     "still_inconclusive_after_retry": 0,
-    "first_try_reasons": [
-      "solver returned unknown: timeout",
-      "solver returned unknown: timeout"
-    ],
+    "first_try_reasons": [],
     "note": "A question the solver did not answer is asked once more before the pair is counted as inconclusive. Z3's running time on these queries is erratic inside a long process, so these two counts can differ from run to run; the verdicts cannot, because any answer the solver gives is exact."
   },
   "exhaustive_constraints": {
@@ -177,15 +174,64 @@
       "pairs": "every ordered (parent, child) pair, including a constraint with itself"
     },
     "outcomes": {
-      "accepted_safe": 648,
-      "rejected_safe_gap": 576,
+      "accepted_safe": 1016,
+      "rejected_safe_gap": 208,
       "rejected_unsafe": 14401,
       "accepted_unsafe_BUG": 0,
       "inconclusive_accepted": 0,
       "inconclusive_rejected": 0,
       "pairs": 15625,
       "truly_safe": 1224,
-      "completeness_rate": 0.5294
+      "completeness_rate": 0.8301
+    },
+    "previous_rule_set": {
+      "note": "The checker WITHOUT rule A, re-created in scripts/m0b_completeness.py and compared with the same solver answers. This is the previous rule set, not the code in src/.",
+      "outcomes": {
+        "accepted_safe": 648,
+        "rejected_safe_gap": 576,
+        "rejected_unsafe": 14401,
+        "accepted_unsafe_BUG": 0,
+        "inconclusive_accepted": 0,
+        "inconclusive_rejected": 0,
+        "pairs": 15625,
+        "truly_safe": 1224,
+        "completeness_rate": 0.5294
+      },
+      "gap_categories": [
+        {
+          "category": "child glob has no star (one literal string), parent glob is not P*",
+          "count": 344
+        },
+        {
+          "category": "prefix rule would apply after collapsing repeated stars",
+          "count": 102
+        },
+        {
+          "category": "infix containment (parent *M*, child has M inside a literal piece)",
+          "count": 57
+        },
+        {
+          "category": "suffix containment (parent *S, child ends with S)",
+          "count": 36
+        },
+        {
+          "category": "child glob has no star (one literal string), parent is eq/in",
+          "count": 24
+        },
+        {
+          "category": "same language, spelled with repeated stars",
+          "count": 13
+        }
+      ]
+    },
+    "rule_a": {
+      "rule": "A: a star-free child glob is checked like eq (implemented in src/)",
+      "gap_before": 576,
+      "gap_now": 208,
+      "gap_pairs_closed": 368,
+      "unsafe_pairs_newly_accepted": 0,
+      "completeness_rate_before": 0.5294,
+      "completeness_rate_now": 0.8301
     },
     "by_parent_and_child_operator": [
       {
@@ -230,15 +276,15 @@
       {
         "parent": "eq",
         "child": "glob",
-        "accepted_safe": 0,
-        "rejected_safe_gap": 3,
+        "accepted_safe": 3,
+        "rejected_safe_gap": 0,
         "rejected_unsafe": 592,
         "accepted_unsafe_BUG": 0,
         "inconclusive_accepted": 0,
         "inconclusive_rejected": 0,
         "pairs": 595,
         "truly_safe": 3,
-        "completeness_rate": 0.0
+        "completeness_rate": 1.0
       },
       {
         "parent": "eq",
@@ -295,15 +341,15 @@
       {
         "parent": "in",
         "child": "glob",
-        "accepted_safe": 0,
-        "rejected_safe_gap": 21,
+        "accepted_safe": 21,
+        "rejected_safe_gap": 0,
         "rejected_unsafe": 2359,
         "accepted_unsafe_BUG": 0,
         "inconclusive_accepted": 0,
         "inconclusive_rejected": 0,
         "pairs": 2380,
         "truly_safe": 21,
-        "completeness_rate": 0.0
+        "completeness_rate": 1.0
       },
       {
         "parent": "in",
@@ -425,15 +471,15 @@
       {
         "parent": "glob",
         "child": "glob",
-        "accepted_safe": 265,
-        "rejected_safe_gap": 552,
+        "accepted_safe": 609,
+        "rejected_safe_gap": 208,
         "rejected_unsafe": 6408,
         "accepted_unsafe_BUG": 0,
         "inconclusive_accepted": 0,
         "inconclusive_rejected": 0,
         "pairs": 7225,
         "truly_safe": 817,
-        "completeness_rate": 0.3244
+        "completeness_rate": 0.7454
       },
       {
         "parent": "glob",
@@ -516,24 +562,6 @@
     ],
     "gap_categories": [
       {
-        "category": "child glob has no star (one literal string), parent glob is not P*",
-        "count": 344,
-        "examples": [
-          {
-            "parent": "glob \"*a\"",
-            "child": "glob \"a\""
-          },
-          {
-            "parent": "glob \"*a\"",
-            "child": "glob \"aa\""
-          },
-          {
-            "parent": "glob \"*a\"",
-            "child": "glob \"ba\""
-          }
-        ]
-      },
-      {
         "category": "prefix rule would apply after collapsing repeated stars",
         "count": 102,
         "examples": [
@@ -588,24 +616,6 @@
         ]
       },
       {
-        "category": "child glob has no star (one literal string), parent is eq/in",
-        "count": 24,
-        "examples": [
-          {
-            "parent": "eq \"a\"",
-            "child": "glob \"a\""
-          },
-          {
-            "parent": "eq \"ab\"",
-            "child": "glob \"ab\""
-          },
-          {
-            "parent": "eq \"a/b\"",
-            "child": "glob \"a/b\""
-          }
-        ]
-      },
-      {
         "category": "same language, spelled with repeated stars",
         "count": 13,
         "examples": [
@@ -626,1726 +636,6 @@
     ],
     "gap_pairs": [
       {
-        "parent": "glob \"*a\"",
-        "child": "glob \"a\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"*a\"",
-        "child": "glob \"aa\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"*a\"",
-        "child": "glob \"ba\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"*a\"",
-        "child": "glob \"/a\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"*a\"",
-        "child": "glob \"aaa\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"*a\"",
-        "child": "glob \"aba\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"*a\"",
-        "child": "glob \"a/a\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"*a\"",
-        "child": "glob \"baa\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"*a\"",
-        "child": "glob \"bba\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"*a\"",
-        "child": "glob \"b/a\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"*a\"",
-        "child": "glob \"/aa\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"*a\"",
-        "child": "glob \"/ba\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"*a\"",
-        "child": "glob \"//a\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"*b\"",
-        "child": "glob \"b\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"*b\"",
-        "child": "glob \"ab\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"*b\"",
-        "child": "glob \"bb\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"*b\"",
-        "child": "glob \"/b\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"*b\"",
-        "child": "glob \"aab\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"*b\"",
-        "child": "glob \"abb\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"*b\"",
-        "child": "glob \"a/b\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"*b\"",
-        "child": "glob \"bab\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"*b\"",
-        "child": "glob \"bbb\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"*b\"",
-        "child": "glob \"b/b\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"*b\"",
-        "child": "glob \"/ab\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"*b\"",
-        "child": "glob \"/bb\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"*b\"",
-        "child": "glob \"//b\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"*/\"",
-        "child": "glob \"/\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"*/\"",
-        "child": "glob \"a/\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"*/\"",
-        "child": "glob \"b/\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"*/\"",
-        "child": "glob \"//\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"*/\"",
-        "child": "glob \"aa/\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"*/\"",
-        "child": "glob \"ab/\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"*/\"",
-        "child": "glob \"a//\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"*/\"",
-        "child": "glob \"ba/\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"*/\"",
-        "child": "glob \"bb/\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"*/\"",
-        "child": "glob \"b//\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"*/\"",
-        "child": "glob \"/a/\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"*/\"",
-        "child": "glob \"/b/\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"*/\"",
-        "child": "glob \"///\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"**\"",
-        "child": "glob \"\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"**\"",
-        "child": "glob \"a\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"**\"",
-        "child": "glob \"b\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"**\"",
-        "child": "glob \"/\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"**\"",
-        "child": "glob \"aa\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"**\"",
-        "child": "glob \"ab\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"**\"",
-        "child": "glob \"a/\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"**\"",
-        "child": "glob \"ba\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"**\"",
-        "child": "glob \"bb\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"**\"",
-        "child": "glob \"b/\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"**\"",
-        "child": "glob \"/a\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"**\"",
-        "child": "glob \"/b\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"**\"",
-        "child": "glob \"//\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"**\"",
-        "child": "glob \"aaa\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"**\"",
-        "child": "glob \"aab\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"**\"",
-        "child": "glob \"aa/\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"**\"",
-        "child": "glob \"aba\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"**\"",
-        "child": "glob \"abb\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"**\"",
-        "child": "glob \"ab/\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"**\"",
-        "child": "glob \"a/a\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"**\"",
-        "child": "glob \"a/b\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"**\"",
-        "child": "glob \"a//\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"**\"",
-        "child": "glob \"baa\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"**\"",
-        "child": "glob \"bab\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"**\"",
-        "child": "glob \"ba/\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"**\"",
-        "child": "glob \"bba\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"**\"",
-        "child": "glob \"bbb\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"**\"",
-        "child": "glob \"bb/\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"**\"",
-        "child": "glob \"b/a\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"**\"",
-        "child": "glob \"b/b\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"**\"",
-        "child": "glob \"b//\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"**\"",
-        "child": "glob \"/aa\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"**\"",
-        "child": "glob \"/ab\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"**\"",
-        "child": "glob \"/a/\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"**\"",
-        "child": "glob \"/ba\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"**\"",
-        "child": "glob \"/bb\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"**\"",
-        "child": "glob \"/b/\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"**\"",
-        "child": "glob \"//a\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"**\"",
-        "child": "glob \"//b\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"**\"",
-        "child": "glob \"///\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"a*a\"",
-        "child": "glob \"aa\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"a*a\"",
-        "child": "glob \"aaa\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"a*a\"",
-        "child": "glob \"aba\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"a*a\"",
-        "child": "glob \"a/a\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"a*b\"",
-        "child": "glob \"ab\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"a*b\"",
-        "child": "glob \"aab\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"a*b\"",
-        "child": "glob \"abb\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"a*b\"",
-        "child": "glob \"a/b\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"a*/\"",
-        "child": "glob \"a/\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"a*/\"",
-        "child": "glob \"aa/\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"a*/\"",
-        "child": "glob \"ab/\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"a*/\"",
-        "child": "glob \"a//\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"a**\"",
-        "child": "glob \"a\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"a**\"",
-        "child": "glob \"aa\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"a**\"",
-        "child": "glob \"ab\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"a**\"",
-        "child": "glob \"a/\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"a**\"",
-        "child": "glob \"aaa\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"a**\"",
-        "child": "glob \"aab\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"a**\"",
-        "child": "glob \"aa/\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"a**\"",
-        "child": "glob \"aba\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"a**\"",
-        "child": "glob \"abb\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"a**\"",
-        "child": "glob \"ab/\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"a**\"",
-        "child": "glob \"a/a\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"a**\"",
-        "child": "glob \"a/b\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"a**\"",
-        "child": "glob \"a//\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"b*a\"",
-        "child": "glob \"ba\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"b*a\"",
-        "child": "glob \"baa\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"b*a\"",
-        "child": "glob \"bba\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"b*a\"",
-        "child": "glob \"b/a\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"b*b\"",
-        "child": "glob \"bb\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"b*b\"",
-        "child": "glob \"bab\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"b*b\"",
-        "child": "glob \"bbb\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"b*b\"",
-        "child": "glob \"b/b\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"b*/\"",
-        "child": "glob \"b/\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"b*/\"",
-        "child": "glob \"ba/\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"b*/\"",
-        "child": "glob \"bb/\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"b*/\"",
-        "child": "glob \"b//\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"b**\"",
-        "child": "glob \"b\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"b**\"",
-        "child": "glob \"ba\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"b**\"",
-        "child": "glob \"bb\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"b**\"",
-        "child": "glob \"b/\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"b**\"",
-        "child": "glob \"baa\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"b**\"",
-        "child": "glob \"bab\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"b**\"",
-        "child": "glob \"ba/\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"b**\"",
-        "child": "glob \"bba\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"b**\"",
-        "child": "glob \"bbb\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"b**\"",
-        "child": "glob \"bb/\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"b**\"",
-        "child": "glob \"b/a\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"b**\"",
-        "child": "glob \"b/b\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"b**\"",
-        "child": "glob \"b//\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"/*a\"",
-        "child": "glob \"/a\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"/*a\"",
-        "child": "glob \"/aa\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"/*a\"",
-        "child": "glob \"/ba\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"/*a\"",
-        "child": "glob \"//a\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"/*b\"",
-        "child": "glob \"/b\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"/*b\"",
-        "child": "glob \"/ab\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"/*b\"",
-        "child": "glob \"/bb\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"/*b\"",
-        "child": "glob \"//b\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"/*/\"",
-        "child": "glob \"//\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"/*/\"",
-        "child": "glob \"/a/\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"/*/\"",
-        "child": "glob \"/b/\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"/*/\"",
-        "child": "glob \"///\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"/**\"",
-        "child": "glob \"/\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"/**\"",
-        "child": "glob \"/a\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"/**\"",
-        "child": "glob \"/b\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"/**\"",
-        "child": "glob \"//\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"/**\"",
-        "child": "glob \"/aa\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"/**\"",
-        "child": "glob \"/ab\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"/**\"",
-        "child": "glob \"/a/\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"/**\"",
-        "child": "glob \"/ba\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"/**\"",
-        "child": "glob \"/bb\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"/**\"",
-        "child": "glob \"/b/\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"/**\"",
-        "child": "glob \"//a\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"/**\"",
-        "child": "glob \"//b\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"/**\"",
-        "child": "glob \"///\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"*aa\"",
-        "child": "glob \"aa\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"*aa\"",
-        "child": "glob \"aaa\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"*aa\"",
-        "child": "glob \"baa\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"*aa\"",
-        "child": "glob \"/aa\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"*ab\"",
-        "child": "glob \"ab\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"*ab\"",
-        "child": "glob \"aab\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"*ab\"",
-        "child": "glob \"bab\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"*ab\"",
-        "child": "glob \"/ab\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"*a/\"",
-        "child": "glob \"a/\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"*a/\"",
-        "child": "glob \"aa/\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"*a/\"",
-        "child": "glob \"ba/\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"*a/\"",
-        "child": "glob \"/a/\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"*a*\"",
-        "child": "glob \"a\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"*a*\"",
-        "child": "glob \"aa\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"*a*\"",
-        "child": "glob \"ab\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"*a*\"",
-        "child": "glob \"a/\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"*a*\"",
-        "child": "glob \"ba\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"*a*\"",
-        "child": "glob \"/a\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"*a*\"",
-        "child": "glob \"aaa\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"*a*\"",
-        "child": "glob \"aab\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"*a*\"",
-        "child": "glob \"aa/\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"*a*\"",
-        "child": "glob \"aba\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"*a*\"",
-        "child": "glob \"abb\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"*a*\"",
-        "child": "glob \"ab/\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"*a*\"",
-        "child": "glob \"a/a\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"*a*\"",
-        "child": "glob \"a/b\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"*a*\"",
-        "child": "glob \"a//\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"*a*\"",
-        "child": "glob \"baa\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"*a*\"",
-        "child": "glob \"bab\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"*a*\"",
-        "child": "glob \"ba/\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"*a*\"",
-        "child": "glob \"bba\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"*a*\"",
-        "child": "glob \"b/a\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"*a*\"",
-        "child": "glob \"/aa\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"*a*\"",
-        "child": "glob \"/ab\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"*a*\"",
-        "child": "glob \"/a/\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"*a*\"",
-        "child": "glob \"/ba\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"*a*\"",
-        "child": "glob \"//a\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"*ba\"",
-        "child": "glob \"ba\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"*ba\"",
-        "child": "glob \"aba\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"*ba\"",
-        "child": "glob \"bba\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"*ba\"",
-        "child": "glob \"/ba\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"*bb\"",
-        "child": "glob \"bb\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"*bb\"",
-        "child": "glob \"abb\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"*bb\"",
-        "child": "glob \"bbb\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"*bb\"",
-        "child": "glob \"/bb\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"*b/\"",
-        "child": "glob \"b/\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"*b/\"",
-        "child": "glob \"ab/\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"*b/\"",
-        "child": "glob \"bb/\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"*b/\"",
-        "child": "glob \"/b/\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"*b*\"",
-        "child": "glob \"b\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"*b*\"",
-        "child": "glob \"ab\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"*b*\"",
-        "child": "glob \"ba\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"*b*\"",
-        "child": "glob \"bb\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"*b*\"",
-        "child": "glob \"b/\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"*b*\"",
-        "child": "glob \"/b\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"*b*\"",
-        "child": "glob \"aab\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"*b*\"",
-        "child": "glob \"aba\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"*b*\"",
-        "child": "glob \"abb\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"*b*\"",
-        "child": "glob \"ab/\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"*b*\"",
-        "child": "glob \"a/b\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"*b*\"",
-        "child": "glob \"baa\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"*b*\"",
-        "child": "glob \"bab\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"*b*\"",
-        "child": "glob \"ba/\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"*b*\"",
-        "child": "glob \"bba\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"*b*\"",
-        "child": "glob \"bbb\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"*b*\"",
-        "child": "glob \"bb/\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"*b*\"",
-        "child": "glob \"b/a\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"*b*\"",
-        "child": "glob \"b/b\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"*b*\"",
-        "child": "glob \"b//\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"*b*\"",
-        "child": "glob \"/ab\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"*b*\"",
-        "child": "glob \"/ba\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"*b*\"",
-        "child": "glob \"/bb\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"*b*\"",
-        "child": "glob \"/b/\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"*b*\"",
-        "child": "glob \"//b\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"*/a\"",
-        "child": "glob \"/a\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"*/a\"",
-        "child": "glob \"a/a\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"*/a\"",
-        "child": "glob \"b/a\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"*/a\"",
-        "child": "glob \"//a\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"*/b\"",
-        "child": "glob \"/b\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"*/b\"",
-        "child": "glob \"a/b\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"*/b\"",
-        "child": "glob \"b/b\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"*/b\"",
-        "child": "glob \"//b\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"*//\"",
-        "child": "glob \"//\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"*//\"",
-        "child": "glob \"a//\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"*//\"",
-        "child": "glob \"b//\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"*//\"",
-        "child": "glob \"///\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"*/*\"",
-        "child": "glob \"/\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"*/*\"",
-        "child": "glob \"a/\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"*/*\"",
-        "child": "glob \"b/\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"*/*\"",
-        "child": "glob \"/a\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"*/*\"",
-        "child": "glob \"/b\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"*/*\"",
-        "child": "glob \"//\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"*/*\"",
-        "child": "glob \"aa/\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"*/*\"",
-        "child": "glob \"ab/\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"*/*\"",
-        "child": "glob \"a/a\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"*/*\"",
-        "child": "glob \"a/b\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"*/*\"",
-        "child": "glob \"a//\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"*/*\"",
-        "child": "glob \"ba/\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"*/*\"",
-        "child": "glob \"bb/\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"*/*\"",
-        "child": "glob \"b/a\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"*/*\"",
-        "child": "glob \"b/b\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"*/*\"",
-        "child": "glob \"b//\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"*/*\"",
-        "child": "glob \"/aa\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"*/*\"",
-        "child": "glob \"/ab\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"*/*\"",
-        "child": "glob \"/a/\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"*/*\"",
-        "child": "glob \"/ba\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"*/*\"",
-        "child": "glob \"/bb\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"*/*\"",
-        "child": "glob \"/b/\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"*/*\"",
-        "child": "glob \"//a\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"*/*\"",
-        "child": "glob \"//b\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"*/*\"",
-        "child": "glob \"///\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"**a\"",
-        "child": "glob \"a\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"**a\"",
-        "child": "glob \"aa\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"**a\"",
-        "child": "glob \"ba\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"**a\"",
-        "child": "glob \"/a\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"**a\"",
-        "child": "glob \"aaa\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"**a\"",
-        "child": "glob \"aba\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"**a\"",
-        "child": "glob \"a/a\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"**a\"",
-        "child": "glob \"baa\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"**a\"",
-        "child": "glob \"bba\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"**a\"",
-        "child": "glob \"b/a\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"**a\"",
-        "child": "glob \"/aa\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"**a\"",
-        "child": "glob \"/ba\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"**a\"",
-        "child": "glob \"//a\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"**b\"",
-        "child": "glob \"b\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"**b\"",
-        "child": "glob \"ab\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"**b\"",
-        "child": "glob \"bb\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"**b\"",
-        "child": "glob \"/b\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"**b\"",
-        "child": "glob \"aab\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"**b\"",
-        "child": "glob \"abb\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"**b\"",
-        "child": "glob \"a/b\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"**b\"",
-        "child": "glob \"bab\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"**b\"",
-        "child": "glob \"bbb\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"**b\"",
-        "child": "glob \"b/b\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"**b\"",
-        "child": "glob \"/ab\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"**b\"",
-        "child": "glob \"/bb\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"**b\"",
-        "child": "glob \"//b\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"**/\"",
-        "child": "glob \"/\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"**/\"",
-        "child": "glob \"a/\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"**/\"",
-        "child": "glob \"b/\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"**/\"",
-        "child": "glob \"//\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"**/\"",
-        "child": "glob \"aa/\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"**/\"",
-        "child": "glob \"ab/\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"**/\"",
-        "child": "glob \"a//\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"**/\"",
-        "child": "glob \"ba/\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"**/\"",
-        "child": "glob \"bb/\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"**/\"",
-        "child": "glob \"b//\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"**/\"",
-        "child": "glob \"/a/\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"**/\"",
-        "child": "glob \"/b/\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"**/\"",
-        "child": "glob \"///\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"***\"",
-        "child": "glob \"\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"***\"",
-        "child": "glob \"a\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"***\"",
-        "child": "glob \"b\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"***\"",
-        "child": "glob \"/\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"***\"",
-        "child": "glob \"aa\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"***\"",
-        "child": "glob \"ab\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"***\"",
-        "child": "glob \"a/\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"***\"",
-        "child": "glob \"ba\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"***\"",
-        "child": "glob \"bb\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"***\"",
-        "child": "glob \"b/\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"***\"",
-        "child": "glob \"/a\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"***\"",
-        "child": "glob \"/b\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"***\"",
-        "child": "glob \"//\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"***\"",
-        "child": "glob \"aaa\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"***\"",
-        "child": "glob \"aab\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"***\"",
-        "child": "glob \"aa/\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"***\"",
-        "child": "glob \"aba\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"***\"",
-        "child": "glob \"abb\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"***\"",
-        "child": "glob \"ab/\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"***\"",
-        "child": "glob \"a/a\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"***\"",
-        "child": "glob \"a/b\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"***\"",
-        "child": "glob \"a//\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"***\"",
-        "child": "glob \"baa\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"***\"",
-        "child": "glob \"bab\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"***\"",
-        "child": "glob \"ba/\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"***\"",
-        "child": "glob \"bba\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"***\"",
-        "child": "glob \"bbb\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"***\"",
-        "child": "glob \"bb/\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"***\"",
-        "child": "glob \"b/a\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"***\"",
-        "child": "glob \"b/b\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"***\"",
-        "child": "glob \"b//\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"***\"",
-        "child": "glob \"/aa\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"***\"",
-        "child": "glob \"/ab\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"***\"",
-        "child": "glob \"/a/\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"***\"",
-        "child": "glob \"/ba\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"***\"",
-        "child": "glob \"/bb\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"***\"",
-        "child": "glob \"/b/\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"***\"",
-        "child": "glob \"//a\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"***\"",
-        "child": "glob \"//b\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
-        "parent": "glob \"***\"",
-        "child": "glob \"///\"",
-        "category": "child glob has no star (one literal string), parent glob is not P*"
-      },
-      {
         "parent": "glob \"**\"",
         "child": "glob \"a*\"",
         "category": "prefix rule would apply after collapsing repeated stars"
@@ -3319,126 +1609,6 @@
         "parent": "glob \"**/\"",
         "child": "glob \"*//\"",
         "category": "suffix containment (parent *S, child ends with S)"
-      },
-      {
-        "parent": "eq \"a\"",
-        "child": "glob \"a\"",
-        "category": "child glob has no star (one literal string), parent is eq/in"
-      },
-      {
-        "parent": "eq \"ab\"",
-        "child": "glob \"ab\"",
-        "category": "child glob has no star (one literal string), parent is eq/in"
-      },
-      {
-        "parent": "eq \"a/b\"",
-        "child": "glob \"a/b\"",
-        "category": "child glob has no star (one literal string), parent is eq/in"
-      },
-      {
-        "parent": "in [\"a\"]",
-        "child": "glob \"a\"",
-        "category": "child glob has no star (one literal string), parent is eq/in"
-      },
-      {
-        "parent": "in [\"ab\"]",
-        "child": "glob \"ab\"",
-        "category": "child glob has no star (one literal string), parent is eq/in"
-      },
-      {
-        "parent": "in [\"a/b\"]",
-        "child": "glob \"a/b\"",
-        "category": "child glob has no star (one literal string), parent is eq/in"
-      },
-      {
-        "parent": "in [\"a\", \"ab\"]",
-        "child": "glob \"a\"",
-        "category": "child glob has no star (one literal string), parent is eq/in"
-      },
-      {
-        "parent": "in [\"a\", \"ab\"]",
-        "child": "glob \"ab\"",
-        "category": "child glob has no star (one literal string), parent is eq/in"
-      },
-      {
-        "parent": "in [\"a\", \"a/b\"]",
-        "child": "glob \"a\"",
-        "category": "child glob has no star (one literal string), parent is eq/in"
-      },
-      {
-        "parent": "in [\"a\", \"a/b\"]",
-        "child": "glob \"a/b\"",
-        "category": "child glob has no star (one literal string), parent is eq/in"
-      },
-      {
-        "parent": "in [\"a\", 0]",
-        "child": "glob \"a\"",
-        "category": "child glob has no star (one literal string), parent is eq/in"
-      },
-      {
-        "parent": "in [\"a\", 1]",
-        "child": "glob \"a\"",
-        "category": "child glob has no star (one literal string), parent is eq/in"
-      },
-      {
-        "parent": "in [\"a\", 2]",
-        "child": "glob \"a\"",
-        "category": "child glob has no star (one literal string), parent is eq/in"
-      },
-      {
-        "parent": "in [\"a\", true]",
-        "child": "glob \"a\"",
-        "category": "child glob has no star (one literal string), parent is eq/in"
-      },
-      {
-        "parent": "in [\"ab\", \"a/b\"]",
-        "child": "glob \"ab\"",
-        "category": "child glob has no star (one literal string), parent is eq/in"
-      },
-      {
-        "parent": "in [\"ab\", \"a/b\"]",
-        "child": "glob \"a/b\"",
-        "category": "child glob has no star (one literal string), parent is eq/in"
-      },
-      {
-        "parent": "in [\"ab\", 0]",
-        "child": "glob \"ab\"",
-        "category": "child glob has no star (one literal string), parent is eq/in"
-      },
-      {
-        "parent": "in [\"ab\", 1]",
-        "child": "glob \"ab\"",
-        "category": "child glob has no star (one literal string), parent is eq/in"
-      },
-      {
-        "parent": "in [\"ab\", 2]",
-        "child": "glob \"ab\"",
-        "category": "child glob has no star (one literal string), parent is eq/in"
-      },
-      {
-        "parent": "in [\"ab\", true]",
-        "child": "glob \"ab\"",
-        "category": "child glob has no star (one literal string), parent is eq/in"
-      },
-      {
-        "parent": "in [\"a/b\", 0]",
-        "child": "glob \"a/b\"",
-        "category": "child glob has no star (one literal string), parent is eq/in"
-      },
-      {
-        "parent": "in [\"a/b\", 1]",
-        "child": "glob \"a/b\"",
-        "category": "child glob has no star (one literal string), parent is eq/in"
-      },
-      {
-        "parent": "in [\"a/b\", 2]",
-        "child": "glob \"a/b\"",
-        "category": "child glob has no star (one literal string), parent is eq/in"
-      },
-      {
-        "parent": "in [\"a/b\", true]",
-        "child": "glob \"a/b\"",
-        "category": "child glob has no star (one literal string), parent is eq/in"
       },
       {
         "parent": "glob \"*a\"",
@@ -3507,62 +1677,32 @@
       }
     ],
     "what_if_extensions": {
-      "note": "Analysis only, not implemented in src/. For each candidate rule set: how many gap pairs of this universe it would accept, and how many unsafe pairs (must be 0 for the rule to be sound here; soundness in general would need its own proof).",
+      "note": "Analysis only, not implemented in src/, and relative to the CURRENT checker (rule A is implemented and is no longer a candidate; see rule_a). For each candidate rule set: how many of the remaining gap pairs of this universe it would accept, and how many unsafe pairs (must be 0 for the rule to be sound here; soundness in general would need its own proof).",
       "results": [
         {
           "extensions": [
-            "A: treat a star-free child glob as eq"
-          ],
-          "gap_pairs_closed": 368,
-          "gap_pairs_left": 208,
-          "unsafe_pairs_it_would_accept": 0,
-          "completeness_rate_with_it": 0.8301
-        },
-        {
-          "extensions": [
             "B: collapse repeated stars before the glob rules"
           ],
-          "gap_pairs_closed": 234,
-          "gap_pairs_left": 342,
-          "unsafe_pairs_it_would_accept": 0,
-          "completeness_rate_with_it": 0.7206
-        },
-        {
-          "extensions": [
-            "C: suffix rule (parent *S, child tail ends with S)"
-          ],
-          "gap_pairs_closed": 96,
-          "gap_pairs_left": 480,
-          "unsafe_pairs_it_would_accept": 0,
-          "completeness_rate_with_it": 0.6078
-        },
-        {
-          "extensions": [
-            "A: treat a star-free child glob as eq",
-            "B: collapse repeated stars before the glob rules"
-          ],
-          "gap_pairs_closed": 483,
+          "gap_pairs_closed": 115,
           "gap_pairs_left": 93,
           "unsafe_pairs_it_would_accept": 0,
           "completeness_rate_with_it": 0.924
         },
         {
           "extensions": [
-            "A: treat a star-free child glob as eq",
             "C: suffix rule (parent *S, child tail ends with S)"
           ],
-          "gap_pairs_closed": 389,
+          "gap_pairs_closed": 21,
           "gap_pairs_left": 187,
           "unsafe_pairs_it_would_accept": 0,
           "completeness_rate_with_it": 0.8472
         },
         {
           "extensions": [
-            "A: treat a star-free child glob as eq",
             "B: collapse repeated stars before the glob rules",
             "C: suffix rule (parent *S, child tail ends with S)"
           ],
-          "gap_pairs_closed": 501,
+          "gap_pairs_closed": 133,
           "gap_pairs_left": 75,
           "unsafe_pairs_it_would_accept": 0,
           "completeness_rate_with_it": 0.9387
@@ -3582,34 +1722,44 @@
         "random": 1467
       },
       "outcomes": {
-        "accepted_safe": 2900,
-        "rejected_safe_gap": 215,
+        "accepted_safe": 2907,
+        "rejected_safe_gap": 208,
         "rejected_unsafe": 1885,
         "accepted_unsafe_BUG": 0,
         "inconclusive_accepted": 0,
         "inconclusive_rejected": 0,
         "pairs": 5000,
         "truly_safe": 3115,
-        "completeness_rate": 0.931
+        "completeness_rate": 0.9332
+      },
+      "previous_rule_set": {
+        "note": "The checker WITHOUT rule A, re-created in scripts/m0b_completeness.py and compared with the same solver answers. This is the previous rule set, not the code in src/.",
+        "outcomes": {
+          "accepted_safe": 2900,
+          "rejected_safe_gap": 215,
+          "rejected_unsafe": 1885,
+          "accepted_unsafe_BUG": 0,
+          "inconclusive_accepted": 0,
+          "inconclusive_rejected": 0,
+          "pairs": 5000,
+          "truly_safe": 3115,
+          "completeness_rate": 0.931
+        }
+      },
+      "rule_a": {
+        "rule": "A: a star-free child glob is checked like eq (implemented in src/)",
+        "gap_before": 215,
+        "gap_now": 208,
+        "gap_pairs_closed": 7,
+        "unsafe_pairs_newly_accepted": 0,
+        "completeness_rate_before": 0.931,
+        "completeness_rate_now": 0.9332
       },
       "gap_categories": [
         {
           "category": "constraint-level gap inherited (one child constraint is safe but rejected)",
-          "count": 6,
-          "examples": [
-            {
-              "parent": "read(z in [\"\", 1])",
-              "child": "read(z glob \"\")"
-            },
-            {
-              "parent": "send(x glob \"*b\", z in [true, \"/ba\", \"a/a\"])",
-              "child": "send(x glob \"b\", z in [true, \"/ba\", \"a/a\"])"
-            },
-            {
-              "parent": "read(x in [\"bb/\", 6, \"\"])",
-              "child": "read(x glob \"\")"
-            }
-          ]
+          "count": 0,
+          "examples": []
         },
         {
           "category": "child capability covered only by a union of two or more parent capabilities",
@@ -3618,7 +1768,7 @@
         },
         {
           "category": "child capability can never allow a call (its constraints conjoin to nothing)",
-          "count": 204,
+          "count": 203,
           "examples": [
             {
               "parent": "pay(y glob \"bb/\", y max 2.0)",
@@ -3680,32 +1830,55 @@
         "random": 1202
       },
       "outcomes": {
-        "accepted_safe": 3049,
-        "rejected_safe_gap": 149,
+        "accepted_safe": 3055,
+        "rejected_safe_gap": 143,
         "rejected_unsafe": 1802,
         "accepted_unsafe_BUG": 0,
         "inconclusive_accepted": 0,
         "inconclusive_rejected": 0,
         "pairs": 5000,
         "truly_safe": 3198,
-        "completeness_rate": 0.9534
+        "completeness_rate": 0.9553
+      },
+      "previous_rule_set": {
+        "note": "The checker WITHOUT rule A, re-created in scripts/m0b_completeness.py and compared with the same solver answers. This is the previous rule set, not the code in src/.",
+        "outcomes": {
+          "accepted_safe": 3049,
+          "rejected_safe_gap": 149,
+          "rejected_unsafe": 1802,
+          "accepted_unsafe_BUG": 0,
+          "inconclusive_accepted": 0,
+          "inconclusive_rejected": 0,
+          "pairs": 5000,
+          "truly_safe": 3198,
+          "completeness_rate": 0.9534
+        }
+      },
+      "rule_a": {
+        "rule": "A: a star-free child glob is checked like eq (implemented in src/)",
+        "gap_before": 149,
+        "gap_now": 143,
+        "gap_pairs_closed": 6,
+        "unsafe_pairs_newly_accepted": 0,
+        "completeness_rate_before": 0.9534,
+        "completeness_rate_now": 0.9553
       },
       "gap_categories": [
         {
           "category": "constraint-level gap inherited (one child constraint is safe but rejected)",
-          "count": 11,
+          "count": 5,
           "examples": [
-            {
-              "parent": "[read(x in [false, 2]); send(y glob \"b**\", z glob \"**\")]",
-              "child": "[read(x in [2]); send(y glob \"bbb\", z glob \"**\")]"
-            },
-            {
-              "parent": "[read(x in [false, 2]); send(y glob \"b**\", z glob \"**\")]",
-              "child": "[read(x in [false]); send(y glob \"bbb\", z glob \"**\")]"
-            },
             {
               "parent": "[read(x glob \"/**\", x any); send(x glob \"**\")]",
               "child": "[send(x eq \"//ba\"); send(x in [\"ba\"]); read(x glob \"//a*\", x any)]"
+            },
+            {
+              "parent": "[read(x glob \"/**\", x any); send(x glob \"**\")]",
+              "child": "[send(x in [\"ba\"]); read(x glob \"//a*\", x any)]"
+            },
+            {
+              "parent": "[read(x glob \"/**\", x any); read(x glob \"**\")]",
+              "child": "[read(x in [\"ba\"]); read(x glob \"//a*\", x any)]"
             }
           ]
         },
@@ -3792,7 +1965,7 @@
   "hypothesis_version": "6.170.15",
   "python_version": "3.13.18",
   "seconds": {
-    "exhaustive": 64.1,
-    "total": 172.7
+    "exhaustive": 74.3,
+    "total": 124.6
   }
 }

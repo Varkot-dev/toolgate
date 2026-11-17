@@ -21,8 +21,15 @@ Section 2 samples capability pairs and grant pairs with the generators in
 tests/strategies.py and a fixed seed. Call budgets and expiry are outside the
 solver model, so budgets are removed and expiries made equal before comparing.
 
-The output also counts what a few candidate rule extensions WOULD close. Those
-are measurements only: nothing in src/ implements them.
+Rule A (a child glob with no "*" accepts exactly one string, so it is checked
+like `eq`) is implemented in src/ since this measurement first ran. To keep the
+record honest, every section also reports the verdicts of the PREVIOUS rule set
+(the checker without rule A, re-created here by a small local function) against
+the same solver truth, so the output shows the gap before rule A and the gap now.
+
+The output also counts what the remaining candidate rule extensions (B and C)
+WOULD close on top of the current checker. Those are measurements only: nothing
+in src/ implements them.
 
 Every rate in the output describes this universe and this sampling
 distribution. None of them says anything about real workloads.
@@ -201,13 +208,66 @@ def categorize(parent: Constraint, child: Constraint) -> str:
     return "other"
 
 
+# The previous rule set: the checker as it was before rule A. Rule A lives in
+# Constraint.finite_values (a star-free glob lists its one string), so the old
+# verdict differs only for a star-free child glob, which used to be compared
+# with glob parents only (identical pattern or the prefix rule).
+
+RULE_A = "A: a star-free child glob is checked like eq (implemented in src/)"
+PREVIOUS_NOTE = (
+    "The checker WITHOUT rule A, re-created in scripts/m0b_completeness.py and compared "
+    "with the same solver answers. This is the previous rule set, not the code in src/."
+)
+
+
+def previous_at_least_as_strict(parent: Constraint, child: Constraint) -> bool:
+    """at_least_as_strict as it was before rule A."""
+    if child.op != "glob" or "*" in child.value:
+        return at_least_as_strict(parent, child)
+    if parent.arg != child.arg:
+        return False
+    if parent.op == "any":
+        return True
+    if parent.op != "glob":
+        return False
+    if child.value == parent.value:
+        return True
+    return is_prefix_shape(parent.value) and child.value.startswith(parent.value[:-1])
+
+
+def previous_covers(parent: Capability, child: Capability) -> bool:
+    """covers as it was before rule A. Budgets are ignored: section 2 strips them."""
+    if parent.tool != child.tool or parent.arg_names != child.arg_names:
+        return False
+    return all(
+        any(previous_at_least_as_strict(pc, cc) for cc in child.constraints)
+        for pc in parent.constraints
+    )
+
+
+def previous_check(parent: Grant, child: Grant) -> bool:
+    """check_attenuation(...).ok as it was before rule A, for equal expiries."""
+    return all(
+        any(previous_covers(pc, cc) for pc in parent.capabilities) for cc in child.capabilities
+    )
+
+
+def rule_a_effect(now: dict[str, Any], before: dict[str, Any]) -> dict[str, Any]:
+    """Before and after rule A, from the two outcome tables of one section."""
+    return {
+        "rule": RULE_A,
+        "gap_before": before["rejected_safe_gap"],
+        "gap_now": now["rejected_safe_gap"],
+        "gap_pairs_closed": before["rejected_safe_gap"] - now["rejected_safe_gap"],
+        "unsafe_pairs_newly_accepted": now["accepted_unsafe_BUG"] - before["accepted_unsafe_BUG"],
+        "completeness_rate_before": before["completeness_rate"],
+        "completeness_rate_now": now["completeness_rate"],
+    }
+
+
 # Candidate rule extensions, measured but not implemented in src/. Each takes a
-# rejected pair and says whether the extended checker would accept it.
-
-
-def _ext_literal_child(parent: Constraint, child: Constraint) -> bool:
-    """A child glob with no star accepts one string: check it like `eq`."""
-    return child.op == "glob" and "*" not in child.value and parent.holds(child.value)
+# pair the current checker rejects and says whether the extended checker would
+# accept it.
 
 
 def _ext_collapse_stars(parent: Constraint, child: Constraint) -> bool:
@@ -230,16 +290,17 @@ def _ext_suffix(parent: Constraint, child: Constraint) -> bool:
 
 
 EXTENSIONS: dict[str, Callable[[Constraint, Constraint], bool]] = {
-    "A: treat a star-free child glob as eq": _ext_literal_child,
     "B: collapse repeated stars before the glob rules": _ext_collapse_stars,
     "C: suffix rule (parent *S, child tail ends with S)": _ext_suffix,
 }
-EXTENSION_SETS = (("A",), ("B",), ("C",), ("A", "B"), ("A", "C"), ("A", "B", "C"))
+EXTENSION_SETS = (("B",), ("C",), ("B", "C"))
 
 
 def section_exhaustive() -> dict[str, Any]:
     universe = build_universe()
     overall: Counter[str] = Counter()
+    before: Counter[str] = Counter()
+    before_categories: Counter[str] = Counter()
     by_ops: dict[tuple[str, str], Counter[str]] = {(p, c): Counter() for p in OPS for c in OPS}
     categories: dict[str, list[tuple[Constraint, Constraint]]] = {}
     bugs: list[dict[str, str]] = []
@@ -248,11 +309,14 @@ def section_exhaustive() -> dict[str, Any]:
 
     for parent, child in product(universe, repeat=2):
         accepted = at_least_as_strict(parent, child)
+        accepted_before = previous_at_least_as_strict(parent, child)
+        assert accepted or not accepted_before, "rule A may only add accepted pairs"
         try:
             witness = ask(smt.find_escalation, parent, child)
         except smt.Inconclusive as why:
             kind = inconclusive(accepted)
             overall[kind] += 1
+            before[inconclusive(accepted_before)] += 1
             by_ops[parent.op, child.op][kind] += 1
             if accepted:
                 unconfirmed.append({"parent": show(parent), "child": show(child), "why": str(why)})
@@ -260,6 +324,9 @@ def section_exhaustive() -> dict[str, Any]:
         safe = witness is smt.NO_WITNESS
         kind = outcome(accepted, safe)
         overall[kind] += 1
+        before[outcome(accepted_before, safe)] += 1
+        if safe and not accepted_before:
+            before_categories[categorize(parent, child)] += 1
         by_ops[parent.op, child.op][kind] += 1
         if kind == "accepted_unsafe_BUG":
             bugs.append({"parent": show(parent), "child": show(child), "witness": repr(witness)})
@@ -304,6 +371,17 @@ def section_exhaustive() -> dict[str, Any]:
             "pairs": "every ordered (parent, child) pair, including a constraint with itself",
         },
         "outcomes": table(overall),
+        "previous_rule_set": {
+            "note": PREVIOUS_NOTE,
+            "outcomes": table(before),
+            "gap_categories": [
+                {"category": name, "count": count}
+                for name, count in sorted(
+                    before_categories.items(), key=lambda kv: (kv[0] == "other", -kv[1], kv[0])
+                )
+            ],
+        },
+        "rule_a": rule_a_effect(table(overall), table(before)),
         "by_parent_and_child_operator": [
             {"parent": p, "child": c, **table(by_ops[p, c])} for p in OPS for c in OPS
         ],
@@ -324,9 +402,11 @@ def section_exhaustive() -> dict[str, Any]:
         ],
         "what_if_extensions": {
             "note": (
-                "Analysis only, not implemented in src/. For each candidate rule set: how many "
-                "gap pairs of this universe it would accept, and how many unsafe pairs (must be "
-                "0 for the rule to be sound here; soundness in general would need its own proof)."
+                "Analysis only, not implemented in src/, and relative to the CURRENT checker "
+                "(rule A is implemented and is no longer a candidate; see rule_a). For each "
+                "candidate rule set: how many of the remaining gap pairs of this universe it "
+                "would accept, and how many unsafe pairs (must be 0 for the rule to be sound "
+                "here; soundness in general would need its own proof)."
             ),
             "results": what_if,
         },
@@ -506,11 +586,13 @@ def compare(
     truth: str,
     pairs: list[tuple[Any, Any, str]],
     accepts: Callable[[Any, Any], bool],
+    accepts_before: Callable[[Any, Any], bool],
     as_grant: Callable[[Any], Grant],
     display: Callable[[Any], str],
     uncovered: Callable[[Any, Any], list[str]],
 ) -> None:
     counts: Counter[str] = Counter()
+    before: Counter[str] = Counter()
     kinds: Counter[str] = Counter()
     found: dict[str, list[dict[str, str]]] = {}
     bugs: list[dict[str, str]] = []
@@ -518,16 +600,20 @@ def compare(
     for parent, child, kind in pairs:
         kinds[kind] += 1
         accepted = accepts(parent, child)
+        accepted_before = accepts_before(parent, child)
+        assert accepted or not accepted_before, "rule A may only add accepted pairs"
         record = {"parent": display(parent), "child": display(child)}
         try:
             witness = ask(smt.find_grant_escalation, as_grant(parent), as_grant(child))
         except smt.Inconclusive as why:
             counts[inconclusive(accepted)] += 1
+            before[inconclusive(accepted_before)] += 1
             if accepted:
                 unconfirmed.append({**record, "why": str(why)})
             continue
         result = outcome(accepted, witness is None)
         counts[result] += 1
+        before[outcome(accepted_before, witness is None)] += 1
         if result == "accepted_unsafe_BUG":
             bugs.append({**record, "witness": repr(witness)})
         elif result == "rejected_safe_gap":
@@ -539,6 +625,8 @@ def compare(
         "truth": truth,
         "children_by_kind": dict(sorted(kinds.items())),
         "outcomes": table(counts),
+        "previous_rule_set": {"note": PREVIOUS_NOTE, "outcomes": table(before)},
+        "rule_a": rule_a_effect(table(counts), table(before)),
         "gap_categories": summarize_gap(found),
         "security_bugs": bugs,
         "accepted_but_inconclusive": unconfirmed,
@@ -567,6 +655,7 @@ def section_sampled(samples: int, seed_value: int) -> dict[str, Any]:
         "smt.find_grant_escalation on the two one-capability grants",
         sample(capability_pairs(), samples, seed_value),
         covers,
+        previous_covers,
         one,
         show_capability,
         capability_reasons,
@@ -578,6 +667,7 @@ def section_sampled(samples: int, seed_value: int) -> dict[str, Any]:
         "smt.find_grant_escalation(parent, child)",
         sample(grant_pairs(), samples, seed_value + 1),
         lambda parent, child: check_attenuation(parent, child).ok,
+        previous_check,
         lambda grant: grant,
         show_grant,
         grant_reasons,
@@ -629,7 +719,9 @@ def main() -> int:
     report = {
         "what_this_is": (
             "Checker verdict against solver truth for the attenuation check. "
-            "rejected_safe_gap is the completeness gap; accepted_unsafe_BUG must be 0."
+            "rejected_safe_gap is the completeness gap; accepted_unsafe_BUG must be 0. "
+            "`outcomes` is the current checker (with rule A); `previous_rule_set` is the "
+            "checker before rule A against the same solver answers; `rule_a` is the difference."
         ),
         "caveat": CAVEAT,
         "completeness_rate_definition": "accepted_safe / (accepted_safe + rejected_safe_gap)",
@@ -667,7 +759,18 @@ def main() -> int:
             f"inconclusive {t['inconclusive_accepted']}+{t['inconclusive_rejected']}"
         )
 
+    def effect(section: dict[str, Any]) -> None:
+        e = section["rule_a"]
+        print(
+            f"  rule A: gap {e['gap_before']} -> {e['gap_now']} "
+            f"(closed {e['gap_pairs_closed']}), completeness "
+            f"{e['completeness_rate_before']} -> {e['completeness_rate_now']}, "
+            f"unsafe newly accepted {e['unsafe_pairs_newly_accepted']}"
+        )
+
+    line("exhaustive, before A", exhaustive["previous_rule_set"]["outcomes"])
     line("exhaustive constraints", exhaustive["outcomes"])
+    effect(exhaustive)
     for entry in exhaustive["gap_categories"]:
         print(f"  {entry['count']:>4}  {entry['category']}")
     for entry in exhaustive["what_if_extensions"]["results"]:
@@ -677,7 +780,9 @@ def main() -> int:
             f"unsafe accepted {entry['unsafe_pairs_it_would_accept']}"
         )
     for level in ("capability_level", "grant_level"):
+        line(f"{level.split('_')[0]}, before A", sampled[level]["previous_rule_set"]["outcomes"])
         line(f"sampled {level.split('_')[0]}", sampled[level]["outcomes"])
+        effect(sampled[level])
         for entry in sampled[level]["gap_categories"]:
             print(f"  {entry['count']:>4}  {entry['category']}")
     print(f"inconclusive pairs (in no cell, in no rate): {unknown}; solver retries: {RETRIES}")

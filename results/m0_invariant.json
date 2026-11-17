@@ -22,18 +22,19 @@
     "parent any / child max": 292,
     "parent eq / child eq": 4023,
     "parent eq / child in": 4,
-    "parent glob / child eq": 1245,
+    "parent glob / child eq": 1241,
     "parent glob / child glob (identical)": 2927,
-    "parent glob / child glob (longer prefix)": 933,
+    "parent glob / child glob (longer prefix)": 937,
     "parent glob / child in": 1181,
-    "parent in / child eq": 2167,
+    "parent in / child eq": 2164,
+    "parent in / child glob": 3,
     "parent in / child in": 4613,
     "parent max / child eq": 1549,
     "parent max / child in": 1467,
     "parent max / child max": 3464
   },
-  "mutants_tried": 11,
-  "mutants_killed": 11,
+  "mutants_tried": 12,
+  "mutants_killed": 12,
   "mutant_search_budget": 20000,
   "mutant_search_strategy": "scenarios(fault_one_in=1): every narrowed child has one fault",
   "mutants": [
@@ -91,9 +92,9 @@
       "invariant": "grant",
       "killed": true,
       "counterexample": {
-        "parent": "[read(z glob '')] expires_at=1",
-        "child": "[read(z glob '*')] expires_at=1",
-        "call": "read({'z': 'a'})",
+        "parent": "[read(x glob '', x in ('a',))] expires_at=1",
+        "child": "[read(x glob '*', x eq 'a')] expires_at=1",
+        "call": "read({'x': 'a'})",
         "now": "0"
       }
     },
@@ -158,6 +159,18 @@
       }
     },
     {
+      "mutant": "star_free_glob_unchecked",
+      "fault": "star-free child glob accepted under every parent",
+      "invariant": "grant",
+      "killed": true,
+      "counterexample": {
+        "parent": "[read(y any, y max 0)] expires_at=1",
+        "child": "[read(y glob '', y any)] expires_at=1",
+        "call": "read({'y': ''})",
+        "now": "0"
+      }
+    },
+    {
       "mutant": "tool_unchecked",
       "fault": "parent capability for a different tool may cover",
       "invariant": "grant",
@@ -172,5 +185,5 @@
   ],
   "hypothesis_version": "6.170.15",
   "python_version": "3.13.18",
-  "seconds": 55.3
+  "seconds": 52.1
 }

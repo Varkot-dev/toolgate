@@ -7,7 +7,9 @@ and writes
     assets/completeness_gap.svg
 
 Left: parent operator by child operator, three counts per cell from the
-exhaustive section. Right: the gap pairs by the reason the checker missed them.
+exhaustive section. Right: the gap pairs by the reason the checker missed them,
+then what rule A (implemented) closed and what candidate B would still close.
+Both panels show the CURRENT checker.
 Every number drawn is read from the JSON; nothing is computed here except sums
 used to check that the file is consistent.
 
@@ -243,30 +245,51 @@ def main() -> None:
     draw_grid(ax, cells)
     draw_categories(ax, categories, totals["rejected_safe_gap"])
 
-    # What two small rule extensions would close, as measured by the same script.
+    # What rule A closed (before -> after) and what candidate B would still close,
+    # both as measured by the same script.
+    effect = section["rule_a"]
+    before = section["previous_rule_set"]["outcomes"]
+    gap = totals["rejected_safe_gap"]
+    assert effect["gap_before"] == before["rejected_safe_gap"]
+    assert effect["gap_now"] == gap
+    assert effect["gap_pairs_closed"] == effect["gap_before"] - gap
+    assert effect["unsafe_pairs_newly_accepted"] == 0
     by_rules = {
         "+".join(label[0] for label in r["extensions"]): r
         for r in section["what_if_extensions"]["results"]
     }
     for r in by_rules.values():
         assert r["unsafe_pairs_it_would_accept"] == 0
-    gap = totals["rejected_safe_gap"]
     y = BARS_Y + len(categories) * ITEM_H + 4
     ax.plot([BARS_X, 1560], [y - 22, y - 22], color=style.RULE, linewidth=1)
-    ax.text(BARS_X, y, "Measured, not implemented:", fontsize=14.5, fontweight="bold", va="center")
+    ax.text(
+        BARS_X,
+        y,
+        "Implemented: a star-free child glob is checked like eq.",
+        fontsize=14.5,
+        fontweight="bold",
+        va="center",
+    )
     ax.text(
         BARS_X,
         y + 26,
-        "checking a star-free child glob like eq would close "
-        f"{n(by_rules['A']['gap_pairs_closed'])} of {n(gap)};",
+        f"It closed {n(effect['gap_pairs_closed'])} pairs: the gap went from "
+        f"{n(effect['gap_before'])} to {n(gap)}.",
         fontsize=14.5,
         va="center",
     )
     ax.text(
         BARS_X,
-        y + 52,
-        "also collapsing repeated stars first would close "
-        f"{n(by_rules['A+B']['gap_pairs_closed'])} of {n(gap)}.",
+        y + 60,
+        "Measured, not implemented: collapsing repeated stars",
+        fontsize=14.5,
+        fontweight="bold",
+        va="center",
+    )
+    ax.text(
+        BARS_X,
+        y + 86,
+        f"first would close {n(by_rules['B']['gap_pairs_closed'])} of the remaining {n(gap)}.",
         fontsize=14.5,
         va="center",
     )

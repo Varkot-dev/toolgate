@@ -1717,43 +1717,43 @@
       "checker": "covers(parent, child)",
       "truth": "smt.find_grant_escalation on the two one-capability grants",
       "children_by_kind": {
-        "faulty": 1164,
-        "narrowed": 2369,
-        "random": 1467
+        "faulty": 1268,
+        "narrowed": 2346,
+        "random": 1386
       },
       "outcomes": {
-        "accepted_safe": 2907,
-        "rejected_safe_gap": 208,
-        "rejected_unsafe": 1885,
+        "accepted_safe": 2938,
+        "rejected_safe_gap": 198,
+        "rejected_unsafe": 1864,
         "accepted_unsafe_BUG": 0,
         "inconclusive_accepted": 0,
         "inconclusive_rejected": 0,
         "pairs": 5000,
-        "truly_safe": 3115,
-        "completeness_rate": 0.9332
+        "truly_safe": 3136,
+        "completeness_rate": 0.9369
       },
       "previous_rule_set": {
         "note": "The checker WITHOUT rule A, re-created in scripts/m0b_completeness.py and compared with the same solver answers. This is the previous rule set, not the code in src/.",
         "outcomes": {
-          "accepted_safe": 2900,
-          "rejected_safe_gap": 215,
-          "rejected_unsafe": 1885,
+          "accepted_safe": 2901,
+          "rejected_safe_gap": 235,
+          "rejected_unsafe": 1864,
           "accepted_unsafe_BUG": 0,
           "inconclusive_accepted": 0,
           "inconclusive_rejected": 0,
           "pairs": 5000,
-          "truly_safe": 3115,
-          "completeness_rate": 0.931
+          "truly_safe": 3136,
+          "completeness_rate": 0.9251
         }
       },
       "rule_a": {
         "rule": "A: a star-free child glob is checked like eq (implemented in src/)",
-        "gap_before": 215,
-        "gap_now": 208,
-        "gap_pairs_closed": 7,
+        "gap_before": 235,
+        "gap_now": 198,
+        "gap_pairs_closed": 37,
         "unsafe_pairs_newly_accepted": 0,
-        "completeness_rate_before": 0.931,
-        "completeness_rate_now": 0.9332
+        "completeness_rate_before": 0.9251,
+        "completeness_rate_now": 0.9369
       },
       "gap_categories": [
         {
@@ -1768,7 +1768,7 @@
         },
         {
           "category": "child capability can never allow a call (its constraints conjoin to nothing)",
-          "count": 203,
+          "count": 198,
           "examples": [
             {
               "parent": "pay(y glob \"bb/\", y max 2.0)",
@@ -1786,21 +1786,8 @@
         },
         {
           "category": "child capability safe only through the conjunction of its own constraints",
-          "count": 5,
-          "examples": [
-            {
-              "parent": "send(x max 4, y max 2, x eq 0.5)",
-              "child": "send(x max 3.5, y eq 1.5, x in [0.5, \"aab\"])"
-            },
-            {
-              "parent": "read(x max 4, y max 2, x eq 0.5)",
-              "child": "read(x max 3.5, y eq 1.5, x in [0.5, \"aab\"])"
-            },
-            {
-              "parent": "read(x max 4, y max 0, x eq 0.5)",
-              "child": "read(x max 3.5, y eq -0.5, x in [0.5, \"aab\"])"
-            }
-          ]
+          "count": 0,
+          "examples": []
         },
         {
           "category": "several uncovered child capabilities with different reasons",
@@ -1825,62 +1812,49 @@
       "checker": "check_attenuation(parent, child).ok",
       "truth": "smt.find_grant_escalation(parent, child)",
       "children_by_kind": {
-        "faulty": 1019,
-        "narrowed": 2779,
-        "random": 1202
+        "faulty": 1054,
+        "narrowed": 2866,
+        "random": 1080
       },
       "outcomes": {
-        "accepted_safe": 3055,
-        "rejected_safe_gap": 143,
-        "rejected_unsafe": 1802,
+        "accepted_safe": 3171,
+        "rejected_safe_gap": 146,
+        "rejected_unsafe": 1683,
         "accepted_unsafe_BUG": 0,
         "inconclusive_accepted": 0,
         "inconclusive_rejected": 0,
         "pairs": 5000,
-        "truly_safe": 3198,
-        "completeness_rate": 0.9553
+        "truly_safe": 3317,
+        "completeness_rate": 0.956
       },
       "previous_rule_set": {
         "note": "The checker WITHOUT rule A, re-created in scripts/m0b_completeness.py and compared with the same solver answers. This is the previous rule set, not the code in src/.",
         "outcomes": {
-          "accepted_safe": 3049,
-          "rejected_safe_gap": 149,
-          "rejected_unsafe": 1802,
+          "accepted_safe": 3115,
+          "rejected_safe_gap": 202,
+          "rejected_unsafe": 1683,
           "accepted_unsafe_BUG": 0,
           "inconclusive_accepted": 0,
           "inconclusive_rejected": 0,
           "pairs": 5000,
-          "truly_safe": 3198,
-          "completeness_rate": 0.9534
+          "truly_safe": 3317,
+          "completeness_rate": 0.9391
         }
       },
       "rule_a": {
         "rule": "A: a star-free child glob is checked like eq (implemented in src/)",
-        "gap_before": 149,
-        "gap_now": 143,
-        "gap_pairs_closed": 6,
+        "gap_before": 202,
+        "gap_now": 146,
+        "gap_pairs_closed": 56,
         "unsafe_pairs_newly_accepted": 0,
-        "completeness_rate_before": 0.9534,
-        "completeness_rate_now": 0.9553
+        "completeness_rate_before": 0.9391,
+        "completeness_rate_now": 0.956
       },
       "gap_categories": [
         {
           "category": "constraint-level gap inherited (one child constraint is safe but rejected)",
-          "count": 5,
-          "examples": [
-            {
-              "parent": "[read(x glob \"/**\", x any); send(x glob \"**\")]",
-              "child": "[send(x eq \"//ba\"); send(x in [\"ba\"]); read(x glob \"//a*\", x any)]"
-            },
-            {
-              "parent": "[read(x glob \"/**\", x any); send(x glob \"**\")]",
-              "child": "[send(x in [\"ba\"]); read(x glob \"//a*\", x any)]"
-            },
-            {
-              "parent": "[read(x glob \"/**\", x any); read(x glob \"**\")]",
-              "child": "[read(x in [\"ba\"]); read(x glob \"//a*\", x any)]"
-            }
-          ]
+          "count": 0,
+          "examples": []
         },
         {
           "category": "child capability covered only by a union of two or more parent capabilities",
@@ -1889,26 +1863,31 @@
         },
         {
           "category": "child capability can never allow a call (its constraints conjoin to nothing)",
-          "count": 138,
+          "count": 145,
           "examples": [
             {
               "parent": "[send(x any)]",
               "child": "[send(y in [\"/\", \"\"], y in [\"b\"])]"
             },
             {
-              "parent": "[send(); read(y max -3, z eq 5, y max -1)]",
+              "parent": "[send(); read(y max -3, z eq 1, y max -1)]",
               "child": "[send(x max 3, x eq \"b\")]"
             },
             {
-              "parent": "[send(); read(y max -3, z eq 5, y max -1)]",
+              "parent": "[send(); read(y max -3, z eq 1, y max -1)]",
               "child": "[read(x max 3, x eq \"b\")]"
             }
           ]
         },
         {
           "category": "child capability safe only through the conjunction of its own constraints",
-          "count": 0,
-          "examples": []
+          "count": 1,
+          "examples": [
+            {
+              "parent": "[pay(y in [3, \"ba\"], z eq -3); read(x in [\"/ba\", \"a/\"], x glob \"a/\")]",
+              "child": "[read(x in [\"a/\", \"/ba\"], x glob \"a/*\"); pay(y in [3], z eq -3); pay(y eq 3, z eq -3, z any)]"
+            }
+          ]
         },
         {
           "category": "several uncovered child capabilities with different reasons",
@@ -1965,7 +1944,7 @@
   "hypothesis_version": "6.170.15",
   "python_version": "3.13.18",
   "seconds": {
-    "exhaustive": 74.3,
-    "total": 124.6
+    "exhaustive": 64.7,
+    "total": 111.1
   }
 }

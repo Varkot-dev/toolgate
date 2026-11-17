@@ -13,15 +13,10 @@ Run from the repo root: .venv/bin/python scripts/fig_delegation_tree.py
 from __future__ import annotations
 
 import json
-import textwrap
 from dataclasses import dataclass
 
-import matplotlib.pyplot as plt
-from matplotlib.axes import Axes
-from matplotlib.patches import FancyBboxPatch
-
 import style
-from toolgate import Capability, Constraint, Grant, check_attenuation
+from toolgate import Capability, Grant, check_attenuation
 
 T0 = 1_800_000_000  # fixed "now" in epoch seconds, so the output never changes
 ADDRESSES = ("ana@x.com", "ben@x.com", "cy@x.com")
@@ -69,133 +64,104 @@ EDGES = [("user", "orchestrator"), ("orchestrator", "research"), ("orchestrator"
 REJECTED_EDGE = ("orchestrator", "research (wider request)")
 
 
-def format_constraint(c: Constraint) -> str:
-    if c.op == "eq":
-        return f"{c.arg} = {c.value}"
-    if c.op == "in":
-        return f"{c.arg} in {{{', '.join(str(v) for v in c.value)}}}"
-    if c.op == "max":
-        return f"{c.arg} <= {c.value}"
-    if c.op == "glob":
-        return f"{c.arg} ~ {c.value}"
-    return f"{c.arg}: any"
+# ---------------------------------------------------------------- plain-language chips
+
+VERB = {"read_file": "read", "send_email": "email", "search_calendar": "calendar"}
 
 
-def format_capability(cap: Capability, width: int) -> list[str]:
-    """`tool(arg ~ pattern, arg: any) xN`, wrapped at argument boundaries to `width` chars."""
-    budget = f" x{cap.max_calls}" if cap.max_calls is not None else ""
-    parts = [format_constraint(c) for c in cap.constraints]
-    parts = [p + "," for p in parts[:-1]] + [(parts[-1] if parts else "") + ")" + budget]
-    lines, current = [], cap.tool + "("
-    for i, part in enumerate(parts):
-        candidate = current + ("" if i == 0 else " ") + part
-        if len(candidate) > width and i > 0:
-            lines.append(current)
-            candidate = "    " + part
-        current = candidate
-    return [*lines, current]
+def who(address: str) -> str:
+    return address.split("@")[0]
+
+
+def chip_text(cap: Capability) -> str:
+    """One capability as a short phrase: "read reports/q3/*", "email ana, 1x"."""
+    by_arg = {c.arg: c for c in cap.constraints}
+    words = VERB.get(cap.tool, cap.tool)
+    if cap.tool == "read_file":
+        path = by_arg["path"]
+        words += " all files" if path.op == "glob" and path.value == "*" else f" {path.value}"
+    elif cap.tool == "send_email":
+        to = by_arg["to"]
+        names = [who(v) for v in to.value] if to.op == "in" else [who(to.value)]
+        words += " " + ", ".join(names)
+    elif cap.tool == "search_calendar":
+        words += f", {by_arg['days'].value} days"
+    if cap.max_calls is not None:
+        words += f", {cap.max_calls}x"
+    return words
+
+
+# ---------------------------------------------------------------- layout, logical px
+
+W, H = 800, 584
+PAD = 16  # inside a node
+NODE_H = 104
+HEAD_DY, CHIP_DY = 28, 70  # name baseline row and chip row, from a node's top
+CHIP_GAP = 8
+COL_W, COL_GAP = 232, 20
+ROW_Y = [96, 272, 448]  # node tops
 
 
 @dataclass
 class Node:
-    title: str
+    name: str
     grant: Grant
-    cx: float
-    top: float
-    width: float
-    height: float = 0.0
-    lines: tuple[str, ...] = ()
-    note: tuple[str, ...] = ()  # the checker's reason, on the rejected node only
+    x: float
+    y: float
+    w: float
+    rejected: bool = False
+
+    @property
+    def cx(self) -> float:
+        return self.x + self.w / 2
 
     @property
     def bottom(self) -> float:
-        return self.top + self.height
+        return self.y + NODE_H
+
+    def chips(self) -> list[str]:
+        return [chip_text(cap) for cap in self.grant.capabilities]
 
 
-CHAR_W = 0.602 * 14 * style.DPI / 72  # advance of one 14 pt DejaVu Sans Mono glyph, in px
-PAD, HEAD, LINE, NOTE_LINE = 22, 40, 29, 24
+def chips_width(texts: list[str]) -> float:
+    return sum(style.text_width(t) + 24 for t in texts) + CHIP_GAP * (len(texts) - 1)
 
 
-def layout(node: Node) -> Node:
-    chars = int((node.width - 2 * PAD) / CHAR_W)
-    lines = [ln for cap in node.grant.capabilities for ln in format_capability(cap, chars)]
-    node.lines = tuple(lines)
-    node.height = PAD + HEAD + LINE * len(lines) + PAD - 8
-    if node.note:
-        node.height += 14 + NOTE_LINE * (len(node.note) + 1)
-    return node
-
-
-def draw_node(ax: Axes, node: Node, rejected: bool = False) -> None:
-    left = node.cx - node.width / 2
-    ax.add_patch(
-        FancyBboxPatch(
-            (left, node.top),
-            node.width,
-            node.height,
-            boxstyle="round,pad=0,rounding_size=12",
-            facecolor=style.SURFACE if rejected else style.PANEL,
-            edgecolor=style.DENY if rejected else style.RULE,
-            linewidth=2 if rejected else 1.2,
-            linestyle=(0, (5, 4)) if rejected else "solid",
-        )
-    )
+def draw_node(c: style.Canvas, node: Node) -> None:
+    if node.rejected:
+        c.box(node.x, node.y, node.w, NODE_H, fill=style.CARD, edge=style.BAD, dashed=True)
+    else:
+        c.box(node.x, node.y, node.w, NODE_H)
     minutes = round((node.grant.expires_at - T0) / 60)
-    y = node.top + PAD + 10
-    ax.text(left + PAD, y, node.title, fontsize=16, fontweight="bold", va="center")
-    ax.text(
-        left + node.width - PAD,
-        y,
-        f"expires in {minutes} min",
-        fontsize=13,
-        color=style.MUTED,
-        ha="right",
-        va="center",
-    )
-    y = node.top + PAD + HEAD + LINE / 2 - 4
-    for line in node.lines:
-        ax.text(left + PAD, y, line, fontsize=14, family=style.MONO, va="center")
-        y += LINE
-    if node.note:
-        y += 14
-        ax.text(left + PAD, y, "checker says:", fontsize=13, color=style.MUTED, va="center")
-        for line in node.note:
-            y += NOTE_LINE
-            ax.text(left + PAD, y, line, fontsize=13, color=style.DENY, va="center")
+    c.text(node.x + PAD, node.y + HEAD_DY, node.name, size=style.LABEL, weight=style.STRONG)
+    expiry = f"{minutes} min"
+    right = node.x + node.w - PAD
+    c.text(right, node.y + HEAD_DY, expiry, size=style.SMALL, color=style.GRAY, ha="right")
+    c.clock(right - style.text_width(expiry, style.SMALL) - 15, node.y + HEAD_DY)
+    x = node.x + PAD
+    for text in node.chips():
+        _, w = c.chip(x, node.y + CHIP_DY, text, tone="bad" if node.rejected else "plain")
+        x += w + CHIP_GAP
 
 
-def draw_edge(ax: Axes, parent: Node, child: Node, ok: bool) -> None:
-    """Elbow connector: leave the parent's bottom edge, jog sideways, drop onto the child."""
-    color = style.ALLOW if ok else style.DENY
-    dash = "solid" if ok else (0, (5, 4))
-    x1, y0, y1 = child.cx, parent.bottom + 3, child.top - 3
-    half = parent.width / 2 - 120
-    x0 = min(max(x1, parent.cx - half), parent.cx + half)
-    mid = (y0 + y1) / 2
-    ax.plot([x0, x0, x1, x1], [y0, mid, mid, mid + 6], color=color, linewidth=2, linestyle=dash)
-    ax.annotate(
-        "",
-        xy=(x1, y1),
-        xytext=(x1, mid + 4),
-        arrowprops={
-            "arrowstyle": "-|>",
-            "color": color,
-            "linewidth": 2,
-            "linestyle": dash,
-            "mutation_scale": 18,
-            "shrinkA": 0,
-            "shrinkB": 0,
-        },
-    )
-    ax.text(
-        x1 + 14,
-        mid + (y1 - mid) / 2,
-        "\u2713 narrower: accepted" if ok else "\u2715 wider: rejected",
-        fontsize=13,
-        fontweight="bold",
-        color=color,
-        va="center",
-    )
+def draw_edge(c: style.Canvas, parent: Node, child: Node, ok: bool, label: str = "") -> None:
+    """Straight down from parent to child, with the checker's verdict as a badge."""
+    x, y0, y1 = child.cx, parent.bottom + 6, child.y - 4
+    tone = "good" if ok else "bad"
+    c.arrow((x, y0), (x, y1), tone=tone, dashed=not ok)
+    mid = (y0 + y1) / 2 - 2
+    c.badge(x, mid, tone)
+    if label:
+        right = child.cx < W / 2 + 1  # label on the side with room
+        c.text(
+            x + 22 if right else x - 22,
+            mid,
+            label,
+            size=style.SMALL,
+            color=style.GOOD if ok else style.BAD,
+            weight=style.STRONG,
+            ha="left" if right else "right",
+        )
 
 
 def main() -> None:
@@ -227,63 +193,50 @@ def main() -> None:
     out = style.RESULTS / "m0_delegation_tree.json"
     out.write_text(json.dumps(record, indent=2) + "\n")
 
-    # 3. Draw. One axes in pixel units, y pointing down.
-    style.apply()
-    fig = plt.figure(figsize=style.SIZE)
-    ax = fig.add_axes((0, 0, 1, 1))
-    ax.set_xlim(0, 1600)
-    ax.set_ylim(900, 0)
-    ax.axis("off")
+    # 3. Draw, from the same grants the checker just judged.
+    c = style.Canvas(W, H)
+    c.title("Each hand-off can only narrow authority")
 
-    ax.text(
-        40, 50, "Authority only shrinks down the delegation chain", fontsize=26, fontweight="bold"
-    )
-    ax.text(
-        40,
-        88,
-        "Every arrow is a real check_attenuation(parent, child) call: "
-        "a child grant may allow nothing its parent does not, and must expire no later.",
-        fontsize=14,
-        color=style.MUTED,
-    )
-
-    gap, leaf_w = 78, 490
-    user = layout(Node("user grant", GRANTS["user"], 800, 122, 1010))
-    orch = layout(Node("orchestrator", GRANTS["orchestrator"], 800, user.bottom + gap, 1010))
-    leaf_top = orch.bottom + gap + 12
-    research = layout(Node("research agent", GRANTS["research"], 285, leaf_top, leaf_w))
-    mailer = layout(Node("mailer agent", GRANTS["mailer"], 800, leaf_top, leaf_w))
-    wider = layout(
-        Node(
-            "research, 2nd ask",
-            REJECTED,
-            1315,
-            leaf_top,
-            leaf_w,
-            note=tuple(textwrap.wrap(denied.reason, 46)),
+    names = {
+        "user": "user",
+        "orchestrator": "orchestrator",
+        "research": "researcher",
+        "mailer": "mailer",
+    }
+    top_w = (
+        max(
+            chips_width([chip_text(cap) for cap in GRANTS[k].capabilities])
+            for k in ("user", "orchestrator")
         )
+        + 2 * PAD
     )
-    nodes = {"user": user, "orchestrator": orch, "research": research, "mailer": mailer}
+    top_w = max(top_w, 3 * COL_W + 2 * COL_GAP - 2 * 96)
+    nodes = {
+        "user": Node(names["user"], GRANTS["user"], (W - top_w) / 2, ROW_Y[0], top_w),
+        "orchestrator": Node(
+            names["orchestrator"], GRANTS["orchestrator"], (W - top_w) / 2, ROW_Y[1], top_w
+        ),
+    }
+    left = (W - 3 * COL_W - 2 * COL_GAP) / 2
+    cols = [left + k * (COL_W + COL_GAP) for k in range(3)]
+    nodes["research"] = Node(names["research"], GRANTS["research"], cols[0], ROW_Y[2], COL_W)
+    nodes["mailer"] = Node(names["mailer"], GRANTS["mailer"], cols[1], ROW_Y[2], COL_W)
+    wider = Node("researcher", REJECTED, cols[2], ROW_Y[2], COL_W, rejected=True)
+    for node in nodes.values():
+        assert chips_width(node.chips()) + 2 * PAD <= node.w, node.name
 
     for (parent, child), result in results.items():
-        draw_edge(ax, nodes[parent], nodes[child], result.ok)
-    draw_edge(ax, orch, wider, denied.ok)
-    for node in nodes.values():
-        draw_node(ax, node)
-    draw_node(ax, wider, rejected=True)
-
-    ax.text(
-        40,
-        872,
-        "Notation:   ~ glob pattern    = exact value    in {..} allow-list    <= ceiling    "
-        "any: must be present, any value    xN call budget        "
-        "Data: results/m0_delegation_tree.json",
-        fontsize=12.5,
-        color=style.MUTED,
-    )
-
-    png, svg = style.save(fig, "delegation_tree")
-    for path in (png, svg, out):
+        draw_edge(
+            c,
+            nodes[parent],
+            nodes[child],
+            result.ok,
+            "narrower: accepted" if parent == "user" else "",
+        )
+    draw_edge(c, nodes["orchestrator"], wider, denied.ok, "wider: rejected")
+    for node in [*nodes.values(), wider]:
+        draw_node(c, node)
+    for path in (*c.save("delegation_tree"), out):
         print(path.relative_to(style.ROOT))
     print(f"rejected: {denied.reason}")
 

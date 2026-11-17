@@ -10,9 +10,12 @@ throwaway directory) through two calls made with one sub-agent token:
 The real outcomes and audit entries go to results/m6_hero.json, and the
 animation is drawn only from that record. Writes
 
-    assets/hero.svg          animated with CSS keyframes, no JavaScript
-    assets/hero.gif          the same animation as frames, for places without SVG
-    assets/hero_poster.png   the final frame, for places that do not animate
+    assets/hero.svg          animated with CSS keyframes, no JavaScript; with
+                             prefers-reduced-motion it shows the final frame
+    assets/hero.gif          the same animation as frames (1x), for places without SVG
+    assets/hero_poster.png   the final frame at 2x, for places that do not animate
+
+Drawn with the shared look in scripts/style.py.
     results/m6_hero.json
 
 Run from the repo root: .venv/bin/python scripts/fig_hero.py
@@ -33,9 +36,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from matplotlib.artist import Artist
-from matplotlib.axes import Axes
 from matplotlib.figure import Figure
-from matplotlib.patches import FancyArrowPatch, FancyBboxPatch
 from matplotlib.transforms import Affine2D
 from PIL import Image
 
@@ -159,14 +160,10 @@ def run_gateway() -> dict[str, Any]:
 # ---------------------------------------------------------------- animation model
 
 FPS = 20
-DURATION = 11.5  # seconds per loop
-FINAL = 10.6  # a moment in the closing hold, used for the poster
-W, H = 1200, 600  # pixels; the axes use pixel coordinates, origin bottom left
-PT = 72 / style.DPI  # SVG user units (points) per pixel
-
-ALLOW_TINT = "#e3efe1"
-DENY_TINT = "#f8e3e2"
-MONO_PX = 14 * style.DPI / 72 * 0.602  # width of one 14 pt DejaVu Sans Mono glyph
+DURATION = 9.0  # seconds per loop
+FINAL = 8.0  # a moment in the closing hold, used for the poster and reduced motion
+W, H = 800, 400  # logical px; y points down
+PT = style.PT  # SVG user units (points) per logical px
 
 
 def ease(u: float) -> float:
@@ -184,7 +181,7 @@ def interp(keys: list[tuple[float, ...]], t: float) -> tuple[float, ...]:
     return keys[-1][1:]
 
 
-def fade(on: float, off: float = DURATION - 0.5, d: float = 0.25) -> list[tuple[float, float]]:
+def fade(on: float, off: float = DURATION - 0.6, d: float = 0.25) -> list[tuple[float, float]]:
     """Opacity keys: invisible, fade in at `on`, fade out at `off`."""
     return [(0.0, 0.0), (on, 0.0), (on + d, 1.0), (off, 1.0), (off + d, 0.0), (DURATION, 0.0)]
 
@@ -223,14 +220,16 @@ class Track:
             alpha, dx, dy = self.state(t)
             rows.append(
                 f"{100 * t / DURATION:.3f}%{{opacity:{alpha:.3f};"
-                f"transform:translate({dx * PT:.2f}px,{-dy * PT:.2f}px)}}"
+                f"transform:translate({dx * PT:.2f}px,{dy * PT:.2f}px)}}"
             )
         return f"@keyframes {self.name}{{{''.join(rows)}}}"
 
 
 class Scene:
-    def __init__(self, ax: Axes) -> None:
-        self.ax = ax
+    """A style.Canvas whose artists can be grouped into animated tracks."""
+
+    def __init__(self, canvas: style.Canvas) -> None:
+        self.c = canvas
         self.tracks: list[Track] = []
 
     def track(self, name: str, opacity: list[tuple[float, float]], move: Any = None) -> Track:
@@ -238,368 +237,192 @@ class Scene:
         self.tracks.append(tr)
         return tr
 
-    def add(self, artist: Artist, tr: Track | None) -> Artist:
-        artist.set_clip_on(False)
-        if tr is not None:
+    def grab(self, tr: Track, made: Any) -> Any:
+        """Put every artist the canvas call `made` into track `tr`."""
+        found = made[0] if isinstance(made, tuple) else made
+        for artist in found if isinstance(found, list) else [found]:
             artist.set_gid(f"{tr.name}-{len(tr.artists)}")
             tr.artists.append(artist)
-        return artist
-
-    def box(
-        self,
-        x: float,
-        y: float,
-        w: float,
-        h: float,
-        fc: str = style.PANEL,
-        ec: str = style.RULE,
-        lw: float = 1.5,
-        r: float = 8,
-        tr: Track | None = None,
-        z: float = 1,
-        ls: str = "-",
-    ) -> Artist:
-        patch = FancyBboxPatch(
-            (x, y),
-            w,
-            h,
-            boxstyle=f"round,pad=0,rounding_size={r}",
-            facecolor=fc,
-            edgecolor=ec,
-            linewidth=lw,
-            linestyle=ls,
-            zorder=z,
-        )
-        return self.add(self.ax.add_patch(patch), tr)
-
-    def text(
-        self,
-        x: float,
-        y: float,
-        s: str,
-        size: float = 14,
-        color: str = style.INK,
-        bold: bool = False,
-        mono: bool = False,
-        ha: str = "left",
-        tr: Track | None = None,
-        z: float = 5,
-    ) -> Artist:
-        artist = self.ax.text(
-            x,
-            y,
-            s,
-            fontsize=size,
-            color=color,
-            fontweight="bold" if bold else "normal",
-            family=style.MONO if mono else style.FONT,
-            ha=ha,
-            va="center",
-            zorder=z,
-        )
-        return self.add(artist, tr)
-
-    def arrow(
-        self,
-        a: tuple[float, float],
-        b: tuple[float, float],
-        color: str = style.MUTED,
-        tr: Track | None = None,
-    ) -> Artist:
-        patch = FancyArrowPatch(
-            a, b, arrowstyle="-|>", mutation_scale=16, color=color, linewidth=2, zorder=4
-        )
-        return self.add(self.ax.add_patch(patch), tr)
+        return made
 
     def pose(self, t: float | None) -> None:
         """Put every track at time t; None shows everything at rest (for the SVG)."""
         for tr in self.tracks:
             alpha, dx, dy = (1.0, 0.0, 0.0) if t is None else tr.state(t)
-            moved = Affine2D().translate(dx, dy) + self.ax.transData
+            moved = Affine2D().translate(dx, dy) + self.c.ax.transData
             for artist in tr.artists:
                 artist.set_alpha(None if t is None else alpha)
                 artist.set_transform(moved)
 
 
-# ---------------------------------------------------------------- formatting
-
-
-def cap_text(cap: dict[str, Any]) -> str:
-    """One capability in the notation of the other figures."""
-    parts = []
-    for arg, con in cap["args"].items():
-        if "glob" in con:
-            parts.append(f"{arg} ~ {con['glob']}")
-        elif "eq" in con:
-            parts.append(f"{arg} = {con['eq']}")
-        elif "in" in con:
-            parts.append(f"{arg} in {{{', '.join(map(str, con['in']))}}}")
-        elif "max" in con:
-            parts.append(f"{arg} <= {con['max']}")
-        else:
-            parts.append(f"{arg}: any")
-    return f"{cap['tool']}({', '.join(parts)})"
-
-
-def call_text(call: dict[str, Any]) -> str:
-    args = ", ".join(f'{k} = "{v}"' for k, v in call["args"].items())
-    return f"{call['tool']}({args})"
-
-
 # ---------------------------------------------------------------- the drawing
 
-# Layout, pixels.
-LANE_Y = 285
-AGENT = (20, 255, 417, 225)
-GATE = (459, 255, 531, 225)
-TOOLS = (1012, 255, 168, 225)
-STAGE_W, STAGE_Y, STAGE_H = 165, 322, 115
-STAGE_X = [469 + i * (STAGE_W + 8) for i in range(3)]
-STAGE_CX = [x + STAGE_W / 2 for x in STAGE_X]
-TOOL_BOX = {"read_file": (1020, 262, 152, 72), "delete_file": (1020, 350, 152, 72)}
-CARD_X, CARD_W, CARD_Y, CARD_H = [20, 425, 830], 350, 58, 150
-LINE_Y = [187, 161, 135, 109, 83]  # header, decision, rule, prev, hash
-STAGES = [("verify", "token"), ("check grant", "and policy"), ("write audit", "entry")]
-# Which pipeline box decided, by CallOutcome.stage.
-STAGE_OF = {"token": 0, "call": 1, "grant": 1, "tool": 1, "policy": 1, "budget": 1}
+# Layout, logical px: three nodes on one row, two lanes through them, a log strip.
+ROW_Y, ROW_H = 100, 168
+AGENT = (32, 176)  # x, width
+GATE = (296, 208)
+TOOLS = (592, 176)
+LANES = [180, 232]  # y of call 1 and call 2
+HEAD_DY = 30
+LOG_Y = 348  # center of the audit chips
+LOG_LABEL_Y = 304
+GAP = 28  # between audit chips
 
-# Timings, seconds: (stage reached, ...) per call.
+# Timings, seconds.
 CALL_T = [
-    {"start": 0.5, "leave": 0.8, "stages": [1.5, 2.4, 3.3], "pause": 0.6, "tool": 4.4},
-    {"start": 5.6, "leave": 5.9, "stages": [6.6, 7.5, 8.4], "pause": 0.6, "tool": None},
+    {"start": 0.4, "gate": 1.4, "verdict": 1.6, "tool": 2.5, "log": 2.9},
+    {"start": 3.9, "gate": 4.9, "verdict": 5.1, "tool": None, "log": 5.6},
 ]
-RESET = 5.2  # call 1's lights go out
 
 
-def card(scene: Scene, x: float, entry: dict[str, Any], tr: Track | None) -> None:
-    color = {"allow": style.ALLOW, "deny": style.DENY}.get(entry["decision"], style.INK)
-    mark = {"allow": "✓ ", "deny": "× "}.get(entry["decision"], "")
-    scene.box(x, CARD_Y, CARD_W, CARD_H, tr=tr, z=2)
-    pad = x + 14
-    scene.text(
-        pad, LINE_Y[0], f"entry {entry['seq']}  {entry['tool']}", bold=True, mono=True, tr=tr
-    )
-    scene.text(pad, LINE_Y[1], mark + entry["decision"], color=color, bold=True, tr=tr)
-    scene.text(pad, LINE_Y[2], entry["rule"], color=style.MUTED, mono=True, tr=tr)
-    scene.text(pad, LINE_Y[3], f"prev {entry['prev'][:6]}", mono=True, tr=tr)
-    scene.text(pad, LINE_Y[4], f"hash {entry['hash'][:6]}", mono=True, tr=tr)
+def short(actor: str) -> str:
+    return actor.split(":", 1)[-1]
 
 
-def draw(data: dict[str, Any]) -> tuple[Figure, Scene]:
-    style.apply()
-    fig = plt.figure(figsize=(W / style.DPI, H / style.DPI))
-    ax = fig.add_axes((0, 0, 1, 1))
-    ax.set_xlim(0, W)
-    ax.set_ylim(0, H)
-    ax.axis("off")
-    s = Scene(ax)
-
+def draw(data: dict[str, Any]) -> Scene:
     token, calls, log = data["token"], data["calls"], data["audit_log"]
     entries = {e["seq"]: e for e in log}
     seqs = [c["audit_seq"] for c in calls]
-    if None in seqs or seqs[1] != seqs[0] + 1 or seqs[0] - 1 not in entries:
+    if None in seqs or seqs[1] != seqs[0] + 1 or sorted(entries) != list(range(seqs[1] + 1)):
         raise SystemExit(f"unexpected audit seqs {seqs}")
-    denied_at = STAGE_OF[calls[1]["stage"]]
-    if calls[0]["status"] != "allowed" or calls[1]["status"] != "denied" or denied_at != 1:
+    if calls[0]["status"] != "allowed" or calls[1]["status"] != "denied":
         raise SystemExit(f"unexpected outcomes {calls}")
 
-    # Title and footers.
-    s.text(20, 570, "Every tool call passes through the gateway", size=22, bold=True)
-    s.text(
-        20,
-        22,
-        f"One real run: a sub-agent token, {data['config']['policy_file']}, fixed clock.",
-        color=style.MUTED,
+    c = style.Canvas(W, H)
+    s = Scene(c)
+    c.title("Every tool call is checked before it runs")
+
+    # The three parties.
+    for (x, w), name, sub in [
+        (AGENT, "agent", short(token["actors"][0])),
+        (GATE, "gateway", ""),
+        (TOOLS, "tools", ""),
+    ]:
+        c.box(x, ROW_Y, w, ROW_H)
+        c.text(x + 16, ROW_Y + HEAD_DY, name, size=style.LABEL, weight=style.STRONG)
+        if sub:
+            c.text(x + w - 16, ROW_Y + HEAD_DY, sub, size=style.SMALL, color=style.GRAY, ha="right")
+
+    agent_right, gate_left = AGENT[0] + AGENT[1], GATE[0]
+    gate_right, tools_left = GATE[0] + GATE[1], TOOLS[0]
+    tool_x: dict[str, float] = {}
+    for call, y in zip(calls, LANES, strict=True):
+        c.chip(AGENT[0] + 16, y, call["tool"], tone="plain", code=True)  # what the agent asks
+        _, w = c.chip(TOOLS[0] + 16, y, call["tool"], tone="plain", code=True)
+        tool_x[call["tool"]] = TOOLS[0] + 16
+
+    # The audit strip: the entries before the calls are already there.
+    c.text(
+        32,
+        LOG_LABEL_Y,
+        "hash-chained audit log",
+        size=style.SMALL,
+        color=style.GRAY,
+        weight=style.STRONG,
     )
-    s.text(W - 20, 22, "Data: results/m6_hero.json", color=style.MUTED, ha="right")
+    log_x: dict[int, tuple[float, float]] = {}
+    x = 32.0
+    for seq in sorted(entries):
+        entry = entries[seq]
+        mark = None
+        if not entry["tool"].startswith("token:"):
+            mark = "good" if entry["decision"] == "allow" else "bad"
+        w = style.text_width(entry["tool"], style.SMALL, code=True) + 24 + (18 if mark else 0)
+        log_x[seq] = (x, w)
+        x += w + GAP
 
-    # Agent, holding its token.
-    x, y, w, h = AGENT
-    s.box(x, y, w, h)
-    s.text(x + 16, 456, token["actors"][0], size=16, bold=True)
-    chain = " <- ".join([token["jti"], *reversed(token["chain"])])
-    s.text(x + 16, 428, f"holds token {chain}", color=style.MUTED)
-    s.box(x + 12, 322, w - 24, 84, fc=style.SURFACE, r=6, z=2)
-    for k, cap in enumerate(token["capabilities"][:2]):
-        s.text(x + 26, 385 - 27 * k, cap_text(cap), mono=True)
+    def log_chip(seq: int, tr: Track | None) -> None:
+        entry = entries[seq]
+        lx, _ = log_x[seq]
+        mark = None
+        tone = "neutral"
+        if not entry["tool"].startswith("token:"):
+            mark = "good" if entry["decision"] == "allow" else "bad"
+            tone = mark
+        made = c.chip(lx, LOG_Y, entry["tool"], tone=tone, code=True, size=style.SMALL, mark=mark)
+        if tr is not None:
+            s.grab(tr, made)
+        if seq > 0:
+            px, pw = log_x[seq - 1]
+            link = c.arrow((px + pw + 4, LOG_Y), (lx - 4, LOG_Y), lw=1.5)
+            if tr is not None:
+                s.grab(tr, link)
 
-    # Gateway and its three stages.
-    x, y, w, h = GATE
-    s.box(x, y, w, h)
-    s.text(x + 16, 456, "gateway", size=16, bold=True)
-    for sx, (l1, l2) in zip(STAGE_X, STAGES, strict=True):
-        s.box(sx, STAGE_Y, STAGE_W, STAGE_H, fc=style.SURFACE, z=2)
-        s.text(sx + STAGE_W / 2, 421, l1, size=15, bold=True, ha="center", z=6)
-        s.text(sx + STAGE_W / 2, 398, l2, size=15, bold=True, ha="center", z=6)
-        s.ax.plot([sx + STAGE_W / 2] * 2, [LANE_Y + 16, STAGE_Y], color=style.RULE, lw=2, zorder=1)
+    for seq in sorted(entries):
+        if seq < seqs[0]:
+            log_chip(seq, None)
 
-    # Tools.
-    x, y, w, h = TOOLS
-    s.box(x, y, w, h)
-    s.text(x + 14, 456, "tools", size=16, bold=True)
-    for name, (bx, by, bw, bh) in TOOL_BOX.items():
-        s.box(bx, by, bw, bh, fc=style.SURFACE, z=2)
-        s.text(bx + bw / 2, by + bh - 20, name, mono=True, bold=True, ha="center", z=6)
-
-    # The lane a call travels along.
-    lane_x0 = AGENT[0] + AGENT[2] / 2
-    read_box = TOOL_BOX["read_file"]
-    lane_x1 = read_box[0] + read_box[2] / 2
-    s.ax.plot([lane_x0, lane_x1], [LANE_Y, LANE_Y], color=style.RULE, lw=2, zorder=1)
-
-    # Audit log strip; the entry before call 1 is already there.
-    s.text(20, 228, "audit log", size=16, bold=True)
-    s.text(140, 228, "each entry stores the hash of the one before it (prev)", color=style.MUTED)
-    card(s, CARD_X[0], entries[seqs[0] - 1], None)
-
-    for n, (call, tm) in enumerate(zip(calls, CALL_T, strict=True)):
-        last = n == len(calls) - 1
-        off = DURATION - 0.5 if last else RESET
+    for n, (call, y, tm) in enumerate(zip(calls, LANES, CALL_T, strict=True)):
         allowed = call["status"] == "allowed"
-        entry = entries[call["audit_seq"]]
+        tone = "good" if allowed else "bad"
 
-        # Caption: the call, then its outcome.
-        cap = s.track(f"c{n}", fade(0.0 if n == 0 else tm["start"] - 0.2, off))
-        s.text(20, 532, f"call {n + 1}   {call_text(call)}", size=15, mono=True, tr=cap)
-        if allowed:
-            ran = data["tool_executions"][call["tool"]]
-            outcome = (
-                f"✓ allowed by {call['rule']}: entry {entry['seq']} was written, "
-                f"then {call['tool']} ran ({ran}x in this run)"
-            )
-            color = style.ALLOW
-        else:
-            outcome = f"× denied by {call['stage']} rule {call['rule']}: “{call['reason']}”"
-            color = style.DENY
-        when = (tm["tool"] + 0.3) if allowed else tm["stages"][2] + 0.3
-        s.text(20, 504, outcome, size=15, color=color, tr=s.track(f"o{n}", fade(when, off)))
+        # The call in motion: from the agent's chip to the gateway's edge.
+        pill_w = style.text_width(call["tool"], code=True) + 24
+        to_gate = gate_left - 6 - pill_w - (AGENT[0] + 16)
+        trip = path([(0.0, 0, 0), (tm["start"], 0, 0), (tm["gate"], to_gate, 0)])
+        pill = s.track(f"p{n}", fade(tm["start"], tm["gate"] - 0.1, 0.15), trip)
+        s.grab(pill, c.chip(AGENT[0] + 16, y, call["tool"], tone="highlight", code=True, z=8))
 
-        # The packet: travels the lane, pausing under each stage it reaches.
-        width = len(call["tool"]) * MONO_PX * 15 / 14 + 30
-        stops = [(0.0, 0.0, 0.0), (tm["leave"], 0.0, 0.0)]
-        reached = 3 if allowed else denied_at + 1
-        for k in range(reached):
-            t_at = tm["stages"][k] if allowed or k < denied_at else tm["stages"][k] - 0.6
-            dx = STAGE_CX[k] - lane_x0
-            stops += [(t_at, dx, 0.0), (t_at + tm["pause"], dx, 0.0)]
-        if allowed:
-            stops.append((tm["tool"], read_box[0] - 6 - width / 2 - lane_x0, 0.0))
-            p_off = tm["tool"] - 0.15
-        else:
-            p_off = tm["stages"][denied_at] - 0.35
-        pk = s.track(f"p{n}", fade(tm["start"], p_off, 0.2), path(stops))
-        s.box(
-            lane_x0 - width / 2,
-            LANE_Y - 16,
-            width,
-            32,
-            fc=style.SURFACE,
-            ec=style.ACCENT,
-            lw=2,
-            r=16,
-            tr=pk,
-            z=8,
+        # The verdict: the path up to the gateway, a mark, the reason.
+        seg = s.track(f"a{n}", fade(tm["gate"] - 0.25))
+        s.grab(
+            seg, c.arrow((agent_right + 6, y), (gate_left - 6, y), tone=tone, dashed=not allowed)
         )
-        s.text(lane_x0, LANE_Y, call["tool"], size=15, mono=True, ha="center", tr=pk, z=9)
-        if not allowed:
-            # Stopped where it was refused; it never moves on to the tool.
-            dead = s.track(f"x{n}", fade(p_off + 0.2, off, 0.2))
-            cx = STAGE_CX[denied_at]
-            s.box(
-                cx - width / 2 - 14,
-                LANE_Y - 16,
-                width + 28,
-                32,
-                fc=DENY_TINT,
-                ec=style.DENY,
-                lw=2,
-                r=16,
-                tr=dead,
-                z=8,
-            )
-            s.text(
-                cx,
-                LANE_Y,
-                f"× {call['tool']}",
-                size=15,
-                mono=True,
-                ha="center",
-                color=style.INK,
-                tr=dead,
-                z=9,
-            )
+        verdict = s.track(f"v{n}", fade(tm["verdict"]))
+        s.grab(verdict, c.badge(gate_left + 30, y, tone))
+        words = f"{call['status']} by {call['stage']}"
+        s.grab(
+            verdict,
+            c.text(
+                gate_left + 52,
+                y,
+                words,
+                color=style.GOOD if allowed else style.BAD,
+                weight=style.STRONG,
+            ),
+        )
 
-        # Stage lights and what each stage says.
-        for k in range(3):
-            if k > denied_at and not allowed and k != 2:
-                continue
-            t_on = tm["stages"][k]
-            if not allowed and k == denied_at:
-                t_on -= 0.35  # lights as the packet arrives (it does not pause first)
-            bad = not allowed and k >= denied_at
-            tint, edge, ink = (
-                (DENY_TINT, style.DENY, style.DENY)
-                if bad
-                else (ALLOW_TINT, style.ALLOW, style.ALLOW)
-            )
-            lit = s.track(f"s{n}{k}", fade(t_on, off))
-            cx = STAGE_CX[k]
-            s.box(STAGE_X[k], STAGE_Y, STAGE_W, STAGE_H, fc=tint, ec=edge, lw=2.5, tr=lit, z=3)
-            if k == 0:
-                head, detail = "✓ verified", f"token {token['jti']}"
-            elif k == 1:
-                head = "✓ allow" if allowed else "× deny"
-                detail = call["rule"] or call["reason"]
-            else:
-                head, detail = f"logged: {entry['decision']}", f"entry {entry['seq']}"
-            s.text(cx, 365, head, color=ink, bold=True, ha="center", tr=lit, z=6)
-            s.text(cx, 341, detail, ha="center", tr=lit, z=6)
-
-        # The audit entry slides into the strip, chained to the one before.
-        t_log = tm["stages"][2] + 0.15
-        slide = path([(0.0, 0.0, -14.0), (t_log, 0.0, -14.0), (t_log + 0.35, 0.0, 0.0)], 6)
-        cd = s.track(f"e{n}", fade(t_log, DURATION - 0.5), slide)
-        card(s, CARD_X[n + 1], entry, cd)
-        link = s.track(f"l{n}", fade(t_log + 0.45, DURATION - 0.5))
-        s.arrow((CARD_X[n] + CARD_W, LINE_Y[4]), (CARD_X[n + 1], LINE_Y[3]), tr=link)
-
-        # The tool: ran, or never reached.
-        bx, by, bw, bh = TOOL_BOX[call["tool"]]
-        ran = data["tool_executions"][call["tool"]]
         if allowed:
-            lit = s.track(f"t{n}", fade(tm["tool"] - 0.1, off))
-            s.box(bx, by, bw, bh, fc=ALLOW_TINT, ec=style.ALLOW, lw=2.5, tr=lit, z=3)
-            s.text(
-                bx + bw / 2,
-                by + 20,
-                f"✓ ran {ran}x",
-                color=style.ALLOW,
-                bold=True,
-                ha="center",
-                tr=lit,
-                z=6,
+            # On to the tool, which runs.
+            out = s.track(f"o{n}", fade(tm["verdict"] + 0.3))
+            s.grab(out, c.arrow((gate_right + 6, y), (tools_left - 6, y), tone="good"))
+            leg = gate_right + 6 - (AGENT[0] + 16)
+            trip = path(
+                [
+                    (0.0, leg, 0),
+                    (tm["verdict"] + 0.3, leg, 0),
+                    (tm["tool"], tool_x[call["tool"]] - AGENT[0] - 16, 0),
+                ]
             )
-        else:
-            never = s.track(f"t{n}", fade(tm["stages"][2] + 0.6, off))
-            s.text(
-                bx + bw / 2,
-                by + 20,
-                f"ran {ran}x",
-                color=style.MUTED,
-                bold=True,
-                ha="center",
-                tr=never,
-                z=6,
+            pill = s.track(f"q{n}", fade(tm["verdict"] + 0.3, tm["tool"], 0.15), trip)
+            s.grab(pill, c.chip(AGENT[0] + 16, y, call["tool"], tone="highlight", code=True, z=8))
+            ran = s.track(f"t{n}", fade(tm["tool"]))
+            s.grab(
+                ran,
+                c.chip(
+                    tool_x[call["tool"]], y, call["tool"], tone="good", code=True, mark="good", z=6
+                ),
             )
-    return fig, s
+
+        # Written to the log, chained to the entry before.
+        slide = path([(0.0, 0, 10), (tm["log"], 0, 10), (tm["log"] + 0.35, 0, 0)], 6)
+        log_chip(call["audit_seq"], s.track(f"e{n}", fade(tm["log"]), slide))
+    return s
 
 
 # ---------------------------------------------------------------- output
 
 
-def rgb(fig: Figure) -> Image.Image:
+def rgba(fig: Figure, dpi: float) -> Image.Image:
+    fig.set_dpi(dpi)
     fig.canvas.draw()
-    return Image.fromarray(np.asarray(fig.canvas.buffer_rgba())).convert("RGB")
+    return Image.fromarray(np.asarray(fig.canvas.buffer_rgba())).copy()
+
+
+def on_white(im: Image.Image) -> Image.Image:
+    base = Image.new("RGBA", im.size, style.CARD)
+    base.alpha_composite(im)
+    return base.convert("RGB")
 
 
 def write_gif(frames: list[Image.Image], target: Path) -> tuple[int, int]:
@@ -612,11 +435,12 @@ def write_gif(frames: list[Image.Image], target: Path) -> tuple[int, int]:
         else:
             unique.append(frame)
             durations.append(1000 // FPS)
-    picks = [unique[0], unique[len(unique) // 2], unique[-1]]
-    sheet = Image.new("RGB", (W, H * len(picks)))
+    w, h = unique[0].size
+    picks = unique[:: max(1, len(unique) // 16)]  # sampled across the loop, so every color is in
+    sheet = Image.new("RGB", (w, h * len(picks)))
     for i, im in enumerate(picks):
-        sheet.paste(im, (0, H * i))
-    palette = sheet.quantize(colors=128, method=Image.Quantize.MEDIANCUT, dither=Image.Dither.NONE)
+        sheet.paste(im, (0, h * i))
+    palette = sheet.quantize(colors=256, method=Image.Quantize.MEDIANCUT, dither=Image.Dither.NONE)
     indexed = [im.quantize(palette=palette, dither=Image.Dither.NONE) for im in unique]
     indexed[0].save(
         target,
@@ -633,7 +457,7 @@ def write_gif(frames: list[Image.Image], target: Path) -> tuple[int, int]:
 def write_svg(fig: Figure, scene: Scene, target: Path) -> None:
     scene.pose(None)
     buffer = io.StringIO()
-    fig.savefig(buffer, format="svg", metadata={"Date": None, "Creator": None})
+    fig.savefig(buffer, format="svg", metadata={"Date": None, "Creator": None}, transparent=True)
     svg = buffer.getvalue()
     css = [
         "<style>",
@@ -662,14 +486,18 @@ def main() -> None:
     out.write_text(json.dumps(data, indent=2) + "\n")
     data = json.loads(out.read_text())  # draw only from what was recorded
 
-    fig, scene = draw(data)
+    scene = draw(data)
+    fig = scene.c.fig
     style.ASSETS.mkdir(exist_ok=True)
     frames = []
     for i in range(round(DURATION * FPS)):
         scene.pose(i / FPS)
-        frames.append(rgb(fig))
+        frames.append(on_white(rgba(fig, style.PX_PER_INCH)))
     scene.pose(FINAL)
-    rgb(fig).save(style.ASSETS / "hero_poster.png", optimize=False)
+    rgba(fig, style.PX_PER_INCH * style.SCALE).save(
+        style.ASSETS / "hero_poster.png", optimize=False
+    )
+    fig.set_dpi(style.PX_PER_INCH)
     unique, total = write_gif(frames, style.ASSETS / "hero.gif")
     write_svg(fig, scene, style.ASSETS / "hero.svg")
     plt.close(fig)

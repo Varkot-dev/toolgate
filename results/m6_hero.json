@@ -161,7 +161,7 @@
   },
   "animation": {
     "fps": 20,
-    "loop_seconds": 11.5,
-    "poster_at_seconds": 10.6
+    "loop_seconds": 9.0,
+    "poster_at_seconds": 8.0
   }
 }

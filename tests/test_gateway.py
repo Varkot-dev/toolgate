@@ -158,6 +158,9 @@ class Env:
             self.queue,
             self.tools,
             clock=self.clock,
+            # Explicit, not the default (False): several tests here and in
+            # test_approvals.py check the exception text a tool raised.
+            tool_error_detail=True,
         )
 
     def mint(self, caps: list[dict[str, Any]] | None = None, ttl: float = 600) -> str:

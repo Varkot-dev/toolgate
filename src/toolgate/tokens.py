@@ -60,7 +60,10 @@ import json
 import math
 import re
 import secrets
+import threading
 import time
+import weakref
+from collections import OrderedDict
 from collections.abc import Callable, Iterator, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
@@ -71,6 +74,7 @@ from jwt.exceptions import InvalidAlgorithmError, InvalidSignatureError, PyJWTEr
 
 from toolgate.attenuation import check_attenuation
 from toolgate.capability import Call, Capability, Decision, Grant
+from toolgate.constraints import Constraint
 from toolgate.store import Entry, Store
 
 ALGORITHM = "EdDSA"
@@ -91,6 +95,10 @@ _MAX_PRINCIPAL_CHARS = 128  # `sub` and actor names; they end up in the audit lo
 # _MAX_TOKEN_CHARS once it is base64 encoded.
 _MAX_CONSTRAINTS = 64  # per capability
 _MAX_REQUEST_BYTES = 48 * 1024  # all requested capabilities, serialized
+# The verify cache (see Authority) keeps at most this many tokens, and never
+# one longer than _MAX_CACHED_CHARS, so it holds at most about 4 MB of keys.
+DEFAULT_VERIFY_CACHE_SIZE = 256
+_MAX_CACHED_CHARS = 16 * 1024
 
 
 class TokenError(Exception):
@@ -131,7 +139,17 @@ class RequestTooLarge(TokenError, ValueError):
 
 @dataclass(frozen=True)
 class Verified:
-    """What a token says, after its signature and every claim were checked."""
+    """What a token says, after its signature and every claim were checked.
+
+    A record returned by `Authority.verify` is also a receipt: it can be
+    handed back to that same Authority's `recheck` and `authorize`, which then
+    skip the signature and the claim parsing. They do not trust the fields of
+    the record handed back. The Authority keeps its own private copy of every
+    record it returns and decides from that copy; the record handed back is
+    only used to find it. A record built by hand, copied (for example with
+    dataclasses.replace), returned by another Authority, or with a field
+    swapped by object.__setattr__ is refused with TokenError "malformed".
+    """
 
     jti: str
     sub: str  # the principal; identical at every hop of a chain
@@ -354,6 +372,19 @@ class Authority:
     exchanged from any one token. Callers of `mint` and `revoke` are trusted (the gateway
     authenticates the user before it calls them); `verify`, `exchange` and
     `authorize` take tokens from untrusted agents.
+
+    `verify_cache_size` is how many token strings the verify cache keeps (0
+    turns it off). The cache remembers, per exact token string, only what
+    cannot change: that its signature is good and what its claims say. Every
+    verify still checks expiry and the not-before time against a fresh clock
+    reading, and asks the store about revocation and registration; refusals
+    are never cached. The key also holds issuer, audience and max_depth, so
+    changing one of them cannot let an old entry through.
+
+    Records returned by `verify` are tracked by identity, weakly, so that
+    `recheck` and `authorize` accept only those (see Verified). This trust
+    sits at the same level as the signing key: code that reads the
+    Authority's private attributes can sign tokens anyway.
     """
 
     def __init__(
@@ -368,6 +399,7 @@ class Authority:
         clock: Callable[[], float] = time.time,
         new_id: Callable[[], str] | None = None,
         max_children: int = 64,
+        verify_cache_size: int = DEFAULT_VERIFY_CACHE_SIZE,
     ) -> None:
         if not isinstance(private_key, Ed25519PrivateKey):
             raise ValueError("private_key must be an Ed25519 private key")
@@ -383,6 +415,8 @@ class Authority:
         self.audience = audience
         if type(max_children) is not int or max_children < 0:
             raise ValueError("max_children must be a non-negative integer")
+        if type(verify_cache_size) is not int or verify_cache_size < 0:
+            raise ValueError("verify_cache_size must be a non-negative integer")
         self.store = store
         self.max_depth = max_depth
         self.max_children = max_children
@@ -390,6 +424,13 @@ class Authority:
         self._clock = clock
         self._new_id = new_id if new_id is not None else (lambda: secrets.token_urlsafe(16))
         self._jws = PyJWS()
+        self.verify_cache_size = verify_cache_size
+        # (issuer, audience, max_depth, token) -> this Authority's own record.
+        self._cache: OrderedDict[tuple[str, str, int, str], Verified] = OrderedDict()
+        # id(record handed out) -> (weak reference to it, private copy, its grant)
+        self._receipts: dict[int, tuple[weakref.ref[Verified], Verified, Grant]] = {}
+        self._next_sweep = 1024
+        self._lock = threading.Lock()
 
     @property
     def public_key(self) -> Ed25519PublicKey:
@@ -532,8 +573,33 @@ class Authority:
         """
         return self._verify(token, self.audience if audience is None else audience, self._now())
 
-    def authorize(self, token: str, call: Call) -> Authorization:
+    def recheck(self, verified: Verified) -> None:
+        """Check again what can have changed since `verify` returned `verified`.
+
+        `verified` must be a record this Authority's `verify` returned (see
+        Verified); anything else is TokenError "malformed". The signature,
+        the claims and the structure of a token string cannot change, so they
+        are not checked again. What can change is checked, with the clock
+        read afresh: expiry ("expired"), a clock now earlier than the token's
+        issue time ("not_yet_valid"), and revocation of the token or any
+        ancestor ("revoked"), in one store call. A clock or store failure is
+        TokenError "unavailable". Returns None if the token still holds.
+
+        Not checked again: whether the store still has the token registered.
+        It can only lose it to `prune`, which forgets tokens that have
+        expired, so with a clock that does not run backwards the expiry check
+        refuses such a token first; and `authorize` charges the budget, which
+        refuses a token the store does not know.
+        """
+        self._recheck(self._own(verified), self._now())
+
+    def authorize(self, token: str | Verified, call: Call) -> Authorization:
         """Decide one tool call made with `token`, and charge its budget.
+
+        `token` is a token string, which is verified completely, or a record
+        `verify` returned, which is rechecked (see `recheck`) and decided from
+        this Authority's own copy of it. The Authorization carries the record
+        passed in, or for a string the fresh one.
 
         Raises TokenError if the token does not verify, or with code
         "unavailable" if the store or the clock fails; never a raw store or
@@ -544,10 +610,15 @@ class Authority:
         itself fails the budget stays spent, which fails closed).
         """
         now = self._now()
-        verified = self._verify(token, self.audience, now)
+        if type(token) is Verified:
+            shown = token
+            verified = self._own(token)
+            self._recheck(verified, now)
+        else:
+            shown = verified = self._verify(token, self.audience, now)
         decision = verified.grant.decide(call, now)
         if not decision.allowed:
-            return Authorization(decision, verified)
+            return Authorization(decision, shown)
         # Capabilities are tried in order. The first that permits the call and
         # still has budget on its whole path pays for it. The path comes from
         # the signed `der` claim: an ancestor's decide() is never re-run here,
@@ -573,13 +644,13 @@ class Authority:
                     raise
                 if late:
                     self._refund_quietly(path)
-                    return Authorization(Decision(False, "expired during authorization"), verified)
-                return Authorization(Decision(True, "ok", index), verified)
+                    return Authorization(Decision(False, "expired during authorization"), shown)
+                return Authorization(Decision(True, "ok", index), shown)
             if charged.reason == "revoked":  # revoked between verify and charge
                 raise TokenError("revoked", "the token or an ancestor was revoked")
             if charged.reason != "exhausted":
                 refusal = "budget ledger has no record of this delegation path"
-        return Authorization(Decision(False, refusal), verified)
+        return Authorization(Decision(False, refusal), shown)
 
     def refund(self, authorization: Authorization) -> bool:
         """Give back the budget `authorize` charged, for a call that never ran.
@@ -595,6 +666,12 @@ class Authority:
         decision, verified = authorization.decision, authorization.verified
         if not decision.allowed or type(decision.capability) is not int:
             return False
+        # For a record verify returned, the path comes from the private copy,
+        # whatever was done to the record since.
+        with self._lock:
+            receipt = self._receipts.get(id(verified))
+        if receipt is not None and receipt[0]() is verified:
+            verified = receipt[1]
         if not 0 <= decision.capability < len(verified.der):
             return False
         return bool(self._ask_store("refund", verified.budget_path(decision.capability)))
@@ -655,20 +732,154 @@ class Authority:
         return min(ttl, self.max_ttl)
 
     def _verify(self, token: Any, audience: Any, now: int | float) -> Verified:
-        """Fail closed: whatever goes wrong in here ends as a TokenError."""
-        try:
-            payload = self._check_signature(token)
-            verified = self._read_claims(payload, audience, now)
-        except TokenError:
-            raise
-        except Exception as exc:
-            raise TokenError("malformed", type(exc).__name__) from None
+        """Fail closed: whatever goes wrong in here ends as a TokenError.
+
+        Returns a fresh record for the caller, registered as a receipt.
+        """
+        own = self._cached(token, audience)
+        if own is not None:
+            # Signature and claims were checked when this string was first
+            # seen; only the time can have moved since.
+            try:
+                self._check_times(own, now)
+            except TokenError:
+                self._forget(token, audience)
+                raise
+        else:
+            try:
+                payload = self._check_signature(token)
+                own = self._read_claims(payload, audience, now)
+            except TokenError:
+                raise
+            except Exception as exc:
+                raise TokenError("malformed", type(exc).__name__) from None
         # The token is well formed. A failure from here on is the store's.
-        if self._ask_store("any_revoked", (verified.jti, *verified.chain)):
+        if self._ask_store("any_revoked", (own.jti, *own.chain)):
             raise TokenError("revoked", "the token or an ancestor was revoked")
-        if not self._ask_store("is_registered", verified.jti):
+        if not self._ask_store("is_registered", own.jti):
             raise TokenError("unknown_token", "the store has no record of this token")
-        return verified
+        self._remember(token, audience, own)
+        return self._hand_out(own)
+
+    # -- receipts and the verify cache ---------------------------------------
+
+    def _hand_out(self, own: Verified) -> Verified:
+        """A record for the caller with its own Grant objects, tracked as a receipt.
+
+        `own` stays private. Its plain fields (str, int, float and tuples of
+        them) cannot be changed by anybody and are shared; the Grant,
+        Capability and Constraint objects are dataclasses that
+        object.__setattr__ can bend, so the caller gets copies of those.
+        """
+        grant = Grant(
+            tuple(
+                Capability(
+                    c.tool,
+                    tuple(Constraint(k.arg, k.op, k.value) for k in c.constraints),
+                    c.max_calls,
+                )
+                for c in own.grant.capabilities
+            ),
+            own.grant.expires_at,
+        )
+        record = Verified(
+            jti=own.jti,
+            sub=own.sub,
+            actors=own.actors,
+            grant=grant,
+            chain=own.chain,
+            der=own.der,
+            exp=own.exp,
+            iat=own.iat,
+        )
+        with self._lock:
+            # Entries whose record is gone are dropped in sweeps spaced so
+            # that the cost per record stays constant. (No weakref callback:
+            # it could run inside this lock, from the garbage collector.)
+            if len(self._receipts) >= self._next_sweep:
+                self._receipts = {k: v for k, v in self._receipts.items() if v[0]() is not None}
+                self._next_sweep = 2 * len(self._receipts) + 1024
+            self._receipts[id(record)] = (weakref.ref(record), own, grant)
+        return record
+
+    def _own(self, verified: Any) -> Verified:
+        """This Authority's private copy of a record its `verify` handed out.
+
+        Refuses (TokenError "malformed") anything else: an object of another
+        type, a record built or copied by hand (it was never handed out, so
+        its identity is unknown), and a handed-out record one of whose fields
+        was replaced (each must still be the very object it was given).
+        """
+        if type(verified) is not Verified:
+            raise _bad("not a verified token record")
+        with self._lock:
+            receipt = self._receipts.get(id(verified))
+        if receipt is None or receipt[0]() is not verified:
+            raise _bad("not a record this authority verified")
+        own, grant = receipt[1], receipt[2]
+        if not (
+            verified.grant is grant
+            and verified.jti is own.jti
+            and verified.sub is own.sub
+            and verified.actors is own.actors
+            and verified.chain is own.chain
+            and verified.der is own.der
+            and verified.exp is own.exp
+            and verified.iat is own.iat
+        ):
+            raise _bad("the verified record was altered")
+        return own
+
+    def _check_times(self, own: Verified, now: int | float) -> None:
+        if not now < own.exp:
+            raise TokenError("expired")
+        if own.iat > now:
+            raise TokenError("not_yet_valid")
+
+    def _recheck(self, own: Verified, now: int | float) -> None:
+        """Expiry, not-before and revocation of a private record: one store call."""
+        self._check_times(own, now)
+        if self._ask_store("any_revoked", (own.jti, *own.chain)):
+            raise TokenError("revoked", "the token or an ancestor was revoked")
+
+    def _cache_key(self, token: Any, audience: Any) -> tuple[str, str, int, str] | None:
+        if (
+            self.verify_cache_size <= 0
+            or type(token) is not str
+            or len(token) > _MAX_CACHED_CHARS
+            or type(audience) is not str
+            or type(self.issuer) is not str
+            or type(self.max_depth) is not int
+        ):
+            return None
+        return (self.issuer, audience, self.max_depth, token)
+
+    def _cached(self, token: Any, audience: Any) -> Verified | None:
+        key = self._cache_key(token, audience)
+        if key is None:
+            return None
+        with self._lock:
+            own = self._cache.get(key)
+            if own is not None:
+                self._cache.move_to_end(key)
+            return own
+
+    def _forget(self, token: Any, audience: Any) -> None:
+        key = self._cache_key(token, audience)
+        if key is not None:
+            with self._lock:
+                self._cache.pop(key, None)
+
+    def _remember(self, token: Any, audience: Any, own: Verified) -> None:
+        """Keep a token that passed every check, least recently used out first."""
+        key = self._cache_key(token, audience)
+        if key is None:
+            return
+        with self._lock:
+            self._cache[key] = own
+            self._cache.move_to_end(key)
+            while len(self._cache) > self.verify_cache_size:
+                self._cache.popitem(last=False)
 
     def _check_signature(self, token: Any) -> bytes:
         """Return the payload bytes of a correctly signed token."""

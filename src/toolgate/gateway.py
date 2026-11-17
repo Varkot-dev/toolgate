@@ -10,13 +10,18 @@ steps, in this order, each failing closed:
   c. Ask operator policy. deny ends the call. approve parks it in the
      approval queue and returns "pending"; nothing runs. allow continues.
   d. Check that the decision can be recorded (`audit.loggable`), take one of
-     the root token's in-flight slots, then `authority.authorize`: verify
-     again and charge the budget, atomically with the revocation check. Only
-     calls that are about to run are charged.
-  e. Write the audit entry, verify the token ONCE MORE (the entry is an fsync,
-     long enough for a revocation or the expiry to land), THEN run the tool.
-     If the entry cannot be written the tool does not run: an unaudited
-     action is worse than a refused one.
+     the root token's in-flight slots, then `authority.authorize` with the
+     record from b: recheck the token and charge the budget, atomically with
+     the revocation check. Only calls that are about to run are charged.
+  e. Write the audit entry, recheck the token ONCE MORE (the entry is an
+     fsync, long enough for a revocation or the expiry to land), THEN run
+     the tool. If the entry cannot be written the tool does not run: an
+     unaudited action is worse than a refused one.
+
+The signature is checked once per decision, in b. The checks in d and e are
+`Authority.recheck`: what can change between steps (expiry against a fresh
+clock reading, revocation of the token or any ancestor, a store or clock
+failure) is checked again; what cannot change (signature, claims) is not.
 
 Budget. A call that was charged in d and then did not reach the tool (the
 entry could not be written, the last verification failed, the tool could not
@@ -331,9 +336,10 @@ def _grant_log(decision: Decision) -> str:
 class Gateway:
     """Owns the whole pipeline. Thread safe; tools may run concurrently.
 
-    Optional limits, all keyword-only. The first three default to "off" so
+    Optional limits, all keyword-only. The first two default to "off" so
     that code built on Gateway keeps its behaviour; `toolgate.server.build`
-    turns them on with the defaults in the example config.
+    turns them on with the defaults in the example config. The third,
+    tool_error_detail, defaults to the safe setting (text withheld).
 
       max_in_flight_per_root  most tool executions running at once under one
                               ROOT token (all its exchanged children count
@@ -349,9 +355,11 @@ class Gateway:
                               background, it keeps its in-flight slot until it
                               does, and its budget is not refunded. None: the
                               tool runs on the calling thread with no timeout.
-      tool_error_detail       True: a tool's exception text is returned in the
-                              outcome (cut to max_error_chars). False: only
-                              the exception type name and a fixed message.
+      tool_error_detail       False (the default): only the exception type
+                              name and a fixed message reach the caller,
+                              since a real tool's exception text can carry
+                              paths, hosts or connection strings. True: the
+                              text is returned (cut to max_error_chars).
       unverified_audit_rate,  token bucket for audit entries about tokens that
       unverified_audit_burst  did not verify (see the module docstring).
                               rate None: no limit.
@@ -370,7 +378,7 @@ class Gateway:
         max_error_chars: int = MAX_ERROR_CHARS,
         max_in_flight_per_root: int | None = None,
         tool_timeout: int | float | None = None,
-        tool_error_detail: bool = True,
+        tool_error_detail: bool = False,
         unverified_audit_rate: int | float | None = DEFAULT_UNVERIFIED_AUDIT_RATE,
         unverified_audit_burst: int = DEFAULT_UNVERIFIED_AUDIT_BURST,
         canonicalizer: Callable[[str, Any], tuple[str, Any]] | None = None,
@@ -846,9 +854,10 @@ class Gateway:
             )
         handed_over = False  # True once _execute owns the slot
         try:
-            # Verify again and charge, in one step with the revocation check.
+            # Recheck and charge, in one step with the revocation check. The
+            # record from b is passed, so the signature is not checked again.
             try:
-                authorization = self.authority.authorize(token, call)
+                authorization = self.authority.authorize(verified, call)
             except TokenError as exc:
                 if exc.code == "unavailable":
                     return deny("unavailable", "token state is unavailable")
@@ -881,7 +890,7 @@ class Gateway:
             # land in that time, so the token is checked one last time.
             late = f"; allowed at seq {entry.seq} but not run"
             try:
-                self.authority.verify(token)
+                self.authority.recheck(verified)
             except TokenError as exc:
                 self._refund(authorization)
                 if exc.code == "unavailable":

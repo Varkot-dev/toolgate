@@ -29,26 +29,57 @@ def test_quick_benchmark_runs_and_writes_every_section(tmp_path: Path) -> None:
     data = json.loads(out.read_text())
     assert data["mode"].startswith("quick")
 
-    main = data["pipeline"]["memory_fsync_on"]
-    for field in PERCENTILES:
-        assert main["handle_call"][field] > 0
-    assert len(main["added_samples_us"]) == main["added"]["n"]
+    assert "1.19 ms" in data["warm_vs_cold"]
+    pipeline = data["pipeline"]
+    for mode in ("warm", "cold"):
+        main = pipeline[f"memory_fsync_on_{mode}"]
+        assert main["token"] == mode
+        for field in PERCENTILES:
+            assert main["handle_call"][field] > 0
+            assert field in main["added"]
+        assert len(main["added_samples_us"]) == main["added"]["n"]
+        assert pipeline[f"memory_fsync_off_{mode}"]["token"] == mode
+        for fsync in ("on", "off"):
+            checked = pipeline[f"memory_fsync_{fsync}_{mode}"]["signature_check_count"]
+            assert checked["signature_checks"] == (checked["calls"] if mode == "cold" else 0)
     for name in (
-        "memory_fsync_off",
-        "sqlite_fsync_on",
-        "sqlite_fsync_off",
-        "memory_fsync_on_grant_denied",
-        "memory_fsync_on_policy_denied",
+        "memory_fsync_off_warm",
+        "memory_fsync_off_cold",
+        "sqlite_fsync_on_warm",
+        "sqlite_fsync_off_warm",
+        "memory_fsync_on_warm_grant_denied",
+        "memory_fsync_on_warm_policy_denied",
+        "memory_fsync_on_warm_server_options",
     ):
-        assert data["pipeline"][name]["handle_call"]["n"] > 0
+        assert pipeline[name]["handle_call"]["n"] > 0
 
-    for key in ("token_verify", "policy_decide", "budget_charge", "audit_append_fsync"):
-        assert data["stages"][key]["p50_us"] > 0
+    stages = data["stages"]
+    for key in (
+        "call_build",
+        "verify_cold",
+        "verify_warm",
+        "recheck",
+        "authorize",
+        "budget_charge",
+        "audit_append_fsync",
+        "audit_append_no_fsync",
+        "policy_decide",
+        "grant_decide",
+        "tool_run",
+    ):
+        assert stages[key]["p50_us"] > 0
+    assert "re_verify" not in stages and "token_verify" not in stages
     assert [row["depth"] for row in data["depth"]] == [0, 1, 2, 3, 4]
     assert [row["ancestors_checked"] for row in data["depth"]] == [0, 1, 2, 3, 4]
     assert [row["rules"] for row in data["policy_size"]] == [10, 100, 1000]
     assert all(row["decision"]["effect"] == "allow" for row in data["policy_size"])
-    assert [row["threads"] for row in data["throughput"]["in_process"]] == [1, 4, 16] * 2
+    for row in data["depth"]:
+        assert row["signature_check_count_cold"]["signature_checks"] == row["cold_pool_size"]
+        for label in ("added_warm_fsync_on", "added_cold_fsync_on", "verify_warm", "verify_cold"):
+            assert row[label]["n"] > 0
+    in_process = data["throughput"]["in_process"]
+    assert [row["threads"] for row in in_process] == [1, 4, 16] * 4
+    assert [row["token"] for row in in_process] == ["warm"] * 6 + ["cold"] * 6
     assert all(row["not_allowed"] == 0 for row in data["throughput"]["in_process"])
 
     http = data["throughput"]["http"]

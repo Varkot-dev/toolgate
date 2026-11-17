@@ -278,9 +278,7 @@ class Rig:
             return [
                 self.authority.mint("user:bench", grant, "agent:bench", 900) for _ in range(count)
             ]
-        return [
-            self.authority.exchange(parent, CAPS, f"agent:cold{i}", 900) for i in range(count)
-        ]
+        return [self.authority.exchange(parent, CAPS, f"agent:cold{i}", 900) for i in range(count)]
 
     def close(self) -> None:
         self.audit.close()
@@ -401,8 +399,10 @@ def bench_pipeline(
                 )
                 checked = None
                 if tool == ALLOWED[0] and args == ALLOWED[1] and not options:
-                    more = [rig.token] * check_calls if mode == "warm" else rig.fresh_tokens(
-                        check_calls
+                    more = (
+                        [rig.token] * check_calls
+                        if mode == "warm"
+                        else rig.fresh_tokens(check_calls)
                     )
                     checked = mode_check(rig, more, mode == "cold")
         finally:
@@ -439,10 +439,11 @@ def bench_stages(scratch: Path, c: dict[str, int]) -> dict[str, Any]:
     side_log = AuditLog(scratch / "stages" / "side-audit.jsonl")
     tool, args = ALLOWED
     call = Call(tool, args)
-    verified = rig.authority.verify(rig.token)
+    n, w = c["stage"], c["warmup"]
+    verified: Verified = rig.authority.verify(rig.token)  # a receipt for recheck/authorize
     now = time.time()
     path = verified.budget_path(0)
-    n, w = c["stage"], c["warmup"]
+    cold_next = iter(rig.fresh_tokens(w + n)).__next__
 
     def append() -> Any:
         return side_log.append(
@@ -458,55 +459,38 @@ def bench_stages(scratch: Path, c: dict[str, int]) -> dict[str, Any]:
         value = noop(**plain_args(call.args))
         return json.loads(json.dumps(value, allow_nan=False, separators=(",", ":")))
 
-    # The signature check on its own, to show how much of verify it is.
+    # The signature check on its own, to show how much of a cold verify it is.
     head, payload, signature = rig.token.split(".")
     signed = f"{head}.{payload}".encode()
     raw_signature = base64.urlsafe_b64decode(signature + "=" * (-len(signature) % 4))
     public_key = rig.authority.public_key
 
+    # (key, label, fn, audit fsync on). In handle_call order: build the call;
+    # b. verify once (cold or warm) and grant decide; c. policy decide;
+    # d. authorize = recheck + grant decide + budget charge; e. audit append,
+    # recheck, run the tool.
     stages: list[tuple[str, str, Callable[[], Any], bool]] = [
-        (
-            "call_build",
-            "Call(tool, args) + hash_args",
-            lambda: hash_args(Call(tool, args).args),
-            True,
-        ),
-        (
-            "token_verify",
-            "Authority.verify (step b)",
-            lambda: rig.authority.verify(rig.token),
-            True,
-        ),
-        ("grant_decide", "Grant.decide", lambda: verified.grant.decide(call, now), True),
-        ("policy_decide", "Policy.decide (example policy)", lambda: rig.policy.decide(call), True),
-        (
-            "budget_charge",
-            "Store.charge on the delegation path",
-            lambda: rig.store.charge(path),
-            True,
-        ),
-        (
-            "authorize",
-            "Authority.authorize (verify + decide + charge, step d)",
-            lambda: rig.authority.authorize(rig.token, call),
-            True,
-        ),
-        ("audit_append_fsync", "AuditLog.append, fsync on", append, True),
+        ("call_build", "Call(tool, args) + hash_args", lambda: hash_args(Call(tool, args).args),
+         True),
+        ("verify_cold", "Authority.verify, new token: signature checked, cache miss (step b)",
+         lambda: rig.authority.verify(cold_next()), True),
+        ("ed25519_signature_only", "Ed25519 signature check alone (part of a cold verify)",
+         lambda: public_key.verify(raw_signature, signed), True),
+        ("verify_warm", "Authority.verify, same token again: cache hit, times + revocation + "
+         "registration (step b)", lambda: rig.authority.verify(rig.token), True),
+        ("grant_decide", "Grant.decide (step b)", lambda: verified.grant.decide(call, now), True),
+        ("policy_decide", "Policy.decide, example policy (step c)",
+         lambda: rig.policy.decide(call), True),
+        ("authorize", "Authority.authorize(receipt): recheck + grant decide + charge (step d)",
+         lambda: rig.authority.authorize(verified, call), True),
+        ("budget_charge", "Store.charge on the delegation path (part of authorize)",
+         lambda: rig.store.charge(path), True),
+        ("audit_append_fsync", "AuditLog.append, fsync on (step e)", append, True),
         ("audit_append_no_fsync", "AuditLog.append, os.fsync a no-op", append, False),
-        (
-            "re_verify",
-            "Authority.verify again (step e)",
-            lambda: rig.authority.verify(rig.token),
-            True,
-        ),
-        ("tool_dispatch", "no-op tool + output JSON check", run_tool, True),
-        (
-            "ed25519_signature_only",
-            "Ed25519 signature check alone (part of every verify)",
-            lambda: public_key.verify(raw_signature, signed),
-            True,
-        ),
-    ]
+        ("recheck", "Authority.recheck(receipt): expiry + revocation only (step e)",
+         lambda: rig.authority.recheck(verified), True),
+        ("tool_run", "no-op tool + output JSON check", run_tool, True),
+    ]  # fmt: skip
     out: dict[str, Any] = {}
     try:
         for key, label, fn, fsync in stages:
@@ -525,43 +509,75 @@ def bench_stages(scratch: Path, c: dict[str, int]) -> dict[str, Any]:
 
 
 def bench_depth(scratch: Path, c: dict[str, int], direct_p50: float) -> list[dict[str, Any]]:
+    """Warm: the rig's token, reused. Cold: a pool of COLD_POOL distinct tokens
+    at the same depth (children of one parent, so that parent may have more
+    children than the default 64), cycled; the pool is larger than the verify
+    cache, so every call misses."""
     tool, args = ALLOWED
+    n, w = c["depth"], c["warmup"]
     rows = []
     for depth in range(0, 5):
-        rig = Rig(scratch / f"depth-{depth}", depth=depth)
+        rig = Rig(scratch / f"depth-{depth}", depth=depth, max_children=2 * COLD_POOL)
         try:
             verified = rig.authority.verify(rig.token)
             path = verified.budget_path(0)
+            if depth == 0:
+                pool = rig.fresh_tokens(COLD_POOL)
+            else:
+                parent = rig.new_token(depth - 1)
+                pool = rig.fresh_tokens(COLD_POOL, parent=parent)
             row: dict[str, Any] = {
                 "depth": depth,
                 "ancestors_checked": len(verified.chain),
                 "budget_entries_charged": len(path),
                 "token_chars": len(rig.token),
+                "cold_pool_size": len(pool),
             }
-            for fsync in (True, False):
-                with audit_fsync(fsync):
-                    samples = sample(
-                        lambda rig=rig: rig.gateway.handle_call(rig.token, tool, args),
-                        c["depth"],
-                        c["warmup"],
-                        is_allowed,
-                    )
-                row["added_fsync_on" if fsync else "added_fsync_off"] = summarize(
-                    [s - direct_p50 for s in samples]
+            used = 0
+            for mode in ("warm", "cold"):
+                for fsync in (True, False):
+                    if mode == "warm":
+                        stream = [rig.token] * (w + n)
+                    else:
+                        stream = cycled(pool, w + n, used)
+                        used += w + n
+                    next_token = iter(stream).__next__
+                    with audit_fsync(fsync):
+                        samples = sample(
+                            lambda rig=rig, next_token=next_token: rig.gateway.handle_call(
+                                next_token(), tool, args
+                            ),
+                            n,
+                            w,
+                            is_allowed,
+                        )
+                    label = f"added_{mode}_fsync_{'on' if fsync else 'off'}"
+                    row[label] = summarize([x - direct_p50 for x in samples])
+            # The cold stream continues where it stopped, so the check sees
+            # exactly what the timed calls saw.
+            with audit_fsync(False):
+                row["signature_check_count_cold"] = mode_check(
+                    rig, cycled(pool, len(pool), used), True
                 )
-            row["verify"] = summarize(
-                sample(lambda rig=rig: rig.authority.verify(rig.token), c["depth"], c["warmup"])
+            used += len(pool)
+            row["verify_warm"] = summarize(
+                sample(lambda rig=rig: rig.authority.verify(rig.token), n, w)
+            )
+            cold_next = iter(cycled(pool, w + n, used)).__next__
+            row["verify_cold"] = summarize(
+                sample(lambda rig=rig, f=cold_next: rig.authority.verify(f()), n, w)
             )
             row["charge"] = summarize(
-                sample(lambda rig=rig, path=path: rig.store.charge(path), c["depth"], c["warmup"])
+                sample(lambda rig=rig, path=path: rig.store.charge(path), n, w)
             )
         finally:
             rig.close()
         rows.append(row)
         print(
-            f"  depth {depth}: added p50 fsync on {row['added_fsync_on']['p50_us']:8.1f} us, "
-            f"off {row['added_fsync_off']['p50_us']:8.1f} us, "
-            f"verify p50 {row['verify']['p50_us']:.1f} us"
+            f"  depth {depth}: added p50 warm {row['added_warm_fsync_on']['p50_us']:8.1f} us, "
+            f"cold {row['added_cold_fsync_on']['p50_us']:8.1f} us (fsync on); "
+            f"verify p50 warm {row['verify_warm']['p50_us']:.1f} us, "
+            f"cold {row['verify_cold']['p50_us']:.1f} us"
         )
     return rows
 
@@ -709,17 +725,19 @@ def run_workers(
 
 
 def _in_process_worker(
-    rig: Rig, tokens: list[str], counts: list[int], bad: list[int]
+    rig: Rig, pools: list[list[str]], counts: list[int], bad: list[int]
 ) -> Callable[[int], Callable[[float], None]]:
+    """Thread i cycles through pools[i]: one token (warm) or COLD_POOL distinct ones."""
     tool, args = ALLOWED
 
     def prepare(i: int) -> Callable[[float], None]:
-        handle, token = rig.gateway.handle_call, tokens[i]
+        handle, pool = rig.gateway.handle_call, pools[i]
+        size = len(pool)
 
         def loop(deadline: float) -> None:
             n = b = 0
             while time.perf_counter() < deadline:
-                if handle(token, tool, args).status != "allowed":
+                if handle(pool[n % size], tool, args).status != "allowed":
                     b += 1
                 n += 1
             counts[i], bad[i] = n, b
@@ -731,31 +749,37 @@ def _in_process_worker(
 
 def bench_threads(scratch: Path, duration: float) -> list[dict[str, Any]]:
     rows = []
-    for fsync in (True, False):
-        for threads in (1, 4, 16):
-            rig = Rig(scratch / f"threads-{threads}-{fsync}")
-            tokens = [rig.new_token() for _ in range(threads)]  # one agent per thread
-            counts, bad = [0] * threads, [0] * threads
-            try:
-                with audit_fsync(fsync):
-                    elapsed = run_workers(
-                        threads, duration, _in_process_worker(rig, tokens, counts, bad)
-                    )
-            finally:
-                rig.close()
-            row = {
-                "threads": threads,
-                "audit_fsync": "on" if fsync else "off (os.fsync replaced by a no-op)",
-                "duration_s": round(elapsed, 3),
-                "calls": sum(counts),
-                "not_allowed": sum(bad),
-                "calls_per_second": round(sum(counts) / elapsed, 1),
-            }
-            rows.append(row)
-            print(
-                f"  in-process {threads:2} threads, fsync {'on ' if fsync else 'off'}: "
-                f"{row['calls_per_second']:9.1f} calls/s"
-            )
+    for mode in ("warm", "cold"):
+        for fsync in (True, False):
+            for threads in (1, 4, 16):
+                rig = Rig(scratch / f"threads-{mode}-{threads}-{fsync}")
+                if mode == "warm":  # one agent per thread, one token each
+                    pools = [[rig.new_token()] for _ in range(threads)]
+                else:  # each thread its own pool, larger than the verify cache
+                    pools = [rig.fresh_tokens(COLD_POOL) for _ in range(threads)]
+                counts, bad = [0] * threads, [0] * threads
+                try:
+                    with audit_fsync(fsync):
+                        elapsed = run_workers(
+                            threads, duration, _in_process_worker(rig, pools, counts, bad)
+                        )
+                finally:
+                    rig.close()
+                row = {
+                    "token": mode,
+                    "threads": threads,
+                    "audit_fsync": "on" if fsync else "off (os.fsync replaced by a no-op)",
+                    "tokens_per_thread": len(pools[0]),
+                    "duration_s": round(elapsed, 3),
+                    "calls": sum(counts),
+                    "not_allowed": sum(bad),
+                    "calls_per_second": round(sum(counts) / elapsed, 1),
+                }
+                rows.append(row)
+                print(
+                    f"  in-process {mode} {threads:2} threads, fsync {'on ' if fsync else 'off'}: "
+                    f"{row['calls_per_second']:9.1f} calls/s"
+                )
     return rows
 
 
@@ -918,6 +942,9 @@ def bench_http(scratch: Path, duration: float) -> dict[str, Any]:
             "client": f"httpx {version('httpx')}, one httpx.Client (one connection) per "
             "client thread, in a separate process from the server",
             "one_root_token_per_client": True,
+            "token": "warm: each client reuses its one token, so the server's verify cache "
+            "hits after the first call. Cold is not measured over HTTP (it would need "
+            "thousands of tokens minted through the admin endpoint first).",
             "floor": floor,
             "runs": rows,
         }
@@ -1018,6 +1045,7 @@ async def _mcp(scratch: Path, n: int, warmup: int) -> dict[str, Any]:
         "mcp_sdk": version("mcp"),
         "call": {"tool": "read_file", "arguments": {"path": "reports/q3.txt"}},
         "audit_fsync": "on",
+        "token": "warm: one token for every call",
         "direct_to_upstream": direct_stats,
         "through_proxy": proxied_stats,
         "added_p50_us": round(proxied_stats["p50_us"] - direct_stats["p50_us"], 2),
@@ -1100,10 +1128,26 @@ FRAMING = (
     "tenants, with no CPU pinning or frequency control. Numbers are indicative and vary "
     "run to run. Audit fsync cost depends entirely on the disk under the temp dir. "
     "Nothing here is compared with any other system. 'added' latency is handle_call time "
-    "minus the median time of calling the no-op tool directly. Stage timings are the "
+    "minus the median time of calling the no-op tool directly. 'warm' reuses one token "
+    "(verify-cache hits), 'cold' uses a token the cache has not seen on every call "
+    "(signature checked every call); see warm_vs_cold. Stage timings are the "
     "public components timed one by one with the same inputs; they need not sum to the "
     "pipeline. In-process threads share one GIL, so thread counts above 1 measure "
     "contention, not parallel speed-up."
+)
+
+
+WARM_VS_COLD = (
+    "Authority.verify keeps a bounded LRU cache (verify_cache_size entries) of "
+    "signature-checked parses, keyed by the exact token string. 'warm' reuses one token, so "
+    "after the first call verify is a cache hit and only the time, revocation and "
+    "registration checks run: the common case for an agent that makes many calls with one "
+    "token. 'cold' is the first call with a token: the Ed25519 signature is checked and the "
+    "claims are parsed. handle_call verifies once (step b) and rechecks the record later "
+    "(steps d and e) in both modes. The earlier published figure (added p50 1.19 ms, main "
+    "configuration) was measured before the verify-once change and before the cache "
+    "existed, when handle_call verified the token string three times; it is not "
+    "comparable with either number here."
 )
 
 
@@ -1129,7 +1173,7 @@ def main(argv: list[str] | None = None) -> int:
         direct = direct_baseline(c)
         print(f"  p50 {direct['p50_us']} us")
         print("pipeline")
-        pipeline = bench_pipeline(scratch, c, direct["p50_us"])
+        pipeline = bench_pipeline(scratch, c, direct["p50_us"], MODE_CHECK_CALLS[pick])
         print("stages")
         stages = bench_stages(scratch, c)
         print("delegation depth")
@@ -1155,6 +1199,7 @@ def main(argv: list[str] | None = None) -> int:
         "created_utc": datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
         "runtime_seconds": round(runtime, 1),
         "seed": SEED,
+        "warm_vs_cold": WARM_VS_COLD,
         "machine": host,
         "method": {
             "timer": "time.perf_counter_ns around each call",
@@ -1162,9 +1207,19 @@ def main(argv: list[str] | None = None) -> int:
             "percentiles": "nearest rank",
             "counts": c,
             "durations_s": durations,
+            "verify_cache_size": DEFAULT_VERIFY_CACHE_SIZE,
+            "cold_pool_size": COLD_POOL,
+            "cold_tokens": "minted with Authority.mint / Authority.exchange before the timed "
+            "loop; neither puts a token in the verify cache. The pipeline section uses a new "
+            "token for every call; depth and throughput cycle a pool of cold_pool_size "
+            "distinct tokens per stream, larger than the cache, so every call still misses. "
+            "signature_check_count fields are an untimed pass that counts signature checks "
+            "to confirm each mode. Depth pools are children of one parent, so depth rigs "
+            "allow that parent 2 * cold_pool_size children (default 64).",
             "tool": "no-op function noop(path) returning None",
             "policy": "config/policy.example.yaml unless stated",
             "policy_sha256": hashlib.sha256(POLICY_FILE.read_bytes()).hexdigest(),
+            "policy_rules": len(Policy.from_file(POLICY_FILE).rules),
             "capabilities": CAPS,
             "allowed_call": {"tool": ALLOWED[0], "args": ALLOWED[1]},
             "fsync_off": "os.fsync replaced by a no-op for the audit log only; SQLite keeps "

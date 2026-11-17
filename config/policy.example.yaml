@@ -1,0 +1,111 @@
+# Example operator policy for an assistant with email, calendar and file tools.
+#
+# How a call is decided (full semantics: src/toolgate/policy.py):
+#   1. Every rule that matches the call is collected.
+#   2. deny beats approve, approve beats allow.
+#   3. If no rule matches, the call is denied.
+# Rule order never changes the outcome, only which rule id is reported.
+#
+# Missing or oddly typed arguments are read pessimistically:
+#   - an allow rule matches only if every condition is proven true;
+#   - a deny or approve rule matches unless a condition is proven false.
+# So `deny ... when path glob "secrets/*"` also denies a call with no `path`.
+#
+# Quote anything that is meant as text. Unquoted no, yes, on, off, 010 and
+# 1:30 are rejected at load time instead of being silently reinterpreted.
+
+version: 1
+
+rules:
+  # ---------------------------------------------------------------- files
+  - id: deny-file-delete
+    effect: deny
+    tools: ["delete_file"]
+    reason: Agents never delete files, whatever the user delegated.
+
+  # Glob is string matching, not path matching: "reports/../secrets/x" does
+  # not match "secrets/*". The file tools must canonicalize paths before the
+  # gateway sees them.
+  - id: deny-secret-paths
+    effect: deny
+    tools: ["read_file", "write_file", "list_files"]
+    when:
+      path: {glob: "secrets/*"}
+    reason: The secrets directory is off limits to agents.
+
+  - id: approve-writes-outside-drafts
+    effect: approve
+    tools: ["write_file"]
+    unless:
+      path: {glob: "drafts/*"}
+    reason: Writing outside drafts/ needs a person to confirm.
+
+  - id: allow-file-reads
+    effect: allow
+    tools: ["read_file", "list_files"]
+
+  - id: allow-file-writes
+    effect: allow
+    tools: ["write_file"]
+
+  # ---------------------------------------------------------------- email
+  - id: deny-bcc
+    effect: deny
+    tools: ["send_email"]
+    when:
+      bcc: {any: true}
+    reason: Hidden recipients are not allowed.
+
+  # `to` must be a single address string. A list of addresses, or a missing
+  # `to`, is not proven internal, so it goes to approval. The email tool must
+  # reject strings that hold several addresses ("a@evil.com, b@example.com"),
+  # because "*" matches commas and spaces too.
+  - id: approve-external-email
+    effect: approve
+    tools: ["send_*"]
+    unless:
+      to: {glob: "*@example.com"}
+    reason: Mail to recipients outside example.com needs approval.
+
+  - id: allow-email-read
+    effect: allow
+    tools: ["search_email", "read_email"]
+
+  - id: allow-email-send
+    effect: allow
+    tools: ["send_email"]
+
+  # ------------------------------------------------------------- calendar
+  - id: allow-calendar-read
+    effect: allow
+    tools: ["list_events", "get_event"]
+
+  # An event with no attendees touches nobody else's calendar.
+  - id: allow-personal-events
+    effect: allow
+    tools: ["create_event"]
+    absent: [attendees]
+
+  - id: approve-invites
+    effect: approve
+    tools: ["create_event", "update_event"]
+    when:
+      attendees: {any: true}
+    reason: Inviting other people needs approval.
+
+  # A missing duration is not proven short, so it also goes to approval.
+  - id: approve-long-events
+    effect: approve
+    tools: ["create_event", "update_event"]
+    unless:
+      duration_minutes: {max: 480}
+    reason: Events longer than eight hours need approval.
+
+  - id: allow-event-update
+    effect: allow
+    tools: ["update_event"]
+
+  - id: approve-calendar-delete
+    effect: approve
+    tools: ["delete_event"]
+    reason: Cancelling a meeting notifies other people.

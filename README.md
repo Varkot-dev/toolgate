@@ -73,7 +73,7 @@ The bounds are listed per lemma in the file (for example, the glob prefix lemma 
 
 The check is sound by design and deliberately incomplete. The completeness gap was measured exhaustively on every ordered pair of a 125-constraint universe:
 
-![Completeness gap: for every parent and child operator, how many pairs are safe and accepted, safe but rejected, and unsafe and rejected](assets/completeness_gap.png)
+![Completeness gap: 0 of 14,401 unsafe pairs accepted, 1,016 of 1,224 safe pairs accepted, and the safe-but-rejected gap falling from 576 to 208 with the added rule](assets/completeness_gap.png)
 
 | All 15,625 pairs (`results/m0b_completeness.json`, `exhaustive_constraints`) | Before the star-free rule | After |
 |---|---|---|
@@ -113,13 +113,13 @@ Columns: `attacks_succeeded` of `attacks_attempted`, `benign_utility_honest`, `a
 
 Stronger tracking asks a person more often. Label creep is the reason: once the agent has read untrusted content, every literal it writes is treated as untrusted.
 
-![Label creep: attacks that succeeded and approvals per task for each configuration, and the share of values labeled untrusted by step within a task](assets/label_creep.png)
+![Label creep: for each configuration with a careful approver, attacks that succeeded and approvals asked per task; scripted agents](assets/label_creep.png)
 
-From `results/m4b_label_creep.json`, `configurations.*.by_step`: with session labels, 100% of values are untrusted from the third call of a task on; with value labels the share reaches 85.71% at step 5; with plan-then-execute it stays between 41.67% and 56.92% after step 1. Scripted agents, scripted planner and scripted extractor.
+The figure shows the protection and approval numbers above. From `results/m4b_label_creep.json`, `configurations.*.by_step`: with session labels, 100% of values are untrusted from the third call of a task on; with value labels the share reaches 85.71% at step 5; with plan-then-execute it stays between 41.67% and 56.92% after step 1. Scripted agents, scripted planner and scripted extractor.
 
-![Provenance graph of task misuse-04 under value labels: every argument and result colored by its sources, with the injected fetch blocked by rule deny-non-public-data-in-url](assets/provenance_graph.png)
+![Provenance graph of task misuse-04: a request from the user, an untrusted web page and a private file; the injected fetch that would put the file into a URL is blocked by rule deny-non-public-data-in-url](assets/provenance_graph.png)
 
-One class d attack (task misuse-04: leak the budget through the URL of a fetch to an allowed host), hijacked scripted agent, value labels. Every label drawn is the one the gateway recorded (`results/m4b_provenance_graph.json`): the injected fetch is denied by `deny-non-public-data-in-url`, and the later legitimate fetch is denied too, which is label creep in one picture.
+One class d attack (task misuse-04: leak the budget through the URL of a fetch to an allowed host), hijacked scripted agent, value labels. Every label drawn is the one the gateway recorded (`results/m4b_provenance_graph.json`): the injected fetch is denied by `deny-non-public-data-in-url`. The figure shows only the nodes of that story; the full graph, including a later legitimate fetch that the same rule also denied (label creep), is in the JSON.
 
 ### 3. Cost
 
@@ -136,9 +136,9 @@ Components timed alone (`stages.*.p50_us`): cold verify 193.8 us, of which the E
 
 Throughput (`throughput`): in-process, one thread, warm, 1,768.3 calls/s with fsync and 7,148.6 without; cold with fsync 1,221.9. Over HTTP to the FastAPI app on one uvicorn process on localhost, 341.9 calls/s with 1 client (p50 2,835 us) and 619.2 with 16 clients. Through the MCP proxy, the median `tools/call` was 3,990 us slower than the same call made directly to the upstream (`mcp_proxy.added_p50_us`, a difference of medians).
 
-![Latency histograms of warm and cold calls with p50 and p99 marked, and the median of each pipeline component](assets/latency.png)
+![Latency: median added time per allowed call for a reused and a new token, and the median of each pipeline step, with the audit fsync the largest](assets/latency.png)
 
-Caveat: one shared cloud container (Intel Xeon at 2.10 GHz, 4 logical cores, ext4 temp directory), not isolated from other tenants. The numbers are indicative, vary from run to run, and the latency figure changes every time it is regenerated (the only other figures that do are the dashboard screenshots, which show wall-clock times). Nothing here is compared with any other system. fsync cost depends entirely on the disk.
+Caveat: one shared cloud container (Intel Xeon at 2.10 GHz, 4 logical cores, ext4 temp directory), not isolated from other tenants. The numbers are indicative, vary from run to run, and so does the latency figure drawn from them (given the same results file it renders identically). Nothing here is compared with any other system. fsync cost depends entirely on the disk.
 
 ### 4. Delegation, offline tokens, audit and dashboard
 
@@ -146,11 +146,11 @@ Caveat: one shared cloud container (Intel Xeon at 2.10 GHz, 4 logical cores, ext
 
 Every arrow is a real `check_attenuation` call: three narrower children are accepted and a request for `read_file(path ~ *)` is rejected (`results/m0_delegation_tree.json`).
 
-![Token chain: an HMAC token gains three caveats offline, each changing the signature, and a token with the last caveat removed fails verification](assets/token_chain.png)
+![Token chain: an HMAC token gains three restrictions offline, each changing the signature; a copy with the last restriction removed fails verification](assets/token_chain.png)
 
 A holder narrows an HMAC chain token offline with no key; removing a caveat fails with "signature mismatch" because HMAC cannot be run backwards (`results/m1b_token_chain.json`).
 
-![Audit chain: an 8-entry log verifies, and a copy with one field of entry 3 changed fails verification at entry 3](assets/audit_tamper.png)
+![Audit chain: an 8-entry log verifies; a copy with entry 3's decision changed fails verification at entry 3](assets/audit_tamper.png)
 
 Changing one field of entry 3 in a copy of a real 8-entry log makes `verify` report entry 3 as the first bad entry (`results/m2_audit_tamper.json`).
 
@@ -235,27 +235,27 @@ The admin API is mounted under `/admin` on the same port. Audit logs can be chec
 ## Reproducing every number
 
 ```bash
-bash scripts/reproduce_all.sh      # several minutes; the dashboard step needs Chromium and Playwright
+bash scripts/reproduce_all.sh      # several minutes; figures are HTML pages rendered by headless Chromium (Node Playwright)
 ```
 
 | Script | Writes |
 |---|---|
 | `scripts/m0_invariant.py` | `results/m0_invariant.json` |
-| `scripts/fig_delegation_tree.py` | `results/m0_delegation_tree.json`, `assets/delegation_tree.*` |
+| `scripts/fig_delegation_tree.py` | `results/m0_delegation_tree.json`, `assets/delegation_tree.png` |
 | `scripts/m0b_prove_rules.py` | `results/m0b_rules.json` |
 | `scripts/m0b_completeness.py` (a few minutes) | `results/m0b_completeness.json` |
-| `scripts/fig_completeness_gap.py` | `assets/completeness_gap.*` |
+| `scripts/fig_completeness_gap.py` | `assets/completeness_gap.png` |
 | `scripts/m1_demo.py` | `results/m1_demo.json` |
-| `scripts/fig_token_chain.py` | `results/m1b_token_chain.json`, `assets/token_chain.*` |
-| `scripts/fig_audit_tamper.py` | `results/m2_audit_tamper.json`, `assets/audit_tamper.*` |
+| `scripts/fig_token_chain.py` | `results/m1b_token_chain.json`, `assets/token_chain.png` |
+| `scripts/fig_audit_tamper.py` | `results/m2_audit_tamper.json`, `assets/audit_tamper.png` |
 | `scripts/demo_gateway.py` | `results/m3_demo.json` |
 | `scripts/demo_mcp_proxy.py` | `results/m4_demo.json` |
 | `scripts/m5_scripted_eval.py` | `results/m5_scripted.json` |
-| `scripts/fig_label_creep.py` | `results/m4b_label_creep.json`, `assets/label_creep.*` |
-| `scripts/fig_provenance_graph.py` | `results/m4b_provenance_graph.json`, `assets/provenance_graph.*` |
+| `scripts/fig_label_creep.py` | `results/m4b_label_creep.json`, `assets/label_creep.png` |
+| `scripts/fig_provenance_graph.py` | `results/m4b_provenance_graph.json`, `assets/provenance_graph.png` |
 | `scripts/fig_hero.py` | `results/m6_hero.json`, `assets/hero.gif`, `assets/hero_poster.png` |
 | `scripts/bench_latency.py` (a few minutes) | `results/m6_latency.json` |
-| `scripts/fig_latency.py` | `assets/latency.*` |
+| `scripts/fig_latency.py` | `assets/latency.png` |
 | `scripts/fig_dashboard.py` | `assets/dashboard.png`, `assets/dashboard_tamper.png` |
 
 Seeds, clocks and ids are fixed, so every file except `m6_latency.json`, the latency figure and the dashboard screenshots is identical byte for byte on a rerun.

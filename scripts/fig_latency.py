@@ -80,7 +80,8 @@ def steps_chart(stages: dict[str, Any]) -> str:
         strong = key == "audit_append_fsync"
         parts.append(text(0, mid, label, "strong" if strong else ""))
         parts.append(
-            f'<rect x="{LABEL_W}" y="{y}" width="{w:.1f}" height="{BAR_H}" rx="{min(3.0, w / 2):g}" fill="{color}"/>'
+            f'<rect x="{LABEL_W}" y="{y}" width="{w:.1f}" height="{BAR_H}" '
+            f'rx="{min(2.0, w / 2):g}" fill="{color}"/>'
         )
         note = ""
         if key == "audit_append_fsync":
@@ -88,9 +89,7 @@ def steps_chart(stages: dict[str, Any]) -> str:
             note = f'<tspan class="quiet" dx="8">{fmt_us(off)} without fsync</tspan>'
         elif key == "verify_cold":
             note = '<tspan class="quiet" dx="8">new token only</tspan>'
-        parts.append(
-            text(LABEL_W + w + 8, mid, fmt_us(value) + note, "strong" if strong else "")
-        )
+        parts.append(text(LABEL_W + w + 8, mid, fmt_us(value) + note, "strong" if strong else ""))
     height = (len(rows) - 1) * ROW_H + BAR_H
     body = "".join(parts)
     return (

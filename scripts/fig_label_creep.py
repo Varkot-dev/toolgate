@@ -70,16 +70,20 @@ def chart(rows: list[dict[str, Any]], attacks: int, top_approvals: float) -> str
         mid = y + BAR_H / 2
         parts.append(text(0, mid, row["name"]))
         hits = row["attacks_succeeded"]
+        # A row whose denominator differs from the header says so (value labels:
+        # label creep blocked one injection before it was ever delivered).
+        tried = row["attacks_attempted"]
+        of = "" if tried == attacks else f' <tspan class="quiet">of {tried}</tspan>'
         if hits:
             w = A_ROOM * hits / attacks
             parts.append(bar(A_X, y, w, "var(--no)"))
-            parts.append(text(A_X + w + 8, mid, str(hits)))
+            parts.append(text(A_X + w + 8, mid, f"{hits}{of}"))
         else:  # nothing got through: a check mark and a zero, not an empty row
             parts.append(
                 f'<path class="icon" d="{CHECK}" transform="translate({A_X - 1} {mid - 8}) '
                 f'scale({16 / 24})" stroke="var(--ok)" stroke-width="3.4"/>'
             )
-            parts.append(text(A_X + 22, mid, "0", "ok strong"))
+            parts.append(text(A_X + 22, mid, f"0{of}", "ok strong"))
         asks = row["honest_approvals_mean_per_task"]
         if asks:
             w = B_ROOM * asks / top_approvals
@@ -106,7 +110,7 @@ def view(data: dict[str, Any], scripted: dict[str, Any]) -> dict[str, Any]:
         honest = m5[key]["approvals_requested"]["honest"]
         assert r["honest_approvals_total"] == honest["total"], key
         assert r["honest_approvals_mean_per_task"] == honest["mean_per_task"], key
-        rows.append({**r, "name": name})
+        rows.append({**r, "name": name, "attacks_attempted": m5[key]["attacks_attempted"]})
     attacks = {r["attacks"] for r in rows}
     assert len(attacks) == 1
     tasks = len(scripted["tasks"])

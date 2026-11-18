@@ -8,7 +8,7 @@ exist (404).
     GET  /dashboard/login                login page    none
     POST /dashboard/login                admin key -> session cookie
     POST /dashboard/logout               session + CSRF
-    GET  /dashboard/static/{name}        CSS and JS    none (fixed files, no data)
+    GET  /dashboard/static/{name}        CSS, JS, fonts, icons: none (fixed files, no data)
     GET  /dashboard/fragment/feed        HTML          session
     GET  /dashboard/fragment/approvals   HTML          session
     GET  /dashboard/fragment/chain       HTML          session
@@ -90,7 +90,18 @@ PREFIX = "/dashboard"
 COOKIE = "toolgate_dashboard"
 CSRF_HEADER = "x-csrf-token"
 STATIC = Path(__file__).resolve().parent / "static"
-ASSETS = {"dashboard.css": "text/css; charset=utf-8", "dashboard.js": "text/javascript"}
+ASSETS = {
+    "dashboard.css": "text/css; charset=utf-8",
+    "dashboard.js": "text/javascript",
+    # Vendored fonts (SIL OFL) and Lucide icons (ISC); licenses sit next to them.
+    "plus-jakarta-sans-latin-500-normal.woff2": "font/woff2",
+    "plus-jakarta-sans-latin-700-normal.woff2": "font/woff2",
+    "jetbrains-mono-latin-500-normal.woff2": "font/woff2",
+    "icon-check.svg": "image/svg+xml",
+    "icon-x.svg": "image/svg+xml",
+    "icon-clock.svg": "image/svg+xml",
+    "icon-link.svg": "image/svg+xml",
+}
 CSP = (
     "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self'; "
     "connect-src 'self'; object-src 'none'; base-uri 'none'; form-action 'self'; "

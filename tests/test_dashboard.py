@@ -484,6 +484,35 @@ def test_security_headers_are_on_every_dashboard_response(dash: Dash) -> None:
     assert "content-security-policy" not in dash.client.get("/healthz").headers
 
 
+def test_vendored_fonts_and_icons_are_served_from_the_app(dash: Dash) -> None:
+    static = ROOT / "src" / "toolgate" / "static"
+    expected = {
+        "plus-jakarta-sans-latin-500-normal.woff2": "font/woff2",
+        "plus-jakarta-sans-latin-700-normal.woff2": "font/woff2",
+        "jetbrains-mono-latin-500-normal.woff2": "font/woff2",
+        "icon-check.svg": "image/svg+xml",
+        "icon-x.svg": "image/svg+xml",
+        "icon-clock.svg": "image/svg+xml",
+        "icon-link.svg": "image/svg+xml",
+    }
+    for name, media_type in expected.items():
+        response = dash.client.get(f"/dashboard/static/{name}")
+        assert response.status_code == 200, name
+        assert response.headers["content-type"] == media_type
+        assert response.content == (static / name).read_bytes()
+        assert response.headers["content-security-policy"] == CSP
+        assert response.headers["x-content-type-options"] == "nosniff"
+        assert "no-store" in response.headers["cache-control"]
+    # Only the listed files: licenses, sources and paths stay unreachable.
+    for name in ["OFL-PlusJakartaSans.txt", "..%2Fdashboard.py", "dashboard.html"]:
+        assert dash.client.get(f"/dashboard/static/{name}").status_code == 404
+    # The stylesheet points only at these same-origin files, never a CDN.
+    css = dash.client.get("/dashboard/static/dashboard.css").text
+    urls = set(re.findall(r'url\("([^"]+)"\)', css))
+    assert urls and urls <= set(expected)
+    assert "http" not in css and "@import" not in css
+
+
 def test_pages_hold_no_inline_script_or_style(dash: Dash) -> None:
     login = dash.client.get("/dashboard/login").text
     dash.login()

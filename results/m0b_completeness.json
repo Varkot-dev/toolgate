@@ -1,0 +1,1950 @@
+{
+  "what_this_is": "Checker verdict against solver truth for the attenuation check. rejected_safe_gap is the completeness gap; accepted_unsafe_BUG must be 0. `outcomes` is the current checker (with rule A); `previous_rule_set` is the checker before rule A against the same solver answers; `rule_a` is the difference.",
+  "caveat": "Every count and rate in this file is a property of the universe and sampling distribution chosen here, not of real workloads. The completeness rate moves freely when the universe changes (for example, more star-free globs lower it). The only number that carries over is accepted_unsafe_BUG = 0, and that one is bounded by what was enumerated or sampled plus what the solver model covers.",
+  "completeness_rate_definition": "accepted_safe / (accepted_safe + rejected_safe_gap)",
+  "seed": 0,
+  "accepted_unsafe_total": 0,
+  "inconclusive_total": 0,
+  "inconclusive_note": "Pairs where smt raised Inconclusive. They are in no cell of the 2x2 tables and in no rate. Accepted ones are listed under accepted_but_inconclusive in each section.",
+  "solver_retries": {
+    "first_try_inconclusive": 0,
+    "still_inconclusive_after_retry": 0,
+    "first_try_reasons": [],
+    "note": "A question the solver did not answer is asked once more before the pair is counted as inconclusive. Z3's running time on these queries is erratic inside a long process, so these two counts can differ from run to run; the verdicts cannot, because any answer the solver gives is exact."
+  },
+  "exhaustive_constraints": {
+    "universe": {
+      "argument": "x",
+      "values_for_eq_and_in": [
+        "a",
+        "ab",
+        "a/b",
+        0,
+        1,
+        2,
+        true
+      ],
+      "in_set_sizes": [
+        1,
+        2
+      ],
+      "max_ceilings": [
+        0,
+        1,
+        2,
+        1.5
+      ],
+      "glob_alphabet": "ab/*",
+      "glob_max_length": 3,
+      "size": 125,
+      "size_by_operator": {
+        "eq": 7,
+        "in": 28,
+        "max": 4,
+        "glob": 85,
+        "any": 1
+      },
+      "constraints": [
+        "eq \"a\"",
+        "eq \"ab\"",
+        "eq \"a/b\"",
+        "eq 0",
+        "eq 1",
+        "eq 2",
+        "eq true",
+        "in [\"a\"]",
+        "in [\"ab\"]",
+        "in [\"a/b\"]",
+        "in [0]",
+        "in [1]",
+        "in [2]",
+        "in [true]",
+        "in [\"a\", \"ab\"]",
+        "in [\"a\", \"a/b\"]",
+        "in [\"a\", 0]",
+        "in [\"a\", 1]",
+        "in [\"a\", 2]",
+        "in [\"a\", true]",
+        "in [\"ab\", \"a/b\"]",
+        "in [\"ab\", 0]",
+        "in [\"ab\", 1]",
+        "in [\"ab\", 2]",
+        "in [\"ab\", true]",
+        "in [\"a/b\", 0]",
+        "in [\"a/b\", 1]",
+        "in [\"a/b\", 2]",
+        "in [\"a/b\", true]",
+        "in [0, 1]",
+        "in [0, 2]",
+        "in [0, true]",
+        "in [1, 2]",
+        "in [1, true]",
+        "in [2, true]",
+        "max 0",
+        "max 1",
+        "max 2",
+        "max 1.5",
+        "glob \"\"",
+        "glob \"a\"",
+        "glob \"b\"",
+        "glob \"/\"",
+        "glob \"*\"",
+        "glob \"aa\"",
+        "glob \"ab\"",
+        "glob \"a/\"",
+        "glob \"a*\"",
+        "glob \"ba\"",
+        "glob \"bb\"",
+        "glob \"b/\"",
+        "glob \"b*\"",
+        "glob \"/a\"",
+        "glob \"/b\"",
+        "glob \"//\"",
+        "glob \"/*\"",
+        "glob \"*a\"",
+        "glob \"*b\"",
+        "glob \"*/\"",
+        "glob \"**\"",
+        "glob \"aaa\"",
+        "glob \"aab\"",
+        "glob \"aa/\"",
+        "glob \"aa*\"",
+        "glob \"aba\"",
+        "glob \"abb\"",
+        "glob \"ab/\"",
+        "glob \"ab*\"",
+        "glob \"a/a\"",
+        "glob \"a/b\"",
+        "glob \"a//\"",
+        "glob \"a/*\"",
+        "glob \"a*a\"",
+        "glob \"a*b\"",
+        "glob \"a*/\"",
+        "glob \"a**\"",
+        "glob \"baa\"",
+        "glob \"bab\"",
+        "glob \"ba/\"",
+        "glob \"ba*\"",
+        "glob \"bba\"",
+        "glob \"bbb\"",
+        "glob \"bb/\"",
+        "glob \"bb*\"",
+        "glob \"b/a\"",
+        "glob \"b/b\"",
+        "glob \"b//\"",
+        "glob \"b/*\"",
+        "glob \"b*a\"",
+        "glob \"b*b\"",
+        "glob \"b*/\"",
+        "glob \"b**\"",
+        "glob \"/aa\"",
+        "glob \"/ab\"",
+        "glob \"/a/\"",
+        "glob \"/a*\"",
+        "glob \"/ba\"",
+        "glob \"/bb\"",
+        "glob \"/b/\"",
+        "glob \"/b*\"",
+        "glob \"//a\"",
+        "glob \"//b\"",
+        "glob \"///\"",
+        "glob \"//*\"",
+        "glob \"/*a\"",
+        "glob \"/*b\"",
+        "glob \"/*/\"",
+        "glob \"/**\"",
+        "glob \"*aa\"",
+        "glob \"*ab\"",
+        "glob \"*a/\"",
+        "glob \"*a*\"",
+        "glob \"*ba\"",
+        "glob \"*bb\"",
+        "glob \"*b/\"",
+        "glob \"*b*\"",
+        "glob \"*/a\"",
+        "glob \"*/b\"",
+        "glob \"*//\"",
+        "glob \"*/*\"",
+        "glob \"**a\"",
+        "glob \"**b\"",
+        "glob \"**/\"",
+        "glob \"***\"",
+        "any"
+      ],
+      "pairs": "every ordered (parent, child) pair, including a constraint with itself"
+    },
+    "outcomes": {
+      "accepted_safe": 1016,
+      "rejected_safe_gap": 208,
+      "rejected_unsafe": 14401,
+      "accepted_unsafe_BUG": 0,
+      "inconclusive_accepted": 0,
+      "inconclusive_rejected": 0,
+      "pairs": 15625,
+      "truly_safe": 1224,
+      "completeness_rate": 0.8301
+    },
+    "previous_rule_set": {
+      "note": "The checker WITHOUT rule A, re-created in scripts/m0b_completeness.py and compared with the same solver answers. This is the previous rule set, not the code in src/.",
+      "outcomes": {
+        "accepted_safe": 648,
+        "rejected_safe_gap": 576,
+        "rejected_unsafe": 14401,
+        "accepted_unsafe_BUG": 0,
+        "inconclusive_accepted": 0,
+        "inconclusive_rejected": 0,
+        "pairs": 15625,
+        "truly_safe": 1224,
+        "completeness_rate": 0.5294
+      },
+      "gap_categories": [
+        {
+          "category": "child glob has no star (one literal string), parent glob is not P*",
+          "count": 344
+        },
+        {
+          "category": "prefix rule would apply after collapsing repeated stars",
+          "count": 102
+        },
+        {
+          "category": "infix containment (parent *M*, child has M inside a literal piece)",
+          "count": 57
+        },
+        {
+          "category": "suffix containment (parent *S, child ends with S)",
+          "count": 36
+        },
+        {
+          "category": "child glob has no star (one literal string), parent is eq/in",
+          "count": 24
+        },
+        {
+          "category": "same language, spelled with repeated stars",
+          "count": 13
+        }
+      ]
+    },
+    "rule_a": {
+      "rule": "A: a star-free child glob is checked like eq (implemented in src/)",
+      "gap_before": 576,
+      "gap_now": 208,
+      "gap_pairs_closed": 368,
+      "unsafe_pairs_newly_accepted": 0,
+      "completeness_rate_before": 0.5294,
+      "completeness_rate_now": 0.8301
+    },
+    "by_parent_and_child_operator": [
+      {
+        "parent": "eq",
+        "child": "eq",
+        "accepted_safe": 7,
+        "rejected_safe_gap": 0,
+        "rejected_unsafe": 42,
+        "accepted_unsafe_BUG": 0,
+        "inconclusive_accepted": 0,
+        "inconclusive_rejected": 0,
+        "pairs": 49,
+        "truly_safe": 7,
+        "completeness_rate": 1.0
+      },
+      {
+        "parent": "eq",
+        "child": "in",
+        "accepted_safe": 7,
+        "rejected_safe_gap": 0,
+        "rejected_unsafe": 189,
+        "accepted_unsafe_BUG": 0,
+        "inconclusive_accepted": 0,
+        "inconclusive_rejected": 0,
+        "pairs": 196,
+        "truly_safe": 7,
+        "completeness_rate": 1.0
+      },
+      {
+        "parent": "eq",
+        "child": "max",
+        "accepted_safe": 0,
+        "rejected_safe_gap": 0,
+        "rejected_unsafe": 28,
+        "accepted_unsafe_BUG": 0,
+        "inconclusive_accepted": 0,
+        "inconclusive_rejected": 0,
+        "pairs": 28,
+        "truly_safe": 0,
+        "completeness_rate": null
+      },
+      {
+        "parent": "eq",
+        "child": "glob",
+        "accepted_safe": 3,
+        "rejected_safe_gap": 0,
+        "rejected_unsafe": 592,
+        "accepted_unsafe_BUG": 0,
+        "inconclusive_accepted": 0,
+        "inconclusive_rejected": 0,
+        "pairs": 595,
+        "truly_safe": 3,
+        "completeness_rate": 1.0
+      },
+      {
+        "parent": "eq",
+        "child": "any",
+        "accepted_safe": 0,
+        "rejected_safe_gap": 0,
+        "rejected_unsafe": 7,
+        "accepted_unsafe_BUG": 0,
+        "inconclusive_accepted": 0,
+        "inconclusive_rejected": 0,
+        "pairs": 7,
+        "truly_safe": 0,
+        "completeness_rate": null
+      },
+      {
+        "parent": "in",
+        "child": "eq",
+        "accepted_safe": 49,
+        "rejected_safe_gap": 0,
+        "rejected_unsafe": 147,
+        "accepted_unsafe_BUG": 0,
+        "inconclusive_accepted": 0,
+        "inconclusive_rejected": 0,
+        "pairs": 196,
+        "truly_safe": 49,
+        "completeness_rate": 1.0
+      },
+      {
+        "parent": "in",
+        "child": "in",
+        "accepted_safe": 70,
+        "rejected_safe_gap": 0,
+        "rejected_unsafe": 714,
+        "accepted_unsafe_BUG": 0,
+        "inconclusive_accepted": 0,
+        "inconclusive_rejected": 0,
+        "pairs": 784,
+        "truly_safe": 70,
+        "completeness_rate": 1.0
+      },
+      {
+        "parent": "in",
+        "child": "max",
+        "accepted_safe": 0,
+        "rejected_safe_gap": 0,
+        "rejected_unsafe": 112,
+        "accepted_unsafe_BUG": 0,
+        "inconclusive_accepted": 0,
+        "inconclusive_rejected": 0,
+        "pairs": 112,
+        "truly_safe": 0,
+        "completeness_rate": null
+      },
+      {
+        "parent": "in",
+        "child": "glob",
+        "accepted_safe": 21,
+        "rejected_safe_gap": 0,
+        "rejected_unsafe": 2359,
+        "accepted_unsafe_BUG": 0,
+        "inconclusive_accepted": 0,
+        "inconclusive_rejected": 0,
+        "pairs": 2380,
+        "truly_safe": 21,
+        "completeness_rate": 1.0
+      },
+      {
+        "parent": "in",
+        "child": "any",
+        "accepted_safe": 0,
+        "rejected_safe_gap": 0,
+        "rejected_unsafe": 28,
+        "accepted_unsafe_BUG": 0,
+        "inconclusive_accepted": 0,
+        "inconclusive_rejected": 0,
+        "pairs": 28,
+        "truly_safe": 0,
+        "completeness_rate": null
+      },
+      {
+        "parent": "max",
+        "child": "eq",
+        "accepted_safe": 8,
+        "rejected_safe_gap": 0,
+        "rejected_unsafe": 20,
+        "accepted_unsafe_BUG": 0,
+        "inconclusive_accepted": 0,
+        "inconclusive_rejected": 0,
+        "pairs": 28,
+        "truly_safe": 8,
+        "completeness_rate": 1.0
+      },
+      {
+        "parent": "max",
+        "child": "in",
+        "accepted_safe": 13,
+        "rejected_safe_gap": 0,
+        "rejected_unsafe": 99,
+        "accepted_unsafe_BUG": 0,
+        "inconclusive_accepted": 0,
+        "inconclusive_rejected": 0,
+        "pairs": 112,
+        "truly_safe": 13,
+        "completeness_rate": 1.0
+      },
+      {
+        "parent": "max",
+        "child": "max",
+        "accepted_safe": 10,
+        "rejected_safe_gap": 0,
+        "rejected_unsafe": 6,
+        "accepted_unsafe_BUG": 0,
+        "inconclusive_accepted": 0,
+        "inconclusive_rejected": 0,
+        "pairs": 16,
+        "truly_safe": 10,
+        "completeness_rate": 1.0
+      },
+      {
+        "parent": "max",
+        "child": "glob",
+        "accepted_safe": 0,
+        "rejected_safe_gap": 0,
+        "rejected_unsafe": 340,
+        "accepted_unsafe_BUG": 0,
+        "inconclusive_accepted": 0,
+        "inconclusive_rejected": 0,
+        "pairs": 340,
+        "truly_safe": 0,
+        "completeness_rate": null
+      },
+      {
+        "parent": "max",
+        "child": "any",
+        "accepted_safe": 0,
+        "rejected_safe_gap": 0,
+        "rejected_unsafe": 4,
+        "accepted_unsafe_BUG": 0,
+        "inconclusive_accepted": 0,
+        "inconclusive_rejected": 0,
+        "pairs": 4,
+        "truly_safe": 0,
+        "completeness_rate": null
+      },
+      {
+        "parent": "glob",
+        "child": "eq",
+        "accepted_safe": 36,
+        "rejected_safe_gap": 0,
+        "rejected_unsafe": 559,
+        "accepted_unsafe_BUG": 0,
+        "inconclusive_accepted": 0,
+        "inconclusive_rejected": 0,
+        "pairs": 595,
+        "truly_safe": 36,
+        "completeness_rate": 1.0
+      },
+      {
+        "parent": "glob",
+        "child": "in",
+        "accepted_safe": 58,
+        "rejected_safe_gap": 0,
+        "rejected_unsafe": 2322,
+        "accepted_unsafe_BUG": 0,
+        "inconclusive_accepted": 0,
+        "inconclusive_rejected": 0,
+        "pairs": 2380,
+        "truly_safe": 58,
+        "completeness_rate": 1.0
+      },
+      {
+        "parent": "glob",
+        "child": "max",
+        "accepted_safe": 0,
+        "rejected_safe_gap": 0,
+        "rejected_unsafe": 340,
+        "accepted_unsafe_BUG": 0,
+        "inconclusive_accepted": 0,
+        "inconclusive_rejected": 0,
+        "pairs": 340,
+        "truly_safe": 0,
+        "completeness_rate": null
+      },
+      {
+        "parent": "glob",
+        "child": "glob",
+        "accepted_safe": 609,
+        "rejected_safe_gap": 208,
+        "rejected_unsafe": 6408,
+        "accepted_unsafe_BUG": 0,
+        "inconclusive_accepted": 0,
+        "inconclusive_rejected": 0,
+        "pairs": 7225,
+        "truly_safe": 817,
+        "completeness_rate": 0.7454
+      },
+      {
+        "parent": "glob",
+        "child": "any",
+        "accepted_safe": 0,
+        "rejected_safe_gap": 0,
+        "rejected_unsafe": 85,
+        "accepted_unsafe_BUG": 0,
+        "inconclusive_accepted": 0,
+        "inconclusive_rejected": 0,
+        "pairs": 85,
+        "truly_safe": 0,
+        "completeness_rate": null
+      },
+      {
+        "parent": "any",
+        "child": "eq",
+        "accepted_safe": 7,
+        "rejected_safe_gap": 0,
+        "rejected_unsafe": 0,
+        "accepted_unsafe_BUG": 0,
+        "inconclusive_accepted": 0,
+        "inconclusive_rejected": 0,
+        "pairs": 7,
+        "truly_safe": 7,
+        "completeness_rate": 1.0
+      },
+      {
+        "parent": "any",
+        "child": "in",
+        "accepted_safe": 28,
+        "rejected_safe_gap": 0,
+        "rejected_unsafe": 0,
+        "accepted_unsafe_BUG": 0,
+        "inconclusive_accepted": 0,
+        "inconclusive_rejected": 0,
+        "pairs": 28,
+        "truly_safe": 28,
+        "completeness_rate": 1.0
+      },
+      {
+        "parent": "any",
+        "child": "max",
+        "accepted_safe": 4,
+        "rejected_safe_gap": 0,
+        "rejected_unsafe": 0,
+        "accepted_unsafe_BUG": 0,
+        "inconclusive_accepted": 0,
+        "inconclusive_rejected": 0,
+        "pairs": 4,
+        "truly_safe": 4,
+        "completeness_rate": 1.0
+      },
+      {
+        "parent": "any",
+        "child": "glob",
+        "accepted_safe": 85,
+        "rejected_safe_gap": 0,
+        "rejected_unsafe": 0,
+        "accepted_unsafe_BUG": 0,
+        "inconclusive_accepted": 0,
+        "inconclusive_rejected": 0,
+        "pairs": 85,
+        "truly_safe": 85,
+        "completeness_rate": 1.0
+      },
+      {
+        "parent": "any",
+        "child": "any",
+        "accepted_safe": 1,
+        "rejected_safe_gap": 0,
+        "rejected_unsafe": 0,
+        "accepted_unsafe_BUG": 0,
+        "inconclusive_accepted": 0,
+        "inconclusive_rejected": 0,
+        "pairs": 1,
+        "truly_safe": 1,
+        "completeness_rate": 1.0
+      }
+    ],
+    "gap_categories": [
+      {
+        "category": "prefix rule would apply after collapsing repeated stars",
+        "count": 102,
+        "examples": [
+          {
+            "parent": "glob \"**\"",
+            "child": "glob \"a*\""
+          },
+          {
+            "parent": "glob \"**\"",
+            "child": "glob \"b*\""
+          },
+          {
+            "parent": "glob \"**\"",
+            "child": "glob \"/*\""
+          }
+        ]
+      },
+      {
+        "category": "infix containment (parent *M*, child has M inside a literal piece)",
+        "count": 57,
+        "examples": [
+          {
+            "parent": "glob \"*a*\"",
+            "child": "glob \"a*\""
+          },
+          {
+            "parent": "glob \"*a*\"",
+            "child": "glob \"*a\""
+          },
+          {
+            "parent": "glob \"*a*\"",
+            "child": "glob \"aa*\""
+          }
+        ]
+      },
+      {
+        "category": "suffix containment (parent *S, child ends with S)",
+        "count": 36,
+        "examples": [
+          {
+            "parent": "glob \"*a\"",
+            "child": "glob \"a*a\""
+          },
+          {
+            "parent": "glob \"*a\"",
+            "child": "glob \"b*a\""
+          },
+          {
+            "parent": "glob \"*a\"",
+            "child": "glob \"/*a\""
+          }
+        ]
+      },
+      {
+        "category": "same language, spelled with repeated stars",
+        "count": 13,
+        "examples": [
+          {
+            "parent": "glob \"*a\"",
+            "child": "glob \"**a\""
+          },
+          {
+            "parent": "glob \"*b\"",
+            "child": "glob \"**b\""
+          },
+          {
+            "parent": "glob \"*/\"",
+            "child": "glob \"**/\""
+          }
+        ]
+      }
+    ],
+    "gap_pairs": [
+      {
+        "parent": "glob \"**\"",
+        "child": "glob \"a*\"",
+        "category": "prefix rule would apply after collapsing repeated stars"
+      },
+      {
+        "parent": "glob \"**\"",
+        "child": "glob \"b*\"",
+        "category": "prefix rule would apply after collapsing repeated stars"
+      },
+      {
+        "parent": "glob \"**\"",
+        "child": "glob \"/*\"",
+        "category": "prefix rule would apply after collapsing repeated stars"
+      },
+      {
+        "parent": "glob \"**\"",
+        "child": "glob \"*a\"",
+        "category": "prefix rule would apply after collapsing repeated stars"
+      },
+      {
+        "parent": "glob \"**\"",
+        "child": "glob \"*b\"",
+        "category": "prefix rule would apply after collapsing repeated stars"
+      },
+      {
+        "parent": "glob \"**\"",
+        "child": "glob \"*/\"",
+        "category": "prefix rule would apply after collapsing repeated stars"
+      },
+      {
+        "parent": "glob \"**\"",
+        "child": "glob \"aa*\"",
+        "category": "prefix rule would apply after collapsing repeated stars"
+      },
+      {
+        "parent": "glob \"**\"",
+        "child": "glob \"ab*\"",
+        "category": "prefix rule would apply after collapsing repeated stars"
+      },
+      {
+        "parent": "glob \"**\"",
+        "child": "glob \"a/*\"",
+        "category": "prefix rule would apply after collapsing repeated stars"
+      },
+      {
+        "parent": "glob \"**\"",
+        "child": "glob \"a*a\"",
+        "category": "prefix rule would apply after collapsing repeated stars"
+      },
+      {
+        "parent": "glob \"**\"",
+        "child": "glob \"a*b\"",
+        "category": "prefix rule would apply after collapsing repeated stars"
+      },
+      {
+        "parent": "glob \"**\"",
+        "child": "glob \"a*/\"",
+        "category": "prefix rule would apply after collapsing repeated stars"
+      },
+      {
+        "parent": "glob \"**\"",
+        "child": "glob \"a**\"",
+        "category": "prefix rule would apply after collapsing repeated stars"
+      },
+      {
+        "parent": "glob \"**\"",
+        "child": "glob \"ba*\"",
+        "category": "prefix rule would apply after collapsing repeated stars"
+      },
+      {
+        "parent": "glob \"**\"",
+        "child": "glob \"bb*\"",
+        "category": "prefix rule would apply after collapsing repeated stars"
+      },
+      {
+        "parent": "glob \"**\"",
+        "child": "glob \"b/*\"",
+        "category": "prefix rule would apply after collapsing repeated stars"
+      },
+      {
+        "parent": "glob \"**\"",
+        "child": "glob \"b*a\"",
+        "category": "prefix rule would apply after collapsing repeated stars"
+      },
+      {
+        "parent": "glob \"**\"",
+        "child": "glob \"b*b\"",
+        "category": "prefix rule would apply after collapsing repeated stars"
+      },
+      {
+        "parent": "glob \"**\"",
+        "child": "glob \"b*/\"",
+        "category": "prefix rule would apply after collapsing repeated stars"
+      },
+      {
+        "parent": "glob \"**\"",
+        "child": "glob \"b**\"",
+        "category": "prefix rule would apply after collapsing repeated stars"
+      },
+      {
+        "parent": "glob \"**\"",
+        "child": "glob \"/a*\"",
+        "category": "prefix rule would apply after collapsing repeated stars"
+      },
+      {
+        "parent": "glob \"**\"",
+        "child": "glob \"/b*\"",
+        "category": "prefix rule would apply after collapsing repeated stars"
+      },
+      {
+        "parent": "glob \"**\"",
+        "child": "glob \"//*\"",
+        "category": "prefix rule would apply after collapsing repeated stars"
+      },
+      {
+        "parent": "glob \"**\"",
+        "child": "glob \"/*a\"",
+        "category": "prefix rule would apply after collapsing repeated stars"
+      },
+      {
+        "parent": "glob \"**\"",
+        "child": "glob \"/*b\"",
+        "category": "prefix rule would apply after collapsing repeated stars"
+      },
+      {
+        "parent": "glob \"**\"",
+        "child": "glob \"/*/\"",
+        "category": "prefix rule would apply after collapsing repeated stars"
+      },
+      {
+        "parent": "glob \"**\"",
+        "child": "glob \"/**\"",
+        "category": "prefix rule would apply after collapsing repeated stars"
+      },
+      {
+        "parent": "glob \"**\"",
+        "child": "glob \"*aa\"",
+        "category": "prefix rule would apply after collapsing repeated stars"
+      },
+      {
+        "parent": "glob \"**\"",
+        "child": "glob \"*ab\"",
+        "category": "prefix rule would apply after collapsing repeated stars"
+      },
+      {
+        "parent": "glob \"**\"",
+        "child": "glob \"*a/\"",
+        "category": "prefix rule would apply after collapsing repeated stars"
+      },
+      {
+        "parent": "glob \"**\"",
+        "child": "glob \"*a*\"",
+        "category": "prefix rule would apply after collapsing repeated stars"
+      },
+      {
+        "parent": "glob \"**\"",
+        "child": "glob \"*ba\"",
+        "category": "prefix rule would apply after collapsing repeated stars"
+      },
+      {
+        "parent": "glob \"**\"",
+        "child": "glob \"*bb\"",
+        "category": "prefix rule would apply after collapsing repeated stars"
+      },
+      {
+        "parent": "glob \"**\"",
+        "child": "glob \"*b/\"",
+        "category": "prefix rule would apply after collapsing repeated stars"
+      },
+      {
+        "parent": "glob \"**\"",
+        "child": "glob \"*b*\"",
+        "category": "prefix rule would apply after collapsing repeated stars"
+      },
+      {
+        "parent": "glob \"**\"",
+        "child": "glob \"*/a\"",
+        "category": "prefix rule would apply after collapsing repeated stars"
+      },
+      {
+        "parent": "glob \"**\"",
+        "child": "glob \"*/b\"",
+        "category": "prefix rule would apply after collapsing repeated stars"
+      },
+      {
+        "parent": "glob \"**\"",
+        "child": "glob \"*//\"",
+        "category": "prefix rule would apply after collapsing repeated stars"
+      },
+      {
+        "parent": "glob \"**\"",
+        "child": "glob \"*/*\"",
+        "category": "prefix rule would apply after collapsing repeated stars"
+      },
+      {
+        "parent": "glob \"**\"",
+        "child": "glob \"**a\"",
+        "category": "prefix rule would apply after collapsing repeated stars"
+      },
+      {
+        "parent": "glob \"**\"",
+        "child": "glob \"**b\"",
+        "category": "prefix rule would apply after collapsing repeated stars"
+      },
+      {
+        "parent": "glob \"**\"",
+        "child": "glob \"**/\"",
+        "category": "prefix rule would apply after collapsing repeated stars"
+      },
+      {
+        "parent": "glob \"a**\"",
+        "child": "glob \"aa*\"",
+        "category": "prefix rule would apply after collapsing repeated stars"
+      },
+      {
+        "parent": "glob \"a**\"",
+        "child": "glob \"ab*\"",
+        "category": "prefix rule would apply after collapsing repeated stars"
+      },
+      {
+        "parent": "glob \"a**\"",
+        "child": "glob \"a/*\"",
+        "category": "prefix rule would apply after collapsing repeated stars"
+      },
+      {
+        "parent": "glob \"a**\"",
+        "child": "glob \"a*a\"",
+        "category": "prefix rule would apply after collapsing repeated stars"
+      },
+      {
+        "parent": "glob \"a**\"",
+        "child": "glob \"a*b\"",
+        "category": "prefix rule would apply after collapsing repeated stars"
+      },
+      {
+        "parent": "glob \"a**\"",
+        "child": "glob \"a*/\"",
+        "category": "prefix rule would apply after collapsing repeated stars"
+      },
+      {
+        "parent": "glob \"b**\"",
+        "child": "glob \"ba*\"",
+        "category": "prefix rule would apply after collapsing repeated stars"
+      },
+      {
+        "parent": "glob \"b**\"",
+        "child": "glob \"bb*\"",
+        "category": "prefix rule would apply after collapsing repeated stars"
+      },
+      {
+        "parent": "glob \"b**\"",
+        "child": "glob \"b/*\"",
+        "category": "prefix rule would apply after collapsing repeated stars"
+      },
+      {
+        "parent": "glob \"b**\"",
+        "child": "glob \"b*a\"",
+        "category": "prefix rule would apply after collapsing repeated stars"
+      },
+      {
+        "parent": "glob \"b**\"",
+        "child": "glob \"b*b\"",
+        "category": "prefix rule would apply after collapsing repeated stars"
+      },
+      {
+        "parent": "glob \"b**\"",
+        "child": "glob \"b*/\"",
+        "category": "prefix rule would apply after collapsing repeated stars"
+      },
+      {
+        "parent": "glob \"/**\"",
+        "child": "glob \"/a*\"",
+        "category": "prefix rule would apply after collapsing repeated stars"
+      },
+      {
+        "parent": "glob \"/**\"",
+        "child": "glob \"/b*\"",
+        "category": "prefix rule would apply after collapsing repeated stars"
+      },
+      {
+        "parent": "glob \"/**\"",
+        "child": "glob \"//*\"",
+        "category": "prefix rule would apply after collapsing repeated stars"
+      },
+      {
+        "parent": "glob \"/**\"",
+        "child": "glob \"/*a\"",
+        "category": "prefix rule would apply after collapsing repeated stars"
+      },
+      {
+        "parent": "glob \"/**\"",
+        "child": "glob \"/*b\"",
+        "category": "prefix rule would apply after collapsing repeated stars"
+      },
+      {
+        "parent": "glob \"/**\"",
+        "child": "glob \"/*/\"",
+        "category": "prefix rule would apply after collapsing repeated stars"
+      },
+      {
+        "parent": "glob \"***\"",
+        "child": "glob \"a*\"",
+        "category": "prefix rule would apply after collapsing repeated stars"
+      },
+      {
+        "parent": "glob \"***\"",
+        "child": "glob \"b*\"",
+        "category": "prefix rule would apply after collapsing repeated stars"
+      },
+      {
+        "parent": "glob \"***\"",
+        "child": "glob \"/*\"",
+        "category": "prefix rule would apply after collapsing repeated stars"
+      },
+      {
+        "parent": "glob \"***\"",
+        "child": "glob \"*a\"",
+        "category": "prefix rule would apply after collapsing repeated stars"
+      },
+      {
+        "parent": "glob \"***\"",
+        "child": "glob \"*b\"",
+        "category": "prefix rule would apply after collapsing repeated stars"
+      },
+      {
+        "parent": "glob \"***\"",
+        "child": "glob \"*/\"",
+        "category": "prefix rule would apply after collapsing repeated stars"
+      },
+      {
+        "parent": "glob \"***\"",
+        "child": "glob \"aa*\"",
+        "category": "prefix rule would apply after collapsing repeated stars"
+      },
+      {
+        "parent": "glob \"***\"",
+        "child": "glob \"ab*\"",
+        "category": "prefix rule would apply after collapsing repeated stars"
+      },
+      {
+        "parent": "glob \"***\"",
+        "child": "glob \"a/*\"",
+        "category": "prefix rule would apply after collapsing repeated stars"
+      },
+      {
+        "parent": "glob \"***\"",
+        "child": "glob \"a*a\"",
+        "category": "prefix rule would apply after collapsing repeated stars"
+      },
+      {
+        "parent": "glob \"***\"",
+        "child": "glob \"a*b\"",
+        "category": "prefix rule would apply after collapsing repeated stars"
+      },
+      {
+        "parent": "glob \"***\"",
+        "child": "glob \"a*/\"",
+        "category": "prefix rule would apply after collapsing repeated stars"
+      },
+      {
+        "parent": "glob \"***\"",
+        "child": "glob \"a**\"",
+        "category": "prefix rule would apply after collapsing repeated stars"
+      },
+      {
+        "parent": "glob \"***\"",
+        "child": "glob \"ba*\"",
+        "category": "prefix rule would apply after collapsing repeated stars"
+      },
+      {
+        "parent": "glob \"***\"",
+        "child": "glob \"bb*\"",
+        "category": "prefix rule would apply after collapsing repeated stars"
+      },
+      {
+        "parent": "glob \"***\"",
+        "child": "glob \"b/*\"",
+        "category": "prefix rule would apply after collapsing repeated stars"
+      },
+      {
+        "parent": "glob \"***\"",
+        "child": "glob \"b*a\"",
+        "category": "prefix rule would apply after collapsing repeated stars"
+      },
+      {
+        "parent": "glob \"***\"",
+        "child": "glob \"b*b\"",
+        "category": "prefix rule would apply after collapsing repeated stars"
+      },
+      {
+        "parent": "glob \"***\"",
+        "child": "glob \"b*/\"",
+        "category": "prefix rule would apply after collapsing repeated stars"
+      },
+      {
+        "parent": "glob \"***\"",
+        "child": "glob \"b**\"",
+        "category": "prefix rule would apply after collapsing repeated stars"
+      },
+      {
+        "parent": "glob \"***\"",
+        "child": "glob \"/a*\"",
+        "category": "prefix rule would apply after collapsing repeated stars"
+      },
+      {
+        "parent": "glob \"***\"",
+        "child": "glob \"/b*\"",
+        "category": "prefix rule would apply after collapsing repeated stars"
+      },
+      {
+        "parent": "glob \"***\"",
+        "child": "glob \"//*\"",
+        "category": "prefix rule would apply after collapsing repeated stars"
+      },
+      {
+        "parent": "glob \"***\"",
+        "child": "glob \"/*a\"",
+        "category": "prefix rule would apply after collapsing repeated stars"
+      },
+      {
+        "parent": "glob \"***\"",
+        "child": "glob \"/*b\"",
+        "category": "prefix rule would apply after collapsing repeated stars"
+      },
+      {
+        "parent": "glob \"***\"",
+        "child": "glob \"/*/\"",
+        "category": "prefix rule would apply after collapsing repeated stars"
+      },
+      {
+        "parent": "glob \"***\"",
+        "child": "glob \"/**\"",
+        "category": "prefix rule would apply after collapsing repeated stars"
+      },
+      {
+        "parent": "glob \"***\"",
+        "child": "glob \"*aa\"",
+        "category": "prefix rule would apply after collapsing repeated stars"
+      },
+      {
+        "parent": "glob \"***\"",
+        "child": "glob \"*ab\"",
+        "category": "prefix rule would apply after collapsing repeated stars"
+      },
+      {
+        "parent": "glob \"***\"",
+        "child": "glob \"*a/\"",
+        "category": "prefix rule would apply after collapsing repeated stars"
+      },
+      {
+        "parent": "glob \"***\"",
+        "child": "glob \"*a*\"",
+        "category": "prefix rule would apply after collapsing repeated stars"
+      },
+      {
+        "parent": "glob \"***\"",
+        "child": "glob \"*ba\"",
+        "category": "prefix rule would apply after collapsing repeated stars"
+      },
+      {
+        "parent": "glob \"***\"",
+        "child": "glob \"*bb\"",
+        "category": "prefix rule would apply after collapsing repeated stars"
+      },
+      {
+        "parent": "glob \"***\"",
+        "child": "glob \"*b/\"",
+        "category": "prefix rule would apply after collapsing repeated stars"
+      },
+      {
+        "parent": "glob \"***\"",
+        "child": "glob \"*b*\"",
+        "category": "prefix rule would apply after collapsing repeated stars"
+      },
+      {
+        "parent": "glob \"***\"",
+        "child": "glob \"*/a\"",
+        "category": "prefix rule would apply after collapsing repeated stars"
+      },
+      {
+        "parent": "glob \"***\"",
+        "child": "glob \"*/b\"",
+        "category": "prefix rule would apply after collapsing repeated stars"
+      },
+      {
+        "parent": "glob \"***\"",
+        "child": "glob \"*//\"",
+        "category": "prefix rule would apply after collapsing repeated stars"
+      },
+      {
+        "parent": "glob \"***\"",
+        "child": "glob \"*/*\"",
+        "category": "prefix rule would apply after collapsing repeated stars"
+      },
+      {
+        "parent": "glob \"***\"",
+        "child": "glob \"**a\"",
+        "category": "prefix rule would apply after collapsing repeated stars"
+      },
+      {
+        "parent": "glob \"***\"",
+        "child": "glob \"**b\"",
+        "category": "prefix rule would apply after collapsing repeated stars"
+      },
+      {
+        "parent": "glob \"***\"",
+        "child": "glob \"**/\"",
+        "category": "prefix rule would apply after collapsing repeated stars"
+      },
+      {
+        "parent": "glob \"*a*\"",
+        "child": "glob \"a*\"",
+        "category": "infix containment (parent *M*, child has M inside a literal piece)"
+      },
+      {
+        "parent": "glob \"*a*\"",
+        "child": "glob \"*a\"",
+        "category": "infix containment (parent *M*, child has M inside a literal piece)"
+      },
+      {
+        "parent": "glob \"*a*\"",
+        "child": "glob \"aa*\"",
+        "category": "infix containment (parent *M*, child has M inside a literal piece)"
+      },
+      {
+        "parent": "glob \"*a*\"",
+        "child": "glob \"ab*\"",
+        "category": "infix containment (parent *M*, child has M inside a literal piece)"
+      },
+      {
+        "parent": "glob \"*a*\"",
+        "child": "glob \"a/*\"",
+        "category": "infix containment (parent *M*, child has M inside a literal piece)"
+      },
+      {
+        "parent": "glob \"*a*\"",
+        "child": "glob \"a*a\"",
+        "category": "infix containment (parent *M*, child has M inside a literal piece)"
+      },
+      {
+        "parent": "glob \"*a*\"",
+        "child": "glob \"a*b\"",
+        "category": "infix containment (parent *M*, child has M inside a literal piece)"
+      },
+      {
+        "parent": "glob \"*a*\"",
+        "child": "glob \"a*/\"",
+        "category": "infix containment (parent *M*, child has M inside a literal piece)"
+      },
+      {
+        "parent": "glob \"*a*\"",
+        "child": "glob \"a**\"",
+        "category": "infix containment (parent *M*, child has M inside a literal piece)"
+      },
+      {
+        "parent": "glob \"*a*\"",
+        "child": "glob \"ba*\"",
+        "category": "infix containment (parent *M*, child has M inside a literal piece)"
+      },
+      {
+        "parent": "glob \"*a*\"",
+        "child": "glob \"b*a\"",
+        "category": "infix containment (parent *M*, child has M inside a literal piece)"
+      },
+      {
+        "parent": "glob \"*a*\"",
+        "child": "glob \"/a*\"",
+        "category": "infix containment (parent *M*, child has M inside a literal piece)"
+      },
+      {
+        "parent": "glob \"*a*\"",
+        "child": "glob \"/*a\"",
+        "category": "infix containment (parent *M*, child has M inside a literal piece)"
+      },
+      {
+        "parent": "glob \"*a*\"",
+        "child": "glob \"*aa\"",
+        "category": "infix containment (parent *M*, child has M inside a literal piece)"
+      },
+      {
+        "parent": "glob \"*a*\"",
+        "child": "glob \"*ab\"",
+        "category": "infix containment (parent *M*, child has M inside a literal piece)"
+      },
+      {
+        "parent": "glob \"*a*\"",
+        "child": "glob \"*a/\"",
+        "category": "infix containment (parent *M*, child has M inside a literal piece)"
+      },
+      {
+        "parent": "glob \"*a*\"",
+        "child": "glob \"*ba\"",
+        "category": "infix containment (parent *M*, child has M inside a literal piece)"
+      },
+      {
+        "parent": "glob \"*a*\"",
+        "child": "glob \"*/a\"",
+        "category": "infix containment (parent *M*, child has M inside a literal piece)"
+      },
+      {
+        "parent": "glob \"*a*\"",
+        "child": "glob \"**a\"",
+        "category": "infix containment (parent *M*, child has M inside a literal piece)"
+      },
+      {
+        "parent": "glob \"*b*\"",
+        "child": "glob \"b*\"",
+        "category": "infix containment (parent *M*, child has M inside a literal piece)"
+      },
+      {
+        "parent": "glob \"*b*\"",
+        "child": "glob \"*b\"",
+        "category": "infix containment (parent *M*, child has M inside a literal piece)"
+      },
+      {
+        "parent": "glob \"*b*\"",
+        "child": "glob \"ab*\"",
+        "category": "infix containment (parent *M*, child has M inside a literal piece)"
+      },
+      {
+        "parent": "glob \"*b*\"",
+        "child": "glob \"a*b\"",
+        "category": "infix containment (parent *M*, child has M inside a literal piece)"
+      },
+      {
+        "parent": "glob \"*b*\"",
+        "child": "glob \"ba*\"",
+        "category": "infix containment (parent *M*, child has M inside a literal piece)"
+      },
+      {
+        "parent": "glob \"*b*\"",
+        "child": "glob \"bb*\"",
+        "category": "infix containment (parent *M*, child has M inside a literal piece)"
+      },
+      {
+        "parent": "glob \"*b*\"",
+        "child": "glob \"b/*\"",
+        "category": "infix containment (parent *M*, child has M inside a literal piece)"
+      },
+      {
+        "parent": "glob \"*b*\"",
+        "child": "glob \"b*a\"",
+        "category": "infix containment (parent *M*, child has M inside a literal piece)"
+      },
+      {
+        "parent": "glob \"*b*\"",
+        "child": "glob \"b*b\"",
+        "category": "infix containment (parent *M*, child has M inside a literal piece)"
+      },
+      {
+        "parent": "glob \"*b*\"",
+        "child": "glob \"b*/\"",
+        "category": "infix containment (parent *M*, child has M inside a literal piece)"
+      },
+      {
+        "parent": "glob \"*b*\"",
+        "child": "glob \"b**\"",
+        "category": "infix containment (parent *M*, child has M inside a literal piece)"
+      },
+      {
+        "parent": "glob \"*b*\"",
+        "child": "glob \"/b*\"",
+        "category": "infix containment (parent *M*, child has M inside a literal piece)"
+      },
+      {
+        "parent": "glob \"*b*\"",
+        "child": "glob \"/*b\"",
+        "category": "infix containment (parent *M*, child has M inside a literal piece)"
+      },
+      {
+        "parent": "glob \"*b*\"",
+        "child": "glob \"*ab\"",
+        "category": "infix containment (parent *M*, child has M inside a literal piece)"
+      },
+      {
+        "parent": "glob \"*b*\"",
+        "child": "glob \"*ba\"",
+        "category": "infix containment (parent *M*, child has M inside a literal piece)"
+      },
+      {
+        "parent": "glob \"*b*\"",
+        "child": "glob \"*bb\"",
+        "category": "infix containment (parent *M*, child has M inside a literal piece)"
+      },
+      {
+        "parent": "glob \"*b*\"",
+        "child": "glob \"*b/\"",
+        "category": "infix containment (parent *M*, child has M inside a literal piece)"
+      },
+      {
+        "parent": "glob \"*b*\"",
+        "child": "glob \"*/b\"",
+        "category": "infix containment (parent *M*, child has M inside a literal piece)"
+      },
+      {
+        "parent": "glob \"*b*\"",
+        "child": "glob \"**b\"",
+        "category": "infix containment (parent *M*, child has M inside a literal piece)"
+      },
+      {
+        "parent": "glob \"*/*\"",
+        "child": "glob \"/*\"",
+        "category": "infix containment (parent *M*, child has M inside a literal piece)"
+      },
+      {
+        "parent": "glob \"*/*\"",
+        "child": "glob \"*/\"",
+        "category": "infix containment (parent *M*, child has M inside a literal piece)"
+      },
+      {
+        "parent": "glob \"*/*\"",
+        "child": "glob \"a/*\"",
+        "category": "infix containment (parent *M*, child has M inside a literal piece)"
+      },
+      {
+        "parent": "glob \"*/*\"",
+        "child": "glob \"a*/\"",
+        "category": "infix containment (parent *M*, child has M inside a literal piece)"
+      },
+      {
+        "parent": "glob \"*/*\"",
+        "child": "glob \"b/*\"",
+        "category": "infix containment (parent *M*, child has M inside a literal piece)"
+      },
+      {
+        "parent": "glob \"*/*\"",
+        "child": "glob \"b*/\"",
+        "category": "infix containment (parent *M*, child has M inside a literal piece)"
+      },
+      {
+        "parent": "glob \"*/*\"",
+        "child": "glob \"/a*\"",
+        "category": "infix containment (parent *M*, child has M inside a literal piece)"
+      },
+      {
+        "parent": "glob \"*/*\"",
+        "child": "glob \"/b*\"",
+        "category": "infix containment (parent *M*, child has M inside a literal piece)"
+      },
+      {
+        "parent": "glob \"*/*\"",
+        "child": "glob \"//*\"",
+        "category": "infix containment (parent *M*, child has M inside a literal piece)"
+      },
+      {
+        "parent": "glob \"*/*\"",
+        "child": "glob \"/*a\"",
+        "category": "infix containment (parent *M*, child has M inside a literal piece)"
+      },
+      {
+        "parent": "glob \"*/*\"",
+        "child": "glob \"/*b\"",
+        "category": "infix containment (parent *M*, child has M inside a literal piece)"
+      },
+      {
+        "parent": "glob \"*/*\"",
+        "child": "glob \"/*/\"",
+        "category": "infix containment (parent *M*, child has M inside a literal piece)"
+      },
+      {
+        "parent": "glob \"*/*\"",
+        "child": "glob \"/**\"",
+        "category": "infix containment (parent *M*, child has M inside a literal piece)"
+      },
+      {
+        "parent": "glob \"*/*\"",
+        "child": "glob \"*a/\"",
+        "category": "infix containment (parent *M*, child has M inside a literal piece)"
+      },
+      {
+        "parent": "glob \"*/*\"",
+        "child": "glob \"*b/\"",
+        "category": "infix containment (parent *M*, child has M inside a literal piece)"
+      },
+      {
+        "parent": "glob \"*/*\"",
+        "child": "glob \"*/a\"",
+        "category": "infix containment (parent *M*, child has M inside a literal piece)"
+      },
+      {
+        "parent": "glob \"*/*\"",
+        "child": "glob \"*/b\"",
+        "category": "infix containment (parent *M*, child has M inside a literal piece)"
+      },
+      {
+        "parent": "glob \"*/*\"",
+        "child": "glob \"*//\"",
+        "category": "infix containment (parent *M*, child has M inside a literal piece)"
+      },
+      {
+        "parent": "glob \"*/*\"",
+        "child": "glob \"**/\"",
+        "category": "infix containment (parent *M*, child has M inside a literal piece)"
+      },
+      {
+        "parent": "glob \"*a\"",
+        "child": "glob \"a*a\"",
+        "category": "suffix containment (parent *S, child ends with S)"
+      },
+      {
+        "parent": "glob \"*a\"",
+        "child": "glob \"b*a\"",
+        "category": "suffix containment (parent *S, child ends with S)"
+      },
+      {
+        "parent": "glob \"*a\"",
+        "child": "glob \"/*a\"",
+        "category": "suffix containment (parent *S, child ends with S)"
+      },
+      {
+        "parent": "glob \"*a\"",
+        "child": "glob \"*aa\"",
+        "category": "suffix containment (parent *S, child ends with S)"
+      },
+      {
+        "parent": "glob \"*a\"",
+        "child": "glob \"*ba\"",
+        "category": "suffix containment (parent *S, child ends with S)"
+      },
+      {
+        "parent": "glob \"*a\"",
+        "child": "glob \"*/a\"",
+        "category": "suffix containment (parent *S, child ends with S)"
+      },
+      {
+        "parent": "glob \"*b\"",
+        "child": "glob \"a*b\"",
+        "category": "suffix containment (parent *S, child ends with S)"
+      },
+      {
+        "parent": "glob \"*b\"",
+        "child": "glob \"b*b\"",
+        "category": "suffix containment (parent *S, child ends with S)"
+      },
+      {
+        "parent": "glob \"*b\"",
+        "child": "glob \"/*b\"",
+        "category": "suffix containment (parent *S, child ends with S)"
+      },
+      {
+        "parent": "glob \"*b\"",
+        "child": "glob \"*ab\"",
+        "category": "suffix containment (parent *S, child ends with S)"
+      },
+      {
+        "parent": "glob \"*b\"",
+        "child": "glob \"*bb\"",
+        "category": "suffix containment (parent *S, child ends with S)"
+      },
+      {
+        "parent": "glob \"*b\"",
+        "child": "glob \"*/b\"",
+        "category": "suffix containment (parent *S, child ends with S)"
+      },
+      {
+        "parent": "glob \"*/\"",
+        "child": "glob \"a*/\"",
+        "category": "suffix containment (parent *S, child ends with S)"
+      },
+      {
+        "parent": "glob \"*/\"",
+        "child": "glob \"b*/\"",
+        "category": "suffix containment (parent *S, child ends with S)"
+      },
+      {
+        "parent": "glob \"*/\"",
+        "child": "glob \"/*/\"",
+        "category": "suffix containment (parent *S, child ends with S)"
+      },
+      {
+        "parent": "glob \"*/\"",
+        "child": "glob \"*a/\"",
+        "category": "suffix containment (parent *S, child ends with S)"
+      },
+      {
+        "parent": "glob \"*/\"",
+        "child": "glob \"*b/\"",
+        "category": "suffix containment (parent *S, child ends with S)"
+      },
+      {
+        "parent": "glob \"*/\"",
+        "child": "glob \"*//\"",
+        "category": "suffix containment (parent *S, child ends with S)"
+      },
+      {
+        "parent": "glob \"**a\"",
+        "child": "glob \"a*a\"",
+        "category": "suffix containment (parent *S, child ends with S)"
+      },
+      {
+        "parent": "glob \"**a\"",
+        "child": "glob \"b*a\"",
+        "category": "suffix containment (parent *S, child ends with S)"
+      },
+      {
+        "parent": "glob \"**a\"",
+        "child": "glob \"/*a\"",
+        "category": "suffix containment (parent *S, child ends with S)"
+      },
+      {
+        "parent": "glob \"**a\"",
+        "child": "glob \"*aa\"",
+        "category": "suffix containment (parent *S, child ends with S)"
+      },
+      {
+        "parent": "glob \"**a\"",
+        "child": "glob \"*ba\"",
+        "category": "suffix containment (parent *S, child ends with S)"
+      },
+      {
+        "parent": "glob \"**a\"",
+        "child": "glob \"*/a\"",
+        "category": "suffix containment (parent *S, child ends with S)"
+      },
+      {
+        "parent": "glob \"**b\"",
+        "child": "glob \"a*b\"",
+        "category": "suffix containment (parent *S, child ends with S)"
+      },
+      {
+        "parent": "glob \"**b\"",
+        "child": "glob \"b*b\"",
+        "category": "suffix containment (parent *S, child ends with S)"
+      },
+      {
+        "parent": "glob \"**b\"",
+        "child": "glob \"/*b\"",
+        "category": "suffix containment (parent *S, child ends with S)"
+      },
+      {
+        "parent": "glob \"**b\"",
+        "child": "glob \"*ab\"",
+        "category": "suffix containment (parent *S, child ends with S)"
+      },
+      {
+        "parent": "glob \"**b\"",
+        "child": "glob \"*bb\"",
+        "category": "suffix containment (parent *S, child ends with S)"
+      },
+      {
+        "parent": "glob \"**b\"",
+        "child": "glob \"*/b\"",
+        "category": "suffix containment (parent *S, child ends with S)"
+      },
+      {
+        "parent": "glob \"**/\"",
+        "child": "glob \"a*/\"",
+        "category": "suffix containment (parent *S, child ends with S)"
+      },
+      {
+        "parent": "glob \"**/\"",
+        "child": "glob \"b*/\"",
+        "category": "suffix containment (parent *S, child ends with S)"
+      },
+      {
+        "parent": "glob \"**/\"",
+        "child": "glob \"/*/\"",
+        "category": "suffix containment (parent *S, child ends with S)"
+      },
+      {
+        "parent": "glob \"**/\"",
+        "child": "glob \"*a/\"",
+        "category": "suffix containment (parent *S, child ends with S)"
+      },
+      {
+        "parent": "glob \"**/\"",
+        "child": "glob \"*b/\"",
+        "category": "suffix containment (parent *S, child ends with S)"
+      },
+      {
+        "parent": "glob \"**/\"",
+        "child": "glob \"*//\"",
+        "category": "suffix containment (parent *S, child ends with S)"
+      },
+      {
+        "parent": "glob \"*a\"",
+        "child": "glob \"**a\"",
+        "category": "same language, spelled with repeated stars"
+      },
+      {
+        "parent": "glob \"*b\"",
+        "child": "glob \"**b\"",
+        "category": "same language, spelled with repeated stars"
+      },
+      {
+        "parent": "glob \"*/\"",
+        "child": "glob \"**/\"",
+        "category": "same language, spelled with repeated stars"
+      },
+      {
+        "parent": "glob \"**\"",
+        "child": "glob \"*\"",
+        "category": "same language, spelled with repeated stars"
+      },
+      {
+        "parent": "glob \"**\"",
+        "child": "glob \"***\"",
+        "category": "same language, spelled with repeated stars"
+      },
+      {
+        "parent": "glob \"a**\"",
+        "child": "glob \"a*\"",
+        "category": "same language, spelled with repeated stars"
+      },
+      {
+        "parent": "glob \"b**\"",
+        "child": "glob \"b*\"",
+        "category": "same language, spelled with repeated stars"
+      },
+      {
+        "parent": "glob \"/**\"",
+        "child": "glob \"/*\"",
+        "category": "same language, spelled with repeated stars"
+      },
+      {
+        "parent": "glob \"**a\"",
+        "child": "glob \"*a\"",
+        "category": "same language, spelled with repeated stars"
+      },
+      {
+        "parent": "glob \"**b\"",
+        "child": "glob \"*b\"",
+        "category": "same language, spelled with repeated stars"
+      },
+      {
+        "parent": "glob \"**/\"",
+        "child": "glob \"*/\"",
+        "category": "same language, spelled with repeated stars"
+      },
+      {
+        "parent": "glob \"***\"",
+        "child": "glob \"*\"",
+        "category": "same language, spelled with repeated stars"
+      },
+      {
+        "parent": "glob \"***\"",
+        "child": "glob \"**\"",
+        "category": "same language, spelled with repeated stars"
+      }
+    ],
+    "what_if_extensions": {
+      "note": "Analysis only, not implemented in src/, and relative to the CURRENT checker (rule A is implemented and is no longer a candidate; see rule_a). For each candidate rule set: how many of the remaining gap pairs of this universe it would accept, and how many unsafe pairs (must be 0 for the rule to be sound here; soundness in general would need its own proof).",
+      "results": [
+        {
+          "extensions": [
+            "B: collapse repeated stars before the glob rules"
+          ],
+          "gap_pairs_closed": 115,
+          "gap_pairs_left": 93,
+          "unsafe_pairs_it_would_accept": 0,
+          "completeness_rate_with_it": 0.924
+        },
+        {
+          "extensions": [
+            "C: suffix rule (parent *S, child tail ends with S)"
+          ],
+          "gap_pairs_closed": 21,
+          "gap_pairs_left": 187,
+          "unsafe_pairs_it_would_accept": 0,
+          "completeness_rate_with_it": 0.8472
+        },
+        {
+          "extensions": [
+            "B: collapse repeated stars before the glob rules",
+            "C: suffix rule (parent *S, child tail ends with S)"
+          ],
+          "gap_pairs_closed": 133,
+          "gap_pairs_left": 75,
+          "unsafe_pairs_it_would_accept": 0,
+          "completeness_rate_with_it": 0.9387
+        }
+      ]
+    },
+    "security_bugs": [],
+    "accepted_but_inconclusive": []
+  },
+  "sampled": {
+    "capability_level": {
+      "checker": "covers(parent, child)",
+      "truth": "smt.find_grant_escalation on the two one-capability grants",
+      "children_by_kind": {
+        "faulty": 1268,
+        "narrowed": 2346,
+        "random": 1386
+      },
+      "outcomes": {
+        "accepted_safe": 2938,
+        "rejected_safe_gap": 198,
+        "rejected_unsafe": 1864,
+        "accepted_unsafe_BUG": 0,
+        "inconclusive_accepted": 0,
+        "inconclusive_rejected": 0,
+        "pairs": 5000,
+        "truly_safe": 3136,
+        "completeness_rate": 0.9369
+      },
+      "previous_rule_set": {
+        "note": "The checker WITHOUT rule A, re-created in scripts/m0b_completeness.py and compared with the same solver answers. This is the previous rule set, not the code in src/.",
+        "outcomes": {
+          "accepted_safe": 2901,
+          "rejected_safe_gap": 235,
+          "rejected_unsafe": 1864,
+          "accepted_unsafe_BUG": 0,
+          "inconclusive_accepted": 0,
+          "inconclusive_rejected": 0,
+          "pairs": 5000,
+          "truly_safe": 3136,
+          "completeness_rate": 0.9251
+        }
+      },
+      "rule_a": {
+        "rule": "A: a star-free child glob is checked like eq (implemented in src/)",
+        "gap_before": 235,
+        "gap_now": 198,
+        "gap_pairs_closed": 37,
+        "unsafe_pairs_newly_accepted": 0,
+        "completeness_rate_before": 0.9251,
+        "completeness_rate_now": 0.9369
+      },
+      "gap_categories": [
+        {
+          "category": "constraint-level gap inherited (one child constraint is safe but rejected)",
+          "count": 0,
+          "examples": []
+        },
+        {
+          "category": "child capability covered only by a union of two or more parent capabilities",
+          "count": 0,
+          "examples": []
+        },
+        {
+          "category": "child capability can never allow a call (its constraints conjoin to nothing)",
+          "count": 198,
+          "examples": [
+            {
+              "parent": "pay(y glob \"bb/\", y max 2.0)",
+              "child": "pay(y glob \"bb/bb\", y max 1.5)"
+            },
+            {
+              "parent": "pay(y glob \"bb/\", y max 3)",
+              "child": "pay(y glob \"bb/bb\", y max 2.5)"
+            },
+            {
+              "parent": "pay(y glob \"bb/\", y max 3)",
+              "child": "pay(y glob \"bb/bb*\", y max 2.5)"
+            }
+          ]
+        },
+        {
+          "category": "child capability safe only through the conjunction of its own constraints",
+          "count": 0,
+          "examples": []
+        },
+        {
+          "category": "several uncovered child capabilities with different reasons",
+          "count": 0,
+          "examples": []
+        },
+        {
+          "category": "not classified (solver inconclusive while classifying)",
+          "count": 0,
+          "examples": []
+        },
+        {
+          "category": "other",
+          "count": 0,
+          "examples": []
+        }
+      ],
+      "security_bugs": [],
+      "accepted_but_inconclusive": []
+    },
+    "grant_level": {
+      "checker": "check_attenuation(parent, child).ok",
+      "truth": "smt.find_grant_escalation(parent, child)",
+      "children_by_kind": {
+        "faulty": 1054,
+        "narrowed": 2866,
+        "random": 1080
+      },
+      "outcomes": {
+        "accepted_safe": 3171,
+        "rejected_safe_gap": 146,
+        "rejected_unsafe": 1683,
+        "accepted_unsafe_BUG": 0,
+        "inconclusive_accepted": 0,
+        "inconclusive_rejected": 0,
+        "pairs": 5000,
+        "truly_safe": 3317,
+        "completeness_rate": 0.956
+      },
+      "previous_rule_set": {
+        "note": "The checker WITHOUT rule A, re-created in scripts/m0b_completeness.py and compared with the same solver answers. This is the previous rule set, not the code in src/.",
+        "outcomes": {
+          "accepted_safe": 3115,
+          "rejected_safe_gap": 202,
+          "rejected_unsafe": 1683,
+          "accepted_unsafe_BUG": 0,
+          "inconclusive_accepted": 0,
+          "inconclusive_rejected": 0,
+          "pairs": 5000,
+          "truly_safe": 3317,
+          "completeness_rate": 0.9391
+        }
+      },
+      "rule_a": {
+        "rule": "A: a star-free child glob is checked like eq (implemented in src/)",
+        "gap_before": 202,
+        "gap_now": 146,
+        "gap_pairs_closed": 56,
+        "unsafe_pairs_newly_accepted": 0,
+        "completeness_rate_before": 0.9391,
+        "completeness_rate_now": 0.956
+      },
+      "gap_categories": [
+        {
+          "category": "constraint-level gap inherited (one child constraint is safe but rejected)",
+          "count": 0,
+          "examples": []
+        },
+        {
+          "category": "child capability covered only by a union of two or more parent capabilities",
+          "count": 0,
+          "examples": []
+        },
+        {
+          "category": "child capability can never allow a call (its constraints conjoin to nothing)",
+          "count": 145,
+          "examples": [
+            {
+              "parent": "[send(x any)]",
+              "child": "[send(y in [\"/\", \"\"], y in [\"b\"])]"
+            },
+            {
+              "parent": "[send(); read(y max -3, z eq 1, y max -1)]",
+              "child": "[send(x max 3, x eq \"b\")]"
+            },
+            {
+              "parent": "[send(); read(y max -3, z eq 1, y max -1)]",
+              "child": "[read(x max 3, x eq \"b\")]"
+            }
+          ]
+        },
+        {
+          "category": "child capability safe only through the conjunction of its own constraints",
+          "count": 1,
+          "examples": [
+            {
+              "parent": "[pay(y in [3, \"ba\"], z eq -3); read(x in [\"/ba\", \"a/\"], x glob \"a/\")]",
+              "child": "[read(x in [\"a/\", \"/ba\"], x glob \"a/*\"); pay(y in [3], z eq -3); pay(y eq 3, z eq -3, z any)]"
+            }
+          ]
+        },
+        {
+          "category": "several uncovered child capabilities with different reasons",
+          "count": 0,
+          "examples": []
+        },
+        {
+          "category": "not classified (solver inconclusive while classifying)",
+          "count": 0,
+          "examples": []
+        },
+        {
+          "category": "other",
+          "count": 0,
+          "examples": []
+        }
+      ],
+      "security_bugs": [],
+      "accepted_but_inconclusive": []
+    },
+    "classifier_self_check": {
+      "note": "Hand-built gap pairs, one per reason, each rejected by the checker, proven safe by the solver and classified as expected. Not sampled and in no count: a sampled count of 0 means rare under this distribution, not invisible to the classifier.",
+      "pairs": [
+        {
+          "category": "constraint-level gap inherited (one child constraint is safe but rejected)",
+          "parent": "[read(x glob \"*a\")]",
+          "child": "[read(x glob \"*ba\")]"
+        },
+        {
+          "category": "child capability covered only by a union of two or more parent capabilities",
+          "parent": "[read(x in [1]); read(x in [2])]",
+          "child": "[read(x in [1, 2])]"
+        },
+        {
+          "category": "child capability can never allow a call (its constraints conjoin to nothing)",
+          "parent": "[read(x eq 1)]",
+          "child": "[read(x eq \"a\", x max 0)]"
+        },
+        {
+          "category": "child capability safe only through the conjunction of its own constraints",
+          "parent": "[read(x in [1, 2])]",
+          "child": "[read(x in [1, 5], x max 1)]"
+        }
+      ]
+    },
+    "sampling": {
+      "seed": 0,
+      "pairs_requested_per_level": 5000,
+      "generators": "tests/strategies.py: parents from _capability / _grant. Half the children are 'narrowed' from the parent (capability level: legal steps only; grant level: the test suite's default, one deliberate fault in one child out of five), a quarter are 'faulty' (always exactly one fault) and a quarter are fully 'random'",
+      "budgets_and_expiry": "max_calls removed from every capability and all expiries set equal before comparing, because the solver model covers the single-call question only"
+    }
+  },
+  "z3_version": "5.4.1",
+  "hypothesis_version": "6.170.15",
+  "python_version": "3.13.18",
+  "seconds": {
+    "exhaustive": 67.6,
+    "total": 118.1
+  }
+}

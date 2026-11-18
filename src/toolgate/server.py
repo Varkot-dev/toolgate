@@ -1,0 +1,1078 @@
+"""HTTP front of the gateway: a thin FastAPI layer over `toolgate.gateway.Gateway`.
+
+Every decision is made by `Gateway`; this module only authenticates the
+caller, parses the request strictly and turns a `CallOutcome` into a status
+code.
+
+    POST /token            admin   mint a root token
+    POST /token/exchange   bearer  parent token -> narrower child token
+    POST /token/revoke     admin   revoke a token id (and its descendants)
+    POST /call             bearer  make a tool call
+    GET  /approvals        admin   pending approvals, WITH arguments
+    POST /approvals/{id}   admin   approve or reject
+    GET  /approvals/{id}   bearer  status and result, for the creating token
+    GET  /audit/verify     admin   replay the audit log's hash chain
+    GET  /audit/head       admin   seq and hash of the last entry
+    GET  /healthz          none
+
+Two kinds of credential, never mixed up. Both travel as
+`Authorization: Bearer <value>`, but an admin endpoint only ever hashes the
+value and compares it with the stored SHA-256 of the admin key (constant
+time), and an agent endpoint only ever verifies it as a signed token. A token
+on an admin endpoint is a wrong key; the admin key on an agent endpoint is
+refused before it reaches the token verifier or the audit log.
+
+Strictness at the boundary:
+
+  * exactly one Authorization header, scheme "Bearer" (any letter case, as
+    RFC 9110 requires), one space, no other whitespace
+  * request bodies are read with a hard size limit before anything parses them
+  * bodies must be `application/json`, valid UTF-8, with no duplicate keys,
+    no NaN or Infinity, and a bounded nesting depth
+  * unknown fields are refused (Pydantic `extra="forbid"`, strict types)
+  * query strings are refused: no endpoint takes one
+  * no CORS headers are ever sent, and the interactive docs are off by default
+  * tokens, keys and request bodies never appear in error bodies
+  * a string that is not valid Unicode text (a lone surrogate, which JSON can
+    spell as backslash-u-d800) is refused with 422 wherever it appears in a body, and
+    every body the server writes is encoded so that it cannot fail on one
+  * a caller whose token did not verify is told the error code and nothing
+    about the audit log (no `audit_seq`, no `stage`)
+
+Threads. Nothing that touches the store, the audit file or a tool runs on the
+event loop. Agent endpoints (/call, /token/exchange, GET /approvals/{id}) are
+plain `def` functions on FastAPI's shared worker pool. Admin endpoints run on
+a small pool of their own, so an operator can still revoke a token, decide
+approvals and read the audit head while every shared worker is busy with slow
+tool calls. Only header checks and JSON parsing of an already bounded body
+run on the loop.
+
+Status codes of /call beyond 200, 202, 401 and 403: 429 with Retry-After when
+the root token already has its maximum of calls in flight, 502 when the tool
+failed, 504 when it did not finish in time (it may still finish in the
+background) and 503 when the store or the audit log is unavailable.
+
+GET /approvals is the one place call arguments are shown, and only to the
+operator: a person cannot approve what they cannot see. Everywhere else the
+arguments exist only as a hash.
+"""
+
+import argparse
+import base64
+import binascii
+import hashlib
+import hmac
+import importlib
+import ipaddress
+import json
+import logging
+import math
+import os
+import re
+import sys
+from collections.abc import Awaitable, Callable, Mapping
+from pathlib import Path
+from typing import Annotated, Any, Literal
+
+import anyio
+import anyio.to_thread
+import yaml
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+from fastapi import Depends, FastAPI, Request
+from fastapi.responses import JSONResponse
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
+
+from toolgate.approvals import PENDING, Approval, ApprovalError, ApprovalQueue, valid_name
+from toolgate.audit import AuditLog, verify
+from toolgate.capability import Capability, Grant
+from toolgate.gateway import (
+    ALLOWED,
+    DEFAULT_UNVERIFIED_AUDIT_BURST,
+    DEFAULT_UNVERIFIED_AUDIT_RATE,
+    ERROR,
+    IN_FLIGHT_LIMIT,
+    TOOL_TIMEOUT,
+    AuditUnavailable,
+    CallOutcome,
+    Gateway,
+    bounded,
+    plain_args,
+)
+from toolgate.gateway import PENDING as CALL_PENDING
+from toolgate.policy import Policy
+from toolgate.store import MemoryStore, SqliteStore
+from toolgate.tokens import Authority, EscalationError, TokenError
+
+DEFAULT_MAX_BODY_BYTES = 64 * 1024
+DEFAULT_ADMIN_THREADS = 4
+DEFAULT_MAX_IN_FLIGHT_PER_ROOT = 8
+DEFAULT_TOOL_TIMEOUT = 30
+DEFAULT_LIMIT_CONCURRENCY = 256
+DEFAULT_TIMEOUT_KEEP_ALIVE = 5
+EMPTY_SHA256 = hashlib.sha256(b"").hexdigest()
+_SURROGATE = re.compile("[\ud800-\udfff]")
+MAX_JSON_DEPTH = 64
+MAX_EXPIRES_IN = 366 * 24 * 3600  # sanity bound; the authority's max_ttl is the real cap
+_HEX64 = re.compile(r"[0-9a-f]{64}")
+# RFC 6750 token68 characters. No whitespace, no commas, no control characters.
+_BEARER = re.compile(r"[Bb][Ee][Aa][Rr][Ee][Rr] ([A-Za-z0-9._~+/=-]{1,65536})")
+_APPROVAL_ID = re.compile(r"[A-Za-z0-9_-]{1,128}")
+_JSON_TYPE = re.compile(r"application/json(\s*;\s*charset=utf-8)?", re.IGNORECASE)
+
+
+def safe_text(value: Any) -> str:
+    """`value` as text that can always be encoded as UTF-8.
+
+    A lone surrogate becomes its visible escape (backslash, u, four hex
+    digits) instead of making the encoder raise while an error is being
+    reported.
+    """
+    return str(value).encode("utf-8", "backslashreplace").decode("utf-8")
+
+
+class _Json(JSONResponse):
+    """The one place a response body is encoded. It cannot fail on a string."""
+
+    def render(self, content: Any) -> bytes:
+        return json.dumps(
+            content, ensure_ascii=False, allow_nan=False, separators=(",", ":")
+        ).encode("utf-8", "backslashreplace")
+
+
+class ApiError(Exception):
+    """An error response. `reason` must never contain a credential.
+
+    This is the one place the strings of an error body are made safe to
+    encode: whatever text a refusal quotes, the response can be written.
+    """
+
+    def __init__(
+        self,
+        status: int,
+        error: str,
+        reason: str = "",
+        headers: Mapping[str, str] | None = None,
+    ) -> None:
+        super().__init__(error)
+        self.status = status
+        self.error = safe_text(error)
+        self.reason = safe_text(reason)
+        self.headers = dict(headers or {})
+
+    def response(self) -> JSONResponse:
+        body = {"error": self.error}
+        if self.reason:
+            body["reason"] = self.reason
+        return _Json(body, status_code=self.status, headers=self.headers)
+
+
+def _unauthorized(error: str = "", description: str = "") -> ApiError:
+    """401 with the challenge RFC 6750 asks for. `description` is a fixed code."""
+    challenge = 'Bearer realm="toolgate"'
+    if error:
+        challenge += f', error="{error}"'
+    if description:
+        challenge += f', error_description="{description}"'
+    return ApiError(401, "unauthorized", description or "", headers={"WWW-Authenticate": challenge})
+
+
+# ---------------------------------------------------------------------------
+# Strict JSON
+# ---------------------------------------------------------------------------
+
+
+def _unique_keys(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+    out: dict[str, Any] = {}
+    for key, value in pairs:
+        if key in out:
+            raise ValueError("duplicate key")
+        out[key] = value
+    return out
+
+
+def _no_constant(name: str) -> Any:
+    raise ValueError("NaN and Infinity are not JSON")
+
+
+def _finite_float(text: str) -> float:
+    value = float(text)
+    if not math.isfinite(value):
+        raise ValueError("number out of range")
+    return value
+
+
+def _too_deep(raw: bytes) -> bool:
+    """True if brackets nest deeper than MAX_JSON_DEPTH. Brackets inside strings count
+    too, which only errs toward refusing."""
+    depth = 0
+    for byte in raw:
+        if byte in (0x5B, 0x7B):  # [ {
+            depth += 1
+            if depth > MAX_JSON_DEPTH:
+                return True
+        elif byte in (0x5D, 0x7D):  # ] }
+            depth -= 1
+    return False
+
+
+def strict_json(raw: bytes) -> Any:
+    """Parse a request body. Raises ApiError(400) for anything questionable."""
+    if _too_deep(raw):
+        raise ApiError(400, "invalid_json", "nested too deeply")
+    try:
+        return json.loads(
+            raw.decode("utf-8"),
+            object_pairs_hook=_unique_keys,
+            parse_constant=_no_constant,
+            parse_float=_finite_float,
+        )
+    except UnicodeDecodeError:
+        raise ApiError(400, "invalid_json", "body is not UTF-8") from None
+    except RecursionError:
+        raise ApiError(400, "invalid_json", "nested too deeply") from None
+    except ValueError as exc:
+        known = ("duplicate key", "NaN and Infinity are not JSON", "number out of range")
+        reason = str(exc) if str(exc) in known else "body is not valid JSON"
+        raise ApiError(400, "invalid_json", reason) from None
+
+
+# ---------------------------------------------------------------------------
+# Request models
+# ---------------------------------------------------------------------------
+
+
+class _Model(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+
+def _name(value: str) -> str:
+    if not valid_name(value):
+        raise ValueError("must be 1 to 256 printable characters with no surrounding whitespace")
+    return value
+
+
+class TokenRequest(_Model):
+    sub: str
+    actor: str
+    capabilities: list[dict[str, Any]] = Field(max_length=256)
+    expires_in: int | float = Field(gt=0, le=MAX_EXPIRES_IN, allow_inf_nan=False)
+
+    _names = field_validator("sub", "actor")(_name)
+
+
+class ExchangeRequest(_Model):
+    capabilities: list[dict[str, Any]] = Field(max_length=256)
+    actor: str
+    expires_in: int | float = Field(gt=0, le=MAX_EXPIRES_IN, allow_inf_nan=False)
+
+    _names = field_validator("actor")(_name)
+
+
+class RevokeRequest(_Model):
+    jti: str = Field(min_length=1, max_length=256)
+
+
+class CallRequest(_Model):
+    tool: str = Field(min_length=1, max_length=128)
+    args: dict[str, Any] = Field(default_factory=dict)
+
+
+class ResolveRequest(_Model):
+    decision: Literal["approve", "reject"]
+    approver: str
+
+    _names = field_validator("approver")(_name)
+
+
+def _has_surrogate(value: Any) -> bool:
+    """True if any string in parsed JSON (a key or a value) holds a surrogate."""
+    stack = [value]
+    while stack:
+        item = stack.pop()
+        if type(item) is str:
+            if _SURROGATE.search(item):
+                return True
+        elif type(item) is dict:
+            stack.extend(item)
+            stack.extend(item.values())
+        elif type(item) is list:
+            stack.extend(item)
+    return False
+
+
+def _body(model: type[_Model]) -> Callable[[Request], Awaitable[Any]]:
+    """Dependency: the request body, strictly parsed and validated as `model`."""
+
+    async def read(request: Request) -> Any:
+        data = strict_json(await request.body())
+        if _has_surrogate(data):
+            # JSON can spell half of a surrogate pair (backslash-u-d800). Such a string
+            # is not text: it cannot be encoded, hashed, logged or echoed.
+            raise ApiError(422, "invalid_request", "strings must not contain surrogate code points")
+        try:
+            return model.model_validate(data)
+        except ValidationError as exc:
+            # Field names and messages only; never the submitted values.
+            problems = [
+                f"{bounded('.'.join(str(p) for p in e['loc']), 80) or 'body'}: {e['msg']}"
+                for e in exc.errors(include_input=False, include_url=False)[:5]
+            ]
+            raise ApiError(422, "invalid_request", "; ".join(problems)) from None
+
+    return read
+
+
+# ---------------------------------------------------------------------------
+# Body size limit and request shape, before FastAPI sees anything
+# ---------------------------------------------------------------------------
+
+
+class _Guard:
+    """ASGI middleware: no query strings, JSON only, and a hard body size limit.
+
+    The body is read here, counted as it arrives, and replayed to the app, so
+    the limit holds for chunked uploads that declare no Content-Length too.
+    """
+
+    def __init__(self, app: Any, max_body_bytes: int) -> None:
+        self.app = app
+        self.max_body_bytes = max_body_bytes
+
+    async def __call__(self, scope: Any, receive: Any, send: Any) -> None:
+        if scope["type"] != "http":
+            if scope["type"] == "lifespan":
+                await self.app(scope, receive, send)
+            return  # websockets and anything else: not served
+        error = self._check(scope)
+        body = b""
+        if error is None and scope["method"] in ("POST", "PUT", "PATCH"):
+            more = True
+            while more:
+                message = await receive()
+                if message["type"] != "http.request":
+                    return  # client went away
+                body += message.get("body", b"")
+                more = message.get("more_body", False)
+                if len(body) > self.max_body_bytes:
+                    error = ApiError(413, "body_too_large")
+                    break
+        if error is not None:
+            await error.response()(scope, receive, send)
+            return
+
+        sent = False
+
+        async def replay() -> Any:
+            nonlocal sent
+            if not sent:
+                sent = True
+                return {"type": "http.request", "body": body, "more_body": False}
+            return await receive()
+
+        await self.app(scope, replay, send)
+
+    def _check(self, scope: Any) -> ApiError | None:
+        if scope.get("query_string"):
+            return ApiError(400, "invalid_request", "query strings are not accepted")
+        if scope["method"] not in ("POST", "PUT", "PATCH"):
+            return None
+        headers = scope.get("headers", [])
+        types = [v for k, v in headers if k == b"content-type"]
+        if len(types) != 1 or not _JSON_TYPE.fullmatch(types[0].decode("latin-1").strip()):
+            return ApiError(415, "unsupported_media_type", "send application/json")
+        if any(k == b"content-encoding" for k, _ in headers):
+            return ApiError(415, "unsupported_media_type", "compressed bodies are not accepted")
+        lengths = [v for k, v in headers if k == b"content-length"]
+        if len(lengths) > 1 or (lengths and not lengths[0].isdigit()):
+            return ApiError(400, "invalid_request", "bad Content-Length")
+        if lengths and int(lengths[0]) > self.max_body_bytes:
+            return ApiError(413, "body_too_large")
+        return None
+
+
+# ---------------------------------------------------------------------------
+# The app
+# ---------------------------------------------------------------------------
+
+
+def hash_admin_key(key: str) -> str:
+    """SHA-256 (hex) of an admin key: the value `create_app` is given.
+
+    A plain hash is only safe for a long random key (32 random bytes or
+    more). It is not a password hash and must not be used for one.
+    """
+    return hashlib.sha256(key.encode("utf-8")).hexdigest()
+
+
+def _outcome_body(outcome: CallOutcome, *, with_result: bool = True) -> dict[str, Any]:
+    body: dict[str, Any] = {"status": outcome.status, "reason": safe_text(outcome.reason)}
+    # A caller whose token did not verify learns the error code and nothing
+    # else: `audit_seq` would let anyone watch how many decisions the gateway
+    # makes, and `stage` describes a pipeline they have no business mapping.
+    known = outcome.authenticated and outcome.stage != "token"
+    if outcome.stage and known:
+        body["stage"] = outcome.stage
+    if outcome.code:
+        body["code"] = outcome.code
+    if outcome.rule is not None:
+        body["rule"] = outcome.rule
+    if outcome.approval_id is not None:
+        body["approval_id"] = outcome.approval_id
+    if outcome.audit_seq is not None and known:
+        body["audit_seq"] = outcome.audit_seq
+    if with_result and outcome.status == ALLOWED:
+        body["result"] = outcome.result
+    return body
+
+
+def _token_error(exc: TokenError) -> ApiError:
+    if exc.code == "unavailable":
+        return ApiError(503, "unavailable", "token state is unavailable")
+    return _unauthorized("invalid_token", exc.code)
+
+
+def _issuing_error(exc: TokenError) -> ApiError:
+    """A TokenError from mint or exchange. Not every one is about the credential."""
+    if isinstance(exc, ValueError):  # the request was too large to consider
+        return ApiError(422, "invalid_request", bounded(exc.detail or exc.code, 200))
+    if exc.code in ("depth_exceeded", "too_many_children"):
+        # The parent token is valid; it has simply run out of delegation.
+        return ApiError(403, exc.code, bounded(exc.detail, 200))
+    return _token_error(exc)
+
+
+def create_app(
+    gateway: Gateway,
+    admin_key_hash: str,
+    *,
+    max_body_bytes: int = DEFAULT_MAX_BODY_BYTES,
+    docs: bool = False,
+    admin_threads: int = DEFAULT_ADMIN_THREADS,
+) -> FastAPI:
+    """Build the HTTP app around a gateway.
+
+    `admin_key_hash` is the lowercase hex SHA-256 of the admin key (see
+    `hash_admin_key`); the key itself is never held by the server.
+    `admin_threads` is the size of the worker pool only admin endpoints use.
+    """
+    if type(admin_key_hash) is not str or not _HEX64.fullmatch(admin_key_hash):
+        raise ValueError("admin_key_hash must be 64 lowercase hex characters (a SHA-256)")
+    if admin_key_hash == EMPTY_SHA256:
+        raise ValueError("admin_key_hash is the SHA-256 of the empty string: no key was set")
+    if type(max_body_bytes) is not int or max_body_bytes < 1:
+        raise ValueError("max_body_bytes must be a positive integer")
+    if type(admin_threads) is not int or admin_threads < 1:
+        raise ValueError("admin_threads must be a positive integer")
+    stored = admin_key_hash.encode("ascii")
+
+    app = FastAPI(
+        title="toolgate",
+        redirect_slashes=False,
+        docs_url="/docs" if docs else None,
+        redoc_url=None,
+        openapi_url="/openapi.json" if docs else None,
+        default_response_class=_Json,
+    )
+    app.add_middleware(_Guard, max_body_bytes=max_body_bytes)
+
+    @app.exception_handler(ApiError)
+    async def _api_error(request: Request, exc: ApiError) -> JSONResponse:
+        return exc.response()
+
+    @app.exception_handler(Exception)
+    async def _unexpected(request: Request, exc: Exception) -> JSONResponse:
+        return _Json({"error": "internal"}, status_code=500)
+
+    # -- the admin pool -----------------------------------------------------
+
+    # FastAPI runs every plain `def` endpoint on one shared pool of worker
+    # threads. Agents can fill that pool with slow tool calls, and an admin
+    # request queued behind them would wait for a tool to finish before a
+    # token could be revoked. Admin endpoints are `async def` and hand their
+    # work to threads counted by a limiter of their own instead.
+    limiters: list[anyio.CapacityLimiter] = []
+
+    async def on_admin_thread(work: Callable[[], Any]) -> Any:
+        if not limiters:  # made on first use: it needs a running event loop
+            limiters.append(anyio.CapacityLimiter(admin_threads))
+        return await anyio.to_thread.run_sync(work, limiter=limiters[0])
+
+    # -- who is calling -----------------------------------------------------
+
+    def is_admin_key(value: str) -> bool:
+        presented = hashlib.sha256(value.encode("utf-8")).hexdigest().encode("ascii")
+        return hmac.compare_digest(presented, stored)
+
+    def credential(request: Request) -> str:
+        values = request.headers.getlist("authorization")
+        if len(values) != 1:
+            raise _unauthorized()
+        match = _BEARER.fullmatch(values[0])
+        if match is None:
+            raise _unauthorized()
+        return match.group(1)
+
+    async def admin(request: Request) -> None:
+        if not is_admin_key(credential(request)):
+            raise _unauthorized("invalid_token")
+
+    async def bearer(request: Request) -> str:
+        value = credential(request)
+        if is_admin_key(value):
+            # The admin key is not an agent credential. Stop here, so it is
+            # never handed to the token verifier or fingerprinted in the log.
+            raise _unauthorized("invalid_token")
+        return value
+
+    Admin = Depends(admin)
+    Bearer = Annotated[str, Depends(bearer)]
+
+    def issued(pair: tuple[str, Any]) -> dict[str, Any]:
+        token, verified = pair
+        return {"token": token, "jti": verified.jti, "expires_at": verified.exp}
+
+    unaudited = ApiError(503, "unavailable", "audit log unavailable; no token was issued")
+
+    # -- tokens -------------------------------------------------------------
+
+    # Mint, exchange and revoke go through the gateway, which writes an audit
+    # entry for each (see "Token lifecycle" in gateway.py).
+
+    @app.post("/token", dependencies=[Admin])
+    async def mint(body: Annotated[TokenRequest, Depends(_body(TokenRequest))]) -> dict[str, Any]:
+        def work() -> dict[str, Any]:
+            try:
+                capabilities = tuple(Capability.from_dict(c) for c in body.capabilities)
+                grant = Grant(capabilities, gateway.now() + body.expires_in)
+                return issued(gateway.mint_token(body.sub, grant, body.actor, body.expires_in))
+            except AuditUnavailable:
+                raise unaudited from None
+            except TokenError as exc:
+                raise _issuing_error(exc) from None
+            except (ValueError, TypeError) as exc:
+                raise ApiError(422, "invalid_request", bounded(str(exc), 200)) from None
+
+        return await on_admin_thread(work)
+
+    @app.post("/token/exchange")
+    def exchange(
+        parent: Bearer, body: Annotated[ExchangeRequest, Depends(_body(ExchangeRequest))]
+    ) -> dict[str, Any]:
+        try:
+            return issued(
+                gateway.exchange_token(parent, body.capabilities, body.actor, body.expires_in)
+            )
+        except AuditUnavailable:
+            raise unaudited from None
+        except TokenError as exc:
+            raise _issuing_error(exc) from None
+        except EscalationError as exc:
+            raise ApiError(403, "escalation", bounded(exc.reason, 200)) from None
+        except (ValueError, TypeError) as exc:
+            raise ApiError(422, "invalid_request", bounded(str(exc), 200)) from None
+
+    @app.post("/token/revoke", dependencies=[Admin])
+    async def revoke(
+        body: Annotated[RevokeRequest, Depends(_body(RevokeRequest))],
+    ) -> dict[str, Any]:
+        def work() -> dict[str, Any]:
+            try:
+                entry = gateway.revoke_token(body.jti)
+            except TokenError as exc:
+                raise _token_error(exc) from None
+            except ValueError as exc:
+                raise ApiError(422, "invalid_request", bounded(str(exc), 200)) from None
+            content: dict[str, Any] = {"revoked": body.jti}
+            if entry is None:  # revoked all the same; the operator should know
+                content["audited"] = False
+            return content
+
+        return await on_admin_thread(work)
+
+    # -- calls --------------------------------------------------------------
+
+    @app.post("/call")
+    def call(
+        token: Bearer, body: Annotated[CallRequest, Depends(_body(CallRequest))]
+    ) -> JSONResponse:
+        outcome = gateway.handle_call(token, body.tool, body.args)
+        content = _outcome_body(outcome)
+        if outcome.status == ALLOWED:
+            return _Json(content, status_code=200)
+        if outcome.status == CALL_PENDING:
+            return _Json(content, status_code=202)
+        if outcome.status == ERROR:
+            # 504: the caller stopped waiting. The tool may still finish.
+            return _Json(content, status_code=504 if outcome.code == TOOL_TIMEOUT else 502)
+        if outcome.stage == "token":
+            challenge = _unauthorized("invalid_token", outcome.reason)
+            return _Json(content, status_code=401, headers=challenge.headers)
+        if outcome.code == IN_FLIGHT_LIMIT:
+            return _Json(content, status_code=429, headers={"Retry-After": "1"})
+        if outcome.stage in ("unavailable", "audit"):
+            return _Json(content, status_code=503)
+        return _Json(content, status_code=403)
+
+    # -- approvals ----------------------------------------------------------
+
+    def approval_id_or_404(approval_id: str) -> str:
+        if not _APPROVAL_ID.fullmatch(approval_id):
+            raise ApiError(404, "not_found")
+        return approval_id
+
+    def approval_error(exc: ApprovalError) -> ApiError:
+        status = {"not_found": 404, "not_pending": 409, "expired": 410}.get(exc.code, 409)
+        return ApiError(status, exc.code, exc.detail)
+
+    @app.get("/approvals", dependencies=[Admin])
+    async def list_approvals() -> dict[str, Any]:
+        return await on_admin_thread(pending_rows)
+
+    def pending_rows() -> dict[str, Any]:
+        now = gateway.now()
+
+        def row(record: Approval) -> dict[str, Any]:
+            return {
+                "id": record.id,
+                "tool": record.call.tool,
+                "sub": record.sub,
+                "actors": list(record.actors),
+                "jti": record.jti,
+                "args_hash": record.args_hash,
+                "args": plain_args(record.call.args),
+                "rule": record.rule,
+                "reason": record.reason,
+                "age_seconds": max(0, now - record.created_at),
+                "expires_in_seconds": max(0, record.expires_at - now),
+            }
+
+        return {"pending": [row(r) for r in gateway.list_pending()]}
+
+    @app.post("/approvals/{approval_id}", dependencies=[Admin])
+    async def resolve(
+        approval_id: str, body: Annotated[ResolveRequest, Depends(_body(ResolveRequest))]
+    ) -> dict[str, Any]:
+        approval_id = approval_id_or_404(approval_id)
+
+        def work() -> dict[str, Any]:
+            try:
+                outcome = gateway.resolve_approval(approval_id, body.decision, body.approver)
+            except ApprovalError as exc:
+                raise approval_error(exc) from None
+            except ValueError as exc:
+                raise ApiError(422, "invalid_request", bounded(str(exc), 200)) from None
+            record = gateway.approvals.get(approval_id)
+            content = _outcome_body(outcome, with_result=False)
+            content["state"] = record.state if record is not None else body.decision
+            return content
+
+        return await on_admin_thread(work)
+
+    @app.get("/approvals/{approval_id}")
+    def read_approval(approval_id: str, token: Bearer) -> dict[str, Any]:
+        approval_id = approval_id_or_404(approval_id)
+        try:
+            record = gateway.get_approval(approval_id, token)
+        except TokenError as exc:
+            raise _token_error(exc) from None
+        except ApprovalError as exc:
+            raise approval_error(exc) from None
+        content: dict[str, Any] = {
+            "id": record.id,
+            "state": record.state,
+            "tool": record.call.tool,
+            "args_hash": record.args_hash,
+            "rule": record.rule,
+        }
+        if record.state != PENDING and type(record.outcome) is CallOutcome:
+            content["outcome"] = _outcome_body(record.outcome)
+            content["outcome"].pop("approval_id", None)
+        return content
+
+    # -- audit --------------------------------------------------------------
+
+    @app.get("/audit/head", dependencies=[Admin])
+    async def audit_head() -> dict[str, Any]:
+        def work() -> dict[str, Any]:
+            head = gateway.audit.head()
+            return {"seq": head.seq, "hash": head.hash}
+
+        return await on_admin_thread(work)
+
+    @app.get("/audit/verify", dependencies=[Admin])
+    async def audit_verify() -> dict[str, Any]:
+        return await on_admin_thread(verify_now)
+
+    def verify_now() -> dict[str, Any]:
+        # Verify against the head this process holds in memory, which also
+        # catches a file truncated or rebuilt behind the gateway's back. If
+        # entries were appended while the file was being read, read it again.
+        for _ in range(3):
+            head = gateway.audit.head()
+            result = verify(gateway.audit.path, head)
+            if result.ok or gateway.audit.head() == head:
+                break
+        else:
+            result = verify(gateway.audit.path)
+            head = gateway.audit.head()
+        return {
+            "ok": result.ok,
+            "entries": result.entries,
+            "first_bad_index": result.first_bad_index,
+            "problem": result.problem,
+            "head": {"seq": head.seq, "hash": head.hash},
+        }
+
+    @app.get("/healthz")
+    async def healthz() -> dict[str, str]:
+        return {"status": "ok"}
+
+    return app
+
+
+# ---------------------------------------------------------------------------
+# Configuration and the command line
+# ---------------------------------------------------------------------------
+
+
+class ConfigError(ValueError):
+    """The gateway configuration cannot be used."""
+
+
+_CONFIG_KEYS = {
+    "issuer",
+    "audience",
+    "signing_key_env",
+    "admin_key_hash_env",
+    "policy_file",
+    "audit_log",
+    "store",
+    "tokens",
+    "approvals",
+    "limits",
+    "server",
+    "tools",
+    "dashboard",
+}
+
+
+def echo(**arguments: Any) -> dict[str, Any]:
+    """Example tool: returns its arguments. Only for trying the gateway out."""
+    return {"echo": arguments}
+
+
+def _section(config: Mapping[str, Any], name: str, allowed: set[str]) -> dict[str, Any]:
+    value = config.get(name, {})
+    if type(value) is not dict:
+        raise ConfigError(f"`{name}` must be a mapping")
+    unknown = sorted(str(k) for k in set(value) - allowed)
+    if unknown:
+        raise ConfigError(f"`{name}`: unknown key {unknown[0]!r}")
+    return value
+
+
+def _env(config: Mapping[str, Any], key: str, environ: Mapping[str, str]) -> str:
+    name = config.get(key)
+    if type(name) is not str or not re.fullmatch(r"[A-Z][A-Z0-9_]*", name):
+        raise ConfigError(f"`{key}` must name an environment variable (the secret is not in files)")
+    value = environ.get(name, "")
+    if not value.strip():
+        raise ConfigError(f"environment variable {name} is not set")
+    return value
+
+
+def _setting(section: Mapping[str, Any], key: str, default: Any, kind: str) -> Any:
+    """One number or flag from a config section, type-checked. `kind` names the type."""
+    value = section.get(key, default)
+    if kind == "flag":
+        ok = type(value) is bool
+    elif kind == "count":
+        ok = type(value) is int and value >= 1
+    else:  # "seconds" and "rate": a positive finite number
+        ok = type(value) in (int, float) and math.isfinite(value) and value > 0
+    if not ok:
+        wanted = {"flag": "true or false", "count": "a positive integer"}.get(
+            kind, "a positive number"
+        )
+        raise ConfigError(f"`{key}` must be {wanted}")
+    return value
+
+
+def is_loopback(host: str) -> bool:
+    """True if `host` can only be reached from this machine."""
+    if host == "localhost":
+        return True
+    try:
+        return ipaddress.ip_address(host).is_loopback
+    except ValueError:
+        return False
+
+
+class _NoQueryStrings(logging.Filter):
+    """Cut the query string out of uvicorn's access log lines.
+
+    The app refuses every request that has a query string, but uvicorn writes
+    the access line with the full request target, and a client that wrongly
+    sends `?access_token=...` would leave its token in the log.
+    """
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        args = record.args
+        # uvicorn: (client address, method, full path, HTTP version, status)
+        if type(args) is tuple and len(args) == 5 and type(args[2]) is str:
+            record.args = (*args[:2], args[2].partition("?")[0], *args[3:])
+        return True
+
+
+def _load_tool(spec: Any) -> Callable[..., Any]:
+    if type(spec) is not str or spec.count(":") != 1:
+        raise ConfigError("a tool is written as 'package.module:function'")
+    module_name, attribute = spec.split(":")
+    try:
+        function = getattr(importlib.import_module(module_name), attribute)
+    except (ImportError, AttributeError) as exc:
+        raise ConfigError(f"cannot load tool {spec!r}: {type(exc).__name__}") from None
+    if not callable(function):
+        raise ConfigError(f"tool {spec!r} is not callable")
+    return function
+
+
+def load_config(path: str | Path) -> dict[str, Any]:
+    """Read and shape-check a gateway config file. No secrets are read here."""
+    try:
+        with open(path, "rb") as handle:
+            config = yaml.safe_load(handle.read(1_000_001).decode("utf-8"))
+    except (OSError, UnicodeDecodeError, yaml.YAMLError) as exc:
+        raise ConfigError(f"cannot read config: {type(exc).__name__}") from None
+    if type(config) is not dict:
+        raise ConfigError("config must be a mapping")
+    unknown = sorted(str(k) for k in set(config) - _CONFIG_KEYS)
+    if unknown:
+        raise ConfigError(f"unknown key {unknown[0]!r}")
+    return config
+
+
+def build(
+    config: Mapping[str, Any], environ: Mapping[str, str], base: Path
+) -> tuple[FastAPI, Gateway, dict[str, Any]]:
+    """Assemble store, authority, policy, audit log, queue, gateway and app.
+
+    Relative paths in the config are resolved against `base` (the config
+    file's directory). Returns (app, gateway, server settings).
+    """
+    # Read outside the try below: a missing variable must say "not set", and
+    # ConfigError is a ValueError that the base64 handler would swallow.
+    encoded = _env(config, "signing_key_env", environ)
+    try:
+        seed = base64.b64decode(encoded, validate=True)
+    except (binascii.Error, ValueError):
+        raise ConfigError("the signing key must be base64 of 32 bytes") from None
+    if len(seed) != 32:
+        raise ConfigError("the signing key must be base64 of 32 bytes")
+    if seed == bytes(32):
+        raise ConfigError("the signing key is all zero bytes; generate a random one")
+    admin_hash = _env(config, "admin_key_hash_env", environ).strip()
+    if not _HEX64.fullmatch(admin_hash):
+        raise ConfigError("the admin key hash must be 64 lowercase hex characters")
+    if admin_hash == EMPTY_SHA256:
+        raise ConfigError(
+            "the admin key hash is the SHA-256 of the empty string: the admin key was empty"
+        )
+
+    def path(key: str, *, resolve: bool = True) -> Path:
+        value = config.get(key)
+        if type(value) is not str or not value:
+            raise ConfigError(f"`{key}` must be a file path")
+        return (base / value).resolve() if resolve else base / value
+
+    store_cfg = _section(config, "store", {"kind", "path"})
+    tokens = _section(config, "tokens", {"max_ttl_seconds", "max_depth", "max_children"})
+    approvals = _section(
+        config,
+        "approvals",
+        {
+            "ttl_seconds",
+            "max_pending_per_token",
+            "max_pending_per_root",
+            "max_pending_per_sub",
+            "max_pending",
+            "retention_seconds",
+        },
+    )
+    limits = _section(
+        config,
+        "limits",
+        {
+            "max_body_bytes",
+            "max_output_bytes",
+            "max_in_flight_per_root",
+            "tool_timeout_seconds",
+            "tool_error_detail",
+            "unverified_audit_per_second",
+            "unverified_audit_burst",
+        },
+    )
+    server = _section(
+        config,
+        "server",
+        {
+            "host",
+            "port",
+            "admin_threads",
+            "limit_concurrency",
+            "timeout_keep_alive_seconds",
+            "access_log",
+        },
+    )
+    dashboard = _section(
+        config,
+        "dashboard",
+        {"enabled", "session_ttl_seconds", "secure_cookie", "feed_entries", "max_sessions"},
+    )
+    dashboard_enabled = _setting(dashboard, "enabled", False, "flag")
+    tools_cfg = config.get("tools", {})
+    if type(tools_cfg) is not dict:
+        raise ConfigError("`tools` must map a tool name to 'package.module:function'")
+
+    settings = {
+        "host": server.get("host", "127.0.0.1"),
+        "port": server.get("port", 8000),
+        "limit_concurrency": _setting(
+            server, "limit_concurrency", DEFAULT_LIMIT_CONCURRENCY, "count"
+        ),
+        "timeout_keep_alive": _setting(
+            server, "timeout_keep_alive_seconds", DEFAULT_TIMEOUT_KEEP_ALIVE, "seconds"
+        ),
+        "access_log": _setting(server, "access_log", False, "flag"),
+    }
+    if type(settings["host"]) is not str or type(settings["port"]) is not int:
+        raise ConfigError("`server.host` must be a string and `server.port` an integer")
+    admin_threads = _setting(server, "admin_threads", DEFAULT_ADMIN_THREADS, "count")
+    gateway_limits = {
+        "max_in_flight_per_root": _setting(
+            limits, "max_in_flight_per_root", DEFAULT_MAX_IN_FLIGHT_PER_ROOT, "count"
+        ),
+        "tool_timeout": _setting(limits, "tool_timeout_seconds", DEFAULT_TOOL_TIMEOUT, "seconds"),
+        "tool_error_detail": _setting(limits, "tool_error_detail", False, "flag"),
+        "unverified_audit_rate": _setting(
+            limits, "unverified_audit_per_second", DEFAULT_UNVERIFIED_AUDIT_RATE, "rate"
+        ),
+        "unverified_audit_burst": _setting(
+            limits, "unverified_audit_burst", DEFAULT_UNVERIFIED_AUDIT_BURST, "count"
+        ),
+    }
+
+    # Everything that can be checked without opening a file for writing is
+    # checked first; the store and the audit log (which takes a lock) come last
+    # and are closed again if anything after them fails.
+    opened: list[Any] = []
+    try:
+        tools = {name: _load_tool(spec) for name, spec in tools_cfg.items()}
+        policy = Policy.from_file(path("policy_file"))
+        queue = ApprovalQueue(
+            ttl=approvals.get("ttl_seconds", 300),
+            max_pending_per_token=approvals.get("max_pending_per_token", 5),
+            max_pending=approvals.get("max_pending", 100),
+            retention=approvals.get("retention_seconds", 3600),
+            max_pending_per_root=approvals.get("max_pending_per_root", 10),
+            max_pending_per_sub=approvals.get("max_pending_per_sub", 20),
+        )
+        # NOT resolved: AuditLog refuses a path that is a symbolic link, and
+        # resolving here would follow the link before AuditLog could see it.
+        audit_path = path("audit_log", resolve=False)
+        kind = store_cfg.get("kind", "memory")
+        if kind == "sqlite":
+            if type(store_cfg.get("path")) is not str:
+                raise ConfigError("`store.path` is required for a sqlite store")
+            store: Any = SqliteStore(str((base / store_cfg["path"]).resolve()))
+            opened.append(store)
+        elif kind == "memory":
+            store = MemoryStore()
+        else:
+            raise ConfigError("`store.kind` must be memory or sqlite")
+        authority = Authority(
+            Ed25519PrivateKey.from_private_bytes(seed),
+            config.get("issuer"),
+            config.get("audience"),
+            store,
+            max_depth=tokens.get("max_depth", 4),
+            max_ttl=tokens.get("max_ttl_seconds", 900),
+            max_children=tokens.get("max_children", 64),
+        )
+        audit = AuditLog(audit_path)
+        opened.append(audit)
+        gateway = Gateway(
+            authority,
+            policy,
+            audit,
+            queue,
+            tools,
+            max_output_bytes=limits.get("max_output_bytes", 64 * 1024),
+            **gateway_limits,
+        )
+        app = create_app(
+            gateway,
+            admin_hash,
+            max_body_bytes=limits.get("max_body_bytes", DEFAULT_MAX_BODY_BYTES),
+            admin_threads=admin_threads,
+        )
+        if dashboard_enabled:  # off by default: without it no /dashboard route exists
+            from toolgate.dashboard import mount_dashboard
+
+            options = {k: v for k, v in dashboard.items() if k != "enabled"}
+            mount_dashboard(app, gateway, admin_hash, admin_threads=admin_threads, **options)
+    except Exception as exc:  # PolicyError, AuditError, sqlite3.Error, ValueError, ...
+        for resource in opened:
+            resource.close()
+        if isinstance(exc, ConfigError):
+            raise
+        raise ConfigError(f"{type(exc).__name__}: {exc}") from None
+    return app, gateway, settings
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(prog="python -m toolgate.server")
+    parser.add_argument("--config", default="config/gateway.example.yaml")
+    options = parser.parse_args(argv)
+    config_path = Path(options.config).resolve()
+    try:
+        app, gateway, settings = build(load_config(config_path), os.environ, config_path.parent)
+    except ConfigError as exc:
+        print(f"toolgate: cannot start: {exc}", file=sys.stderr)
+        return 2
+    for warning in getattr(gateway.policy, "warnings", ()):
+        print(f"toolgate: policy warning: {warning}", file=sys.stderr)
+    if not is_loopback(settings["host"]):
+        print(
+            f"toolgate: warning: listening on {settings['host']}, which is not loopback. "
+            "There is no TLS here: every token and the admin key cross the network in clear "
+            "unless a TLS proxy is in front (see docs/DEPLOYMENT.md).",
+            file=sys.stderr,
+        )
+    import uvicorn
+
+    # The access log is off unless the config turns it on, and then a filter
+    # cuts query strings out of it: a client that wrongly sent a token in the
+    # URL would otherwise leave it there. No Server header, no proxy header
+    # trust. limit_concurrency caps connections and in-flight requests
+    # together (uvicorn answers 503 past it); timeout_keep_alive closes idle
+    # keep-alive connections. Neither replaces the proxy's read timeouts.
+    logging.getLogger("uvicorn.access").addFilter(_NoQueryStrings())
+    try:
+        uvicorn.run(
+            app,
+            host=settings["host"],
+            port=settings["port"],
+            server_header=False,
+            proxy_headers=False,
+            access_log=settings["access_log"],
+            limit_concurrency=settings["limit_concurrency"],
+            timeout_keep_alive=settings["timeout_keep_alive"],
+        )
+    finally:
+        gateway.flush()  # the last "attempts suppressed" summary, if any
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

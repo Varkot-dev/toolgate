@@ -1,0 +1,184 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<!--BASE-->
+<link rel="stylesheet" href="system.css">
+<style>
+  /* source tones: neutral for the user, indigo for a trusted tool, amber for
+     untrusted; red stays reserved for the one blocked call */
+  :root {
+    --warn: #d98a0b;        /* amber lines and icons */
+    --warn-ink: #8a4f00;    /* text, 6.1:1 on warn-tint */
+    --warn-tint: #fdf3e1;
+    --trust-ink: #4a3bd6;   /* text, 6.0:1 on accent-tint */
+  }
+  .read { margin-top: 40px; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 44px; }
+  .read .card { display: flex; flex-direction: column; gap: 12px; min-height: 164px; }
+  .tag {
+    align-self: flex-start;
+    display: inline-flex; align-items: center; height: 28px; padding: 0 10px;
+    border-radius: var(--r-pill); white-space: nowrap; line-height: 1;
+    background: var(--chip); color: var(--muted);
+  }
+  .tag.trusted { background: var(--accent-tint); color: var(--trust-ink); }
+  .tag.untrusted { background: var(--warn-tint); color: var(--warn-ink); }
+  .row { display: flex; align-items: center; gap: 8px; line-height: 22px; white-space: nowrap; }
+  .row svg { width: 16px; height: 16px; flex: none; stroke-width: 1.75; color: var(--muted); }
+  .row.where { font-family: var(--mono); color: var(--ink); }
+  .row.said { display: block; color: var(--ink); }
+  .row.who { margin-top: auto; color: var(--muted); }
+  .head .meta.mono { font-family: var(--mono); }
+
+  .gap { height: 104px; }
+  .card.blocked { border: 1.5px dashed var(--no); box-shadow: none; background: var(--card);
+                  display: grid; gap: 14px; padding: 18px 20px; }
+  .card.blocked .head .name { font-family: var(--mono); font-weight: 500; letter-spacing: -0.01em; }
+  .head .tag { height: 26px; margin-left: 4px; }
+  .head .verdict { margin-left: auto; }
+  .line { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+  .url { display: flex; align-items: center; gap: 0; font-family: var(--mono); white-space: nowrap; line-height: 22px; }
+  .url .k { color: var(--muted); margin-right: 12px; font-family: var(--font); }
+  .val {
+    display: inline-flex; align-items: center; gap: 6px; height: 30px; padding: 0 10px;
+    border-radius: var(--r-pill); background: var(--accent-tint); color: var(--trust-ink);
+    margin-left: 2px;
+  }
+  .val svg { width: 16px; height: 16px; stroke-width: 1.75; }
+  .rule { font-family: var(--mono); height: 30px; display: inline-flex; align-items: center;
+          padding: 0 10px; border-radius: var(--r-pill); background: var(--no-tint); color: var(--no-ink);
+          white-space: nowrap; letter-spacing: -0.01em; }
+  .verdict { display: inline-flex; align-items: center; gap: 6px; color: var(--no-ink); white-space: nowrap; }
+  .verdict .rule { margin-left: 6px; }
+  .verdict svg { width: 16px; height: 16px; stroke-width: 2.5; color: var(--no); }
+
+  .wire-label {
+    position: absolute; transform: translate(-50%, -50%);
+    display: inline-flex; align-items: center; height: 30px; padding: 0 12px; border-radius: 999px;
+    background: var(--card); border: 1px solid var(--line); color: var(--muted); white-space: nowrap;
+  }
+</style>
+</head>
+<body>
+<div class="stage" id="stage">
+  <div class="title" id="title"></div>
+  <div class="read" id="read"></div>
+  <div class="gap"></div>
+  <div class="card blocked" id="call"></div>
+  <svg class="wires" id="wires"></svg>
+</div>
+<template id="i-user">{{icon:user}}</template>
+<template id="i-globe">{{icon:globe}}</template>
+<template id="i-file-text">{{icon:file-text}}</template>
+<template id="i-users">{{icon:users}}</template>
+<template id="i-lock">{{icon:lock}}</template>
+<template id="i-shield-x">{{icon:shield-x}}</template>
+<template id="i-x">{{icon:x}}</template>
+<script>
+/*DATA*/
+const D = window.DATA;
+const $ = (id) => document.getElementById(id);
+const ic = (n) => $("i-" + n).innerHTML;
+const el = (tag, cls, html) => {
+  const e = document.createElement(tag);
+  if (cls) e.className = cls;
+  if (html !== undefined) e.innerHTML = html;
+  return e;
+};
+const esc = (s) => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;");
+const NS = "http://www.w3.org/2000/svg";
+const TONE = { "from user": "", "trusted tool": "trusted", "untrusted": "untrusted" };
+
+function card(node) {
+  const c = el("div", "card");
+  c.id = "n-" + node.key;
+  const head = el("div", "head", ic(node.icon));
+  head.append(el("div", "name", esc(node.name)));
+  c.append(head);
+  c.append(el("span", "tag " + TONE[node.source], esc(node.source)));
+  if (node.where) c.append(el("div", "row where", esc(node.where)));
+  if (node.said) c.append(el("div", "row said", esc(node.said)));
+  const shared = node.shared;
+  c.append(el("div", "row who", ic(shared ? "users" : "lock") + `<span>${esc(node.readers)}</span>`));
+  return c;
+}
+
+function rel(node) {
+  const s = $("stage").getBoundingClientRect();
+  const r = node.getBoundingClientRect();
+  return { l: r.left - s.left, r: r.right - s.left, t: r.top - s.top, b: r.bottom - s.top,
+           cx: (r.left + r.right) / 2 - s.left, cy: (r.top + r.bottom) / 2 - s.top };
+}
+function path(d, color, dashed) {
+  const p = document.createElementNS(NS, "path");
+  p.setAttribute("d", d);
+  p.style.stroke = color;
+  p.setAttribute("stroke-width", 1.75);
+  if (dashed) p.setAttribute("stroke-dasharray", "4 5");
+  $("wires").append(p);
+}
+const right = (x, y, c) => path(`M ${x - 6} ${y - 5} L ${x} ${y} L ${x - 6} ${y + 5}`, c);
+const down = (x, y, c) => path(`M ${x - 5} ${y - 6} L ${x} ${y} L ${x + 5} ${y - 6}`, c);
+function label(text, x, y) {
+  const l = el("div", "wire-label", esc(text));
+  l.style.left = x + "px";
+  l.style.top = y + "px";
+  $("stage").append(l);
+}
+
+window.figure = {
+  async init() {
+    $("title").textContent = D.title;
+    for (const n of D.read) $("read").append(card(n));
+
+    const k = D.call;
+    const call = $("call");
+    const head = el("div", "head", ic("shield-x"));
+    head.firstChild.classList.add("no");
+    head.append(el("div", "name", esc(k.tool)));
+    head.append(el("span", "tag " + TONE[k.source], esc(k.origin)));
+    const v = el("div", "verdict", ic("x") + `<span>${esc(k.verdict)}</span>`);
+    v.append(el("span", "rule", esc(k.rule)));
+    head.append(v);
+    call.append(head);
+    const line = el("div", "line");
+    const url = el("div", "url", `<span class="k">${esc(k.arg)}</span><span>${esc(k.prefix)}</span>`);
+    url.append(el("span", "val", ic(D.read.find((n) => n.key === k.ref).icon) + `<span>${esc(k.ref_name)}</span>`));
+    line.append(url);
+    call.append(line);
+
+    // Top row: the values the agent read, in the order it read them.
+    const cards = D.read.map((n) => rel($("n-" + n.key)));
+    for (let i = 0; i + 1 < cards.length; i++) {
+      const a = cards[i], b = cards[i + 1], y = a.t + 31;
+      path(`M ${a.r + 8} ${y} L ${b.l - 9} ${y}`, "var(--wire)");
+      right(b.l - 9, y, "var(--wire)");
+    }
+    // Down: which values flowed into the attempted call.
+    const c = rel(call);
+    for (const e of D.flows) {
+      const a = cards[D.read.findIndex((n) => n.key === e.from)];
+      const y0 = a.b + 8, y1 = c.t - 7;
+      const color = e.dashed ? "var(--warn)" : "var(--accent)";
+      path(`M ${a.cx} ${y0} L ${a.cx} ${y1}`, color, e.dashed);
+      down(a.cx, y1, color);
+      label(e.label, a.cx, (y0 + y1) / 2);
+    }
+  },
+  frame() {},
+  problems() {
+    const out = [];
+    for (const c of document.querySelectorAll(".card")) {
+      if (c.scrollWidth > c.clientWidth + 0.5) out.push("overflow: " + c.textContent.trim());
+      const r = c.getBoundingClientRect();
+      for (const p of c.querySelectorAll(".tag, .name, .row, .url, .rule, .verdict")) {
+        const q = p.getBoundingClientRect();
+        if (q.right > r.right - 12 || q.left < r.left) out.push("outside card: " + p.textContent);
+      }
+    }
+    return out;
+  },
+};
+</script>
+</body>
+</html>

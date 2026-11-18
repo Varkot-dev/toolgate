@@ -1,0 +1,167 @@
+{
+  "description": "Hero animation data: two real calls through the gateway with one token",
+  "config": {
+    "issuer": "https://gateway.example",
+    "audience": "toolgate-demo",
+    "start_unix": 1794873600,
+    "key_seed": "toolgate hero figure key, not a secret",
+    "policy_file": "config/policy.example.yaml",
+    "policy_sha256": "8fce9026e625da739489f944929b4b0045fb3f188bd244fdcca30ae359429052",
+    "root_capabilities": [
+      {
+        "tool": "read_file",
+        "args": {
+          "path": {
+            "glob": "reports/*"
+          }
+        },
+        "max_calls": 5
+      },
+      {
+        "tool": "delete_file",
+        "args": {
+          "path": {
+            "any": true
+          }
+        },
+        "max_calls": 1
+      }
+    ]
+  },
+  "token": {
+    "jti": "tok-2",
+    "sub": "user:alice",
+    "actors": [
+      "agent:researcher",
+      "agent:orchestrator"
+    ],
+    "chain": [
+      "tok-1"
+    ],
+    "capabilities": [
+      {
+        "tool": "read_file",
+        "args": {
+          "path": {
+            "glob": "reports/q3/*"
+          }
+        },
+        "max_calls": 3
+      },
+      {
+        "tool": "delete_file",
+        "args": {
+          "path": {
+            "any": true
+          }
+        },
+        "max_calls": 1
+      }
+    ]
+  },
+  "calls": [
+    {
+      "tool": "read_file",
+      "args": {
+        "path": "reports/q3/summary.txt"
+      },
+      "status": "allowed",
+      "stage": "policy",
+      "reason": "ok",
+      "rule": "allow-file-reads",
+      "code": "",
+      "audit_seq": 2
+    },
+    {
+      "tool": "delete_file",
+      "args": {
+        "path": "reports/q3/summary.txt"
+      },
+      "status": "denied",
+      "stage": "policy",
+      "reason": "Agents never delete files, whatever the user delegated.",
+      "rule": "deny-file-delete",
+      "code": "",
+      "audit_seq": 3
+    }
+  ],
+  "tool_executions": {
+    "read_file": 1,
+    "delete_file": 0
+  },
+  "audit_log": [
+    {
+      "actors": [
+        "agent:orchestrator"
+      ],
+      "approver": null,
+      "args_hash": "53f1285bd9d3e407a9d5cd611c07bf1e07ed75976370fc88b240aaacb1c918ca",
+      "decision": "allow",
+      "hash": "3fe9f069c2f2e2bec77cb6044eddb1aa4ff97ade675722c6ee3f076c1ae8b470",
+      "jti": "tok-1",
+      "prev": "9fbdce0679c190589bbae3f428600ba32cf75a2fc29c42ac125d6eb02e097ee5",
+      "rule": "token: minted by admin",
+      "seq": 0,
+      "time": 1794873600000000000,
+      "tool": "token:mint"
+    },
+    {
+      "actors": [
+        "agent:researcher",
+        "agent:orchestrator"
+      ],
+      "approver": null,
+      "args_hash": "291db4389bfa3b2de77af0a91c69a57e2fdc2006e99f419cda6e7fe471e73072",
+      "decision": "allow",
+      "hash": "d55b116f07742366ece1ffd34633e94b37349b7722c129b53f68cb49c16eb2c4",
+      "jti": "tok-2",
+      "prev": "3fe9f069c2f2e2bec77cb6044eddb1aa4ff97ade675722c6ee3f076c1ae8b470",
+      "rule": "token: exchanged from tok-1",
+      "seq": 1,
+      "time": 1794873600001000000,
+      "tool": "token:exchange"
+    },
+    {
+      "actors": [
+        "agent:researcher",
+        "agent:orchestrator"
+      ],
+      "approver": null,
+      "args_hash": "4f4c77bcae9dd32088e8422401dbd7e26cb8b6da14caa4aa6f3f09bf20aaea5c",
+      "decision": "allow",
+      "hash": "f78e2398c30e2d8825456a179678d1bfafd6d112f69a81717f33fecab239a462",
+      "jti": "tok-2",
+      "prev": "d55b116f07742366ece1ffd34633e94b37349b7722c129b53f68cb49c16eb2c4",
+      "rule": "allow-file-reads",
+      "seq": 2,
+      "time": 1794873600002000000,
+      "tool": "read_file"
+    },
+    {
+      "actors": [
+        "agent:researcher",
+        "agent:orchestrator"
+      ],
+      "approver": null,
+      "args_hash": "4f4c77bcae9dd32088e8422401dbd7e26cb8b6da14caa4aa6f3f09bf20aaea5c",
+      "decision": "deny",
+      "hash": "4e203de9963f6418496ac55510fb1728ce677242e42a2ce5cf48348b71117f3a",
+      "jti": "tok-2",
+      "prev": "f78e2398c30e2d8825456a179678d1bfafd6d112f69a81717f33fecab239a462",
+      "rule": "deny-file-delete",
+      "seq": 3,
+      "time": 1794873600003000000,
+      "tool": "delete_file"
+    }
+  ],
+  "audit_verify": {
+    "ok": true,
+    "entries": 4,
+    "head_hash": "4e203de9963f6418496ac55510fb1728ce677242e42a2ce5cf48348b71117f3a"
+  },
+  "animation": {
+    "fps": 20,
+    "loop_seconds": 9.0,
+    "poster_at_seconds": 8.0
+  }
+}

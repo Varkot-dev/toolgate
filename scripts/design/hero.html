@@ -1,0 +1,279 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<!--BASE-->
+<link rel="stylesheet" href="system.css">
+<style>
+  .flow {
+    position: relative; margin-top: 40px;
+    display: grid; grid-template-columns: 184px 1fr 224px 1fr 184px;
+  }
+  .rows { margin-top: 18px; display: grid; gap: 14px; }
+  .lane { height: 60px; display: grid; align-content: start; justify-items: start; gap: 6px; }
+  .lane .note { padding-left: 2px; line-height: 20px; white-space: nowrap; }
+  .stack { display: grid; }
+  .stack > * { grid-area: 1 / 1; }
+  /* a quiet "not run" dot that sits where the check appears once the tool runs */
+  .slot { width: 16px; height: 16px; margin-left: -2px; display: grid; place-items: center; flex: none; }
+  .slot i { width: 6px; height: 6px; border-radius: 50%; background: var(--wire); }
+  .card.gate { border-color: #dcd8fb; }
+
+  .log { margin-top: 44px; }
+  .log .meta { color: var(--ok-ink); }
+  .log .meta svg { color: var(--ok); stroke-width: 2.5; }
+  .chain { margin-top: 18px; display: flex; align-items: center; }
+  .link { width: 28px; display: grid; place-items: center; color: var(--wire); flex: none; }
+  .link svg { width: 16px; height: 16px; stroke-width: 2; }
+  .block { flex: 1 1 auto; border: 1px solid var(--line); border-radius: 10px; padding: 9px 12px; display: grid; gap: 2px; }
+  .block .top { display: flex; align-items: center; gap: 6px; font-family: var(--mono); white-space: nowrap; line-height: 22px; }
+  .block .top svg { width: 16px; height: 16px; stroke-width: 2.5; flex: none; }
+  .block .hash { font-family: var(--mono); color: var(--muted); line-height: 20px; white-space: nowrap; }
+  .block.ok .top svg { color: var(--ok); }
+  .block.no .top svg { color: var(--no); }
+
+  .packet {
+    position: absolute; z-index: 3; width: 12px; height: 12px; margin: -6px 0 0 -6px;
+    border-radius: 50%; background: var(--accent);
+    box-shadow: 0 0 0 4px rgba(91, 76, 240, 0.16);
+  }
+  .stop {
+    position: absolute; z-index: 3; width: 26px; height: 26px; margin: -13px 0 0 -13px;
+    border-radius: 50%; background: var(--card); border: 1.5px solid var(--no);
+    display: grid; place-items: center; color: var(--no);
+  }
+  .stop svg { width: 14px; height: 14px; stroke-width: 2.75; }
+  .writes { position: absolute; color: var(--muted); white-space: nowrap; line-height: 20px; }
+  svg.wires { z-index: 2; }
+</style>
+</head>
+<body>
+<div class="stage" id="stage">
+  <div class="title" id="title"></div>
+  <div class="flow">
+    <div class="card" id="agent">
+      <div class="head">{{icon:bot}}<div class="name">Agent</div></div>
+      <div class="rows" id="agent-rows"></div>
+    </div>
+    <div></div>
+    <div class="card gate" id="gate">
+      <div class="head"><svg class="accent-holder"></svg><div class="name">Gateway</div></div>
+      <div class="rows" id="gate-rows"></div>
+    </div>
+    <div></div>
+    <div class="card" id="tools">
+      <div class="head">{{icon:wrench}}<div class="name">Tools</div></div>
+      <div class="rows" id="tool-rows"></div>
+    </div>
+  </div>
+  <div class="card log" id="log">
+    <div class="head">{{icon:scroll-text}}<div class="name">Audit log</div>
+      <div class="meta" id="verified">{{icon:check}}<span>chain verifies</span></div>
+    </div>
+    <div class="chain" id="chain"></div>
+  </div>
+  <svg class="wires" id="wires"></svg>
+  <div class="writes" id="writes">writes</div>
+</div>
+<template id="i-shield-check">{{icon:shield-check}}</template>
+<template id="i-check">{{icon:check}}</template>
+<template id="i-x">{{icon:x}}</template>
+<template id="i-link">{{icon:link}}</template>
+<script>
+/*DATA*/
+const D = window.DATA;
+const T = D.timeline;
+const $ = (id) => document.getElementById(id);
+const ic = (n) => $("i-" + n).innerHTML;
+const el = (tag, cls, html) => {
+  const e = document.createElement(tag);
+  if (cls) e.className = cls;
+  if (html !== undefined) e.innerHTML = html;
+  return e;
+};
+const esc = (s) => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;");
+const NS = "http://www.w3.org/2000/svg";
+
+// ---- timing: every pose is a pure function of t
+const clamp = (x) => Math.max(0, Math.min(1, x));
+const ease = (u) => u * u * (3 - 2 * u);
+const k = (t, a, b) => ease(clamp((t - a) / (b - a)));   // 0 -> 1 between a and b
+// Exact resting values and motion in whole device pixels only, so a pose
+// always rasterizes the same way.
+const r3 = (x) => Math.round(x * 1000) / 1000;
+const snap = (v) => Math.round(v * window.devicePixelRatio) / window.devicePixelRatio;
+const rise = (u, d = 6) => { const y = snap(d * (1 - u)); return y === 0 ? "none" : `translateY(${y}px)`; };
+let out = 1;  // loop fade-out factor, set per frame
+const A = {};
+
+function rel(node) {
+  const s = $("stage").getBoundingClientRect();
+  const r = node.getBoundingClientRect();
+  return { l: r.left - s.left, r: r.right - s.left, t: r.top - s.top, b: r.bottom - s.top,
+           cx: (r.left + r.right) / 2 - s.left, cy: (r.top + r.bottom) / 2 - s.top };
+}
+function line(d, color, width, dash) {
+  const p = document.createElementNS(NS, "path");
+  p.setAttribute("d", d);
+  p.style.stroke = color;
+  p.setAttribute("stroke-width", width || 2);
+  if (dash) p.setAttribute("stroke-dasharray", dash);
+  $("wires").append(p);
+  return p;
+}
+const arrowR = (x, y, c) => line(`M ${x - 6} ${y - 5} L ${x} ${y} L ${x - 6} ${y + 5}`, c);
+const arrowD = (x, y, c) => line(`M ${x - 5} ${y - 6} L ${x} ${y} L ${x + 5} ${y - 6}`, c);
+// A wire that draws itself: a dash as long as the wire, slid along it.
+function drawn(x0, y, x1, color) {
+  const len = x1 - x0;
+  const p = line(`M ${x0} ${y} L ${x1} ${y}`, color, 2, `${len} ${len + 10}`);
+  return { set(u, alpha) { p.setAttribute("stroke-dashoffset", r3(len * (1 - u))); p.style.opacity = r3(alpha); } };
+}
+function packet() { const d = el("div", "packet"); d.hidden = true; $("stage").append(d); return d; }
+function place(node, x, y, alpha) {
+  node.style.left = snap(x) + "px";
+  node.style.top = snap(y) + "px";
+  node.style.opacity = r3(alpha);
+  node.hidden = alpha <= 0.001;
+}
+const show = (node, u) => { node.style.opacity = r3(out * u); node.style.transform = rise(u); };
+
+window.figure = {
+  async init() {
+    $("title").textContent = D.title;
+    const holder = document.querySelector(".accent-holder");
+    holder.outerHTML = ic("shield-check").replace("<svg", '<svg class="accent"');
+    $("agent").querySelector(".name").textContent = D.agent;
+    D.calls.forEach((c, i) => {
+      const a = el("div", "lane");
+      const ask = el("span", "pill mono", esc(c.tool));
+      ask.id = `ask${i}`;
+      a.append(ask);
+      $("agent-rows").append(a);
+
+      const g = el("div", "lane");
+      const v = el("span", `pill strong ${c.ok ? "ok" : "no"}`, `${ic(c.ok ? "check" : "x")}<span>${esc(c.verdict)}</span>`);
+      v.id = `verdict${i}`;
+      const rule = el("span", "note mono muted", esc(c.rule));
+      rule.id = `rule${i}`;
+      g.append(v, rule);
+      $("gate-rows").append(g);
+
+      const t = el("div", "lane");
+      const st = el("div", "stack");
+      const idle = el("span", "pill mono", `<span class="slot"><i></i></span><span>${esc(c.tool)}</span>`);
+      const ran = el("span", "pill mono ok", `${ic("check")}<span>${esc(c.tool)}</span>`);
+      idle.id = `idle${i}`; ran.id = `ran${i}`;
+      st.append(idle, ran);
+      const note = el("span", "note muted", esc(c.ran_text));
+      note.id = `note${i}`;
+      t.append(st, note);
+      $("tool-rows").append(t);
+    });
+    D.audit.forEach((e, i) => {
+      if (i > 0) { const l = el("div", "link", ic("link")); l.id = `link${i}`; $("chain").append(l); }
+      const mark = e.kind === "token" ? "" : ic(e.kind === "ok" ? "check" : "x");
+      const b = el("div", `block ${e.kind}`,
+        `<div class="top">${mark}<span>${esc(e.tool)}</span></div><div class="hash">#${e.seq} ${esc(e.hash)}</div>`);
+      b.id = `block${i}`;
+      $("chain").append(b);
+    });
+
+    const agent = rel($("agent")), gate = rel($("gate")), tools = rel($("tools")), log = rel($("log"));
+    A.calls = D.calls.map((c, i) => {
+      const y = rel($(`ask${i}`)).cy;
+      const x0 = agent.r + 12, x1 = gate.l - 12, x2 = gate.r + 12, x3 = tools.l - 12;
+      const color = c.ok ? "var(--ok)" : "var(--no)";
+      const w = { c, y, x0, x1, x2, x3, p: packet(), q: c.ok ? packet() : null };
+      w.inA = drawn(x0, y, x1, "var(--accent)");
+      w.inC = drawn(x0, y, c.ok ? x1 : x1 - 14, color);
+      w.headC = c.ok ? arrowR(x1, y, color) : null;
+      if (c.ok) { w.onward = drawn(x2, y, x3, color); w.onHead = arrowR(x3, y, color); }
+      else {
+        w.stop = el("span", "stop", ic("x"));
+        w.stop.style.left = x1 + "px"; w.stop.style.top = y + "px";
+        $("stage").append(w.stop);
+      }
+      return w;
+    });
+    const wx = gate.cx, wy0 = gate.b + 10, wy1 = log.t - 10;
+    line(`M ${wx} ${wy0} L ${wx} ${wy1}`, "var(--wire)", 2, "4 5");
+    arrowD(wx, wy1, "var(--wire)");
+    A.write = { x: wx, y0: wy0, y1: wy1, p: packet() };
+    $("writes").style.left = wx + 12 + "px";
+    $("writes").style.top = (wy0 + wy1) / 2 - 10 + "px";
+  },
+
+  frame(t) {
+    if (t === null) t = T.poster;
+    out = 1 - k(t, T.fade[0], T.fade[1]);
+    let focus = 0;
+    A.calls.forEach((w, i) => {
+      const s = T.calls[i];
+      // the request leaves the agent
+      const hi = out * k(t, s.start - 0.2, s.start) * (1 - k(t, s.verdict + 0.4, s.verdict + 0.8));
+      $(`ask${i}`).style.boxShadow = hi > 0.001 ? `inset 0 0 0 1.5px rgba(91, 76, 240, ${r3(hi)})` : "";
+      const u = k(t, s.start, s.arrive);
+      const decided = k(t, s.verdict - 0.05, s.verdict + 0.25);
+      w.inA.set(u, out * (1 - decided));
+      w.inC.set(u, out * decided);
+      if (w.headC) w.headC.style.opacity = r3(out * decided);
+      const moving = t >= s.start && t <= s.arrive + 0.15 ? 1 : 0;
+      place(w.p, w.x0 + (w.x1 - w.x0) * u, w.y, out * moving * (1 - k(t, s.arrive, s.arrive + 0.15)));
+      focus = Math.max(focus, k(t, s.arrive - 0.15, s.arrive) * (1 - k(t, s.verdict + 0.3, s.verdict + 0.6)));
+
+      // the gateway decides
+      show($(`verdict${i}`), k(t, s.verdict, s.verdict + 0.3));
+      show($(`rule${i}`), k(t, s.verdict + 0.15, s.verdict + 0.45));
+      if (w.stop) w.stop.style.opacity = r3(out * k(t, s.verdict, s.verdict + 0.3));
+
+      // on to the tool, or not
+      const ran = $(`ran${i}`), idle = $(`idle${i}`), note = $(`note${i}`);
+      if (w.c.ok) {
+        const o = k(t, s.onward, s.reach);
+        w.onward.set(o, out);
+        w.onHead.style.opacity = r3(out * (o > 0.98 ? 1 : 0));
+        const go = t >= s.onward && t <= s.reach + 0.15 ? 1 : 0;
+        place(w.q, w.x2 + (w.x3 - w.x2) * o, w.y, out * go * (1 - k(t, s.reach, s.reach + 0.15)));
+        const done = k(t, s.reach, s.reach + 0.3);
+        ran.style.opacity = r3(out * done);
+        idle.style.opacity = r3(1 - out * done);
+        show(note, done);
+      } else {
+        ran.style.opacity = 0;
+        show(note, k(t, s.verdict + 0.3, s.verdict + 0.6));
+      }
+    });
+    $("gate").style.boxShadow = focus > 0.001
+      ? `0 0 0 ${r3(4 * focus)}px rgba(91, 76, 240, ${r3(0.14 * focus)}), var(--shadow)` : "";
+
+    // the decision is written to the log
+    let wp = 0, wy = A.write.y0;
+    D.audit.forEach((e, i) => {
+      if (e.appears === null) return;
+      const at = e.appears, s = at - 0.35;
+      if (t >= s && t <= at + 0.1) { wp = 1 - k(t, at, at + 0.1); wy = A.write.y0 + (A.write.y1 - A.write.y0) * k(t, s, at); }
+      const u = k(t, at, at + 0.35);
+      show($(`block${i}`), u);
+      $(`link${i}`).style.opacity = r3(out * u);
+    });
+    place(A.write.p, A.write.x, wy, wp * out);
+    show($("verified"), k(t, T.verified, T.verified + 0.35));
+  },
+
+  problems() {
+    const bad = [];
+    for (const c of document.querySelectorAll(".card")) {
+      if (c.scrollWidth > c.clientWidth + 0.5) bad.push("overflow: " + c.textContent.trim());
+      const r = c.getBoundingClientRect();
+      for (const p of c.querySelectorAll(".pill, .note, .block, .name, .meta")) {
+        const q = p.getBoundingClientRect();
+        if (q.right > r.right - 10 || q.bottom > r.bottom - 6) bad.push("outside card: " + p.textContent.trim());
+      }
+    }
+    return bad;
+  },
+};
+</script>
+</body>
+</html>

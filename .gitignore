@@ -1,0 +1,12 @@
+.venv/
+__pycache__/
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.hypothesis/
+dist/
+
+# Local runtime files created by following the README quick start
+config/audit.jsonl
+config/*.sqlite
+config/*.local.yaml

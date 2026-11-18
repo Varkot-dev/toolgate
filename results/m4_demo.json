@@ -1,0 +1,526 @@
+{
+  "description": "M4 MCP proxy story: real MCP SDK client, real MCP upstream server, in-process HTTP, fixed clock and ids",
+  "config": {
+    "mcp_sdk": "2.3.0",
+    "protocol_version": "2026-07-28",
+    "policy_file": "config/policy.example.yaml",
+    "policy_sha256": "8fce9026e625da739489f944929b4b0045fb3f188bd244fdcca30ae359429052",
+    "key_seed": "toolgate m4 demo key, not a secret",
+    "start_unix": 1794873600,
+    "proxy_url": "http://proxy.demo/mcp",
+    "orchestrator_capabilities": [
+      {
+        "tool": "read_file",
+        "args": {
+          "path": {
+            "any": true
+          }
+        }
+      },
+      {
+        "tool": "list_files",
+        "args": {
+          "path": {
+            "any": true
+          }
+        }
+      },
+      {
+        "tool": "write_file",
+        "args": {
+          "path": {
+            "any": true
+          },
+          "content": {
+            "any": true
+          }
+        }
+      },
+      {
+        "tool": "delete_file",
+        "args": {
+          "path": {
+            "any": true
+          }
+        }
+      },
+      {
+        "tool": "send_email",
+        "args": {
+          "to": {
+            "any": true
+          },
+          "subject": {
+            "any": true
+          },
+          "body": {
+            "any": true
+          }
+        },
+        "max_calls": 3
+      },
+      {
+        "tool": "search_calendar",
+        "args": {
+          "query": {
+            "any": true
+          }
+        }
+      }
+    ],
+    "sub_agent_capabilities": [
+      {
+        "tool": "read_file",
+        "args": {
+          "path": {
+            "glob": "reports/*"
+          }
+        },
+        "max_calls": 2
+      },
+      {
+        "tool": "list_files",
+        "args": {
+          "path": {
+            "glob": "reports/*"
+          }
+        }
+      }
+    ]
+  },
+  "tools_seen": {
+    "without_proxy": [
+      "delete_file",
+      "list_files",
+      "read_file",
+      "search_calendar",
+      "send_email",
+      "write_file"
+    ],
+    "orchestrator": [
+      "list_files",
+      "read_file",
+      "send_email",
+      "toolgate_approval_status",
+      "write_file"
+    ],
+    "sub-agent": [
+      "list_files",
+      "read_file",
+      "toolgate_approval_status"
+    ]
+  },
+  "steps": [
+    {
+      "who": "orchestrator",
+      "tool": "read_file",
+      "arguments": {
+        "path": "reports/q3.txt"
+      },
+      "note": "granted",
+      "answer": {
+        "mcp": "result",
+        "is_error": false,
+        "outcome": "allowed",
+        "text": "Q3 revenue was 4.2M, up 8 percent."
+      }
+    },
+    {
+      "who": "orchestrator",
+      "tool": "read_file",
+      "arguments": {
+        "path": "secrets/payroll.csv"
+      },
+      "note": "granted by the user, denied by operator policy",
+      "answer": {
+        "mcp": "result",
+        "is_error": true,
+        "outcome": "denied",
+        "text": "Denied by toolgate at the policy check (policy rule deny-secret-paths): The secrets directory is off limits to agents. The call did not run. Repeating it unchanged will be denied again.",
+        "rule": "deny-secret-paths"
+      }
+    },
+    {
+      "who": "orchestrator",
+      "tool": "write_file",
+      "arguments": {
+        "path": "drafts/summary.txt",
+        "content": "Q3 was up 8 percent."
+      },
+      "note": "granted; the file appears upstream",
+      "answer": {
+        "mcp": "result",
+        "is_error": false,
+        "outcome": "allowed",
+        "text": "wrote 20 characters to drafts/summary.txt"
+      }
+    },
+    {
+      "who": "orchestrator",
+      "tool": "delete_file",
+      "arguments": {
+        "path": "reports/q3.txt"
+      },
+      "note": "the grant names it, policy denies it outright: not listed, unknown",
+      "answer": {
+        "mcp": "protocol_error",
+        "code": -32602,
+        "message": "Unknown tool: delete_file"
+      }
+    },
+    {
+      "who": "orchestrator",
+      "tool": "search_calendar",
+      "arguments": {
+        "query": "review"
+      },
+      "note": "the grant names it, no policy rule allows it: not listed, unknown",
+      "answer": {
+        "mcp": "protocol_error",
+        "code": -32602,
+        "message": "Unknown tool: search_calendar"
+      }
+    },
+    {
+      "who": "orchestrator",
+      "tool": "no_such_tool",
+      "arguments": {
+        "path": "reports/q3.txt"
+      },
+      "note": "does not exist: the same answer as the two above",
+      "answer": {
+        "mcp": "protocol_error",
+        "code": -32602,
+        "message": "Unknown tool: no_such_tool"
+      }
+    },
+    {
+      "who": "orchestrator",
+      "tool": "send_email",
+      "arguments": {
+        "to": "partner@other.example",
+        "subject": "Q3 summary",
+        "body": "Revenue is up 8%."
+      },
+      "note": "external mail: policy parks it for a person; nothing is sent",
+      "answer": {
+        "mcp": "result",
+        "is_error": false,
+        "outcome": "pending_approval",
+        "text": "This call has NOT run. Operator policy requires a person to approve it (rule approve-external-email: Mail to recipients outside example.com needs approval). Approval id: apr-1. Call toolgate_approval_status with that approval_id to see the decision and collect the result. Do not repeat the original call.",
+        "approval_id": "apr-1",
+        "rule": "approve-external-email"
+      }
+    },
+    {
+      "who": "orchestrator",
+      "tool": "toolgate_approval_status",
+      "arguments": {
+        "approval_id": "apr-1"
+      },
+      "note": "the agent polls: still waiting",
+      "answer": {
+        "mcp": "result",
+        "is_error": false,
+        "outcome": "pending_approval",
+        "text": "Still waiting for a person to decide. The call has not run. Check again later.",
+        "approval_id": "apr-1"
+      }
+    },
+    {
+      "who": "operator",
+      "action": "approve",
+      "approval_id": "apr-1",
+      "answer": {
+        "status": "allowed",
+        "rule": "approve-external-email"
+      }
+    },
+    {
+      "who": "orchestrator",
+      "tool": "toolgate_approval_status",
+      "arguments": {
+        "approval_id": "apr-1"
+      },
+      "note": "the agent polls again: the mail's result",
+      "answer": {
+        "mcp": "result",
+        "is_error": false,
+        "outcome": "allowed",
+        "text": "email 1 sent to partner@other.example"
+      }
+    },
+    {
+      "who": "sub-agent",
+      "tool": "read_file",
+      "arguments": {
+        "path": "reports/q3.txt"
+      },
+      "note": "granted",
+      "answer": {
+        "mcp": "result",
+        "is_error": false,
+        "outcome": "allowed",
+        "text": "Q3 revenue was 4.2M, up 8 percent."
+      }
+    },
+    {
+      "who": "sub-agent",
+      "tool": "read_file",
+      "arguments": {
+        "path": "notes/todo.txt"
+      },
+      "note": "the tool is granted, this path is not",
+      "answer": {
+        "mcp": "result",
+        "is_error": true,
+        "outcome": "denied",
+        "text": "Denied by toolgate at the grant check (constraint_failed): argument 'path' fails glob. The call did not run. Repeating it unchanged will be denied again."
+      }
+    },
+    {
+      "who": "sub-agent",
+      "tool": "send_email",
+      "arguments": {
+        "to": "partner@other.example",
+        "subject": "Q3 summary",
+        "body": "Revenue is up 8%."
+      },
+      "note": "the orchestrator may, the sub-agent's token does not name it: unknown",
+      "answer": {
+        "mcp": "protocol_error",
+        "code": -32602,
+        "message": "Unknown tool: send_email"
+      }
+    },
+    {
+      "who": "sub-agent",
+      "tool": "read_file",
+      "arguments": {
+        "path": "reports/q4-draft.txt"
+      },
+      "note": "second read",
+      "answer": {
+        "mcp": "result",
+        "is_error": false,
+        "outcome": "allowed",
+        "text": "Q4 draft: numbers pending."
+      }
+    },
+    {
+      "who": "sub-agent",
+      "tool": "read_file",
+      "arguments": {
+        "path": "reports/q3.txt"
+      },
+      "note": "third read: the token's budget for read_file was 2",
+      "answer": {
+        "mcp": "result",
+        "is_error": true,
+        "outcome": "denied",
+        "text": "Denied by toolgate at the budget check (budget_exhausted): budget exhausted. The call did not run. Repeating it unchanged will be denied again."
+      }
+    }
+  ],
+  "http": {
+    "no_token": {
+      "http_status": 401,
+      "www_authenticate": "Bearer error=\"invalid_token\", error_description=\"Authentication required\", resource_metadata=\"http://proxy.demo/.well-known/oauth-protected-resource/mcp\""
+    },
+    "sub_agent_after_orchestrator_revoked": {
+      "http_status": 401,
+      "www_authenticate": "Bearer error=\"invalid_token\", error_description=\"Authentication required\", resource_metadata=\"http://proxy.demo/.well-known/oauth-protected-resource/mcp\""
+    }
+  },
+  "upstream": {
+    "tool_calls_received": [
+      "read_file",
+      "write_file",
+      "send_email",
+      "read_file",
+      "read_file"
+    ],
+    "requests_by_method": {
+      "server/discover": 2,
+      "tools/call": 5,
+      "tools/list": 4
+    },
+    "authorization_headers_received": 0,
+    "outbox": [
+      {
+        "to": "partner@other.example",
+        "subject": "Q3 summary",
+        "body": "Revenue is up 8%."
+      }
+    ],
+    "outbox_size_while_parked": 0,
+    "files_added": [
+      "drafts/summary.txt"
+    ],
+    "files_removed": []
+  },
+  "audit": [
+    {
+      "seq": 0,
+      "actors": [
+        "orchestrator"
+      ],
+      "tool": "token:mint",
+      "decision": "allow",
+      "rule": "token: minted by admin"
+    },
+    {
+      "seq": 1,
+      "actors": [
+        "sub-agent",
+        "orchestrator"
+      ],
+      "tool": "token:exchange",
+      "decision": "allow",
+      "rule": "token: exchanged from tok-1"
+    },
+    {
+      "seq": 2,
+      "actors": [
+        "orchestrator"
+      ],
+      "tool": "read_file",
+      "decision": "allow",
+      "rule": "allow-file-reads"
+    },
+    {
+      "seq": 3,
+      "actors": [
+        "orchestrator"
+      ],
+      "tool": "read_file",
+      "decision": "deny",
+      "rule": "deny-secret-paths"
+    },
+    {
+      "seq": 4,
+      "actors": [
+        "orchestrator"
+      ],
+      "tool": "write_file",
+      "decision": "allow",
+      "rule": "allow-file-writes"
+    },
+    {
+      "seq": 5,
+      "actors": [
+        "orchestrator"
+      ],
+      "tool": "delete_file",
+      "decision": "deny",
+      "rule": "deny-file-delete"
+    },
+    {
+      "seq": 6,
+      "actors": [
+        "orchestrator"
+      ],
+      "tool": "search_calendar",
+      "decision": "deny",
+      "rule": "policy: no rule matched (default deny)"
+    },
+    {
+      "seq": 7,
+      "actors": [
+        "orchestrator"
+      ],
+      "tool": "no_such_tool",
+      "decision": "deny",
+      "rule": "grant: no_capability"
+    },
+    {
+      "seq": 8,
+      "actors": [
+        "orchestrator"
+      ],
+      "tool": "send_email",
+      "decision": "approve",
+      "rule": "approve-external-email"
+    },
+    {
+      "seq": 9,
+      "actors": [
+        "orchestrator"
+      ],
+      "tool": "send_email",
+      "decision": "approved",
+      "rule": "approve-external-email"
+    },
+    {
+      "seq": 10,
+      "actors": [
+        "sub-agent",
+        "orchestrator"
+      ],
+      "tool": "read_file",
+      "decision": "allow",
+      "rule": "allow-file-reads"
+    },
+    {
+      "seq": 11,
+      "actors": [
+        "sub-agent",
+        "orchestrator"
+      ],
+      "tool": "read_file",
+      "decision": "deny",
+      "rule": "grant: constraint_failed (glob)"
+    },
+    {
+      "seq": 12,
+      "actors": [
+        "sub-agent",
+        "orchestrator"
+      ],
+      "tool": "send_email",
+      "decision": "deny",
+      "rule": "grant: no_capability"
+    },
+    {
+      "seq": 13,
+      "actors": [
+        "sub-agent",
+        "orchestrator"
+      ],
+      "tool": "read_file",
+      "decision": "allow",
+      "rule": "allow-file-reads"
+    },
+    {
+      "seq": 14,
+      "actors": [
+        "sub-agent",
+        "orchestrator"
+      ],
+      "tool": "read_file",
+      "decision": "deny",
+      "rule": "budget: budget_exhausted"
+    },
+    {
+      "seq": 15,
+      "actors": [],
+      "tool": "token:revoke",
+      "decision": "allow",
+      "rule": "token: revoked by admin"
+    }
+  ],
+  "checks": {
+    "audit_log_verifies": true,
+    "audit_entries": 16,
+    "tools_hidden_from_orchestrator": [
+      "delete_file",
+      "search_calendar"
+    ],
+    "tools_hidden_from_sub_agent": [
+      "delete_file",
+      "search_calendar",
+      "send_email",
+      "write_file"
+    ]
+  }
+}

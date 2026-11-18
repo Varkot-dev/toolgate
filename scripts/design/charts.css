@@ -1,0 +1,45 @@
+/* Chart pieces shared by the result figures (completeness gap, label creep,
+ * latency). Built on the tokens in system.css; only adds layout for stat tiles
+ * and type for the inline SVG charts each figure script draws.
+ */
+
+.tiles { margin-top: 32px; display: grid; gap: 12px; }
+.tile { padding: 16px 18px 15px; }
+.tile .top { display: flex; align-items: center; gap: 8px; }
+.tile .top svg { width: 18px; height: 18px; flex: none; stroke-width: 2; color: var(--muted); }
+.tile.ok .top svg, .tile.okmark .top svg { color: var(--ok); stroke-width: 2.5; }
+.tile.accent .top svg { color: var(--accent); }
+.tile .lab { font-size: var(--size-body); line-height: 22px; white-space: nowrap; }
+.tile .num {
+  margin-top: 8px;
+  font-size: var(--size-title); font-weight: 700; letter-spacing: -0.02em; line-height: 36px;
+  font-variant-numeric: tabular-nums; white-space: nowrap;
+}
+.tile .num small { font-size: var(--size-label); font-weight: 700; letter-spacing: 0; margin-left: 3px; }
+.tile.ok .num { color: var(--ok-ink); }
+.tile.quiet .num { color: var(--muted); }
+.tile .sub { margin-top: 2px; color: var(--muted); line-height: 20px; white-space: nowrap; }
+
+.tilenote { margin: 12px 0 0; color: var(--muted); font-size: 14px; line-height: 20px; }
+.tilenote + .chartcard, .tilenote + #charts > .chartcard:first-child { margin-top: 20px; }
+
+.chartcard { margin-top: 12px; padding: 18px 18px 16px; }
+.chartcard .head .meta { font-size: var(--size-body); }
+.chartcard svg.chart { display: block; margin-top: 16px; overflow: visible; }
+
+.aside { margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--line); color: var(--muted); line-height: 20px;
+  display: flex; justify-content: space-between; gap: 16px; white-space: nowrap; }
+
+svg.chart text { font-family: var(--font); font-size: var(--size-body); font-weight: 500; fill: var(--ink); }
+svg.chart text.strong { font-weight: 700; }
+svg.chart text.muted { fill: var(--muted); }
+svg.chart text.ok { fill: var(--ok-ink); }
+svg.chart text.no { fill: var(--no-ink); }
+svg.chart text.head { font-size: var(--size-body); font-weight: 700; }
+svg.chart text.small { font-size: 14px; }
+svg.chart tspan.quiet { font-weight: 500; fill: var(--muted); }
+svg.chart tspan.mono { font-family: var(--mono); }
+svg.chart .track { fill: var(--chip); }
+svg.chart .rule { stroke: var(--line); stroke-width: 1; }
+svg.chart .icon { fill: none; stroke-linecap: round; stroke-linejoin: round; }
+.title + #charts > .chartcard:first-child { margin-top: 32px; }

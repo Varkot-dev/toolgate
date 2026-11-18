@@ -1,0 +1,135 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<!--BASE-->
+<link rel="stylesheet" href="system.css">
+<style>
+  .tree { margin-top: 40px; display: grid; }
+  .row { display: flex; justify-content: center; }
+  .row.top .card { width: 640px; }
+  .row.kids { gap: 12px; justify-content: space-between; }
+  .row.kids .card { width: 232px; }
+  .gap1 { height: 80px; }
+  .gap2 { height: 112px; }
+  .chips { margin-top: 14px; display: flex; flex-wrap: wrap; gap: 8px; }
+  .verdict {
+    position: absolute; transform: translate(-50%, -50%);
+    display: inline-flex; align-items: center; gap: 6px;
+    height: 32px; padding: 0 12px 0 10px; border-radius: 999px;
+    background: var(--card); border: 1px solid var(--line);
+    white-space: nowrap;
+  }
+  .verdict svg { width: 16px; height: 16px; stroke-width: 2.5; }
+  .verdict.ok { color: var(--ok-ink); }
+  .verdict.ok svg { color: var(--ok); }
+  .verdict.no { color: var(--no-ink); }
+  .verdict.no svg { color: var(--no); }
+</style>
+</head>
+<body>
+<div class="stage" id="stage">
+  <div class="title" id="title"></div>
+  <div class="tree" id="tree"></div>
+  <svg class="wires" id="wires"></svg>
+</div>
+<template id="i-user">{{icon:user}}</template>
+<template id="i-bot">{{icon:bot}}</template>
+<template id="i-shield-x">{{icon:shield-x}}</template>
+<template id="i-check">{{icon:check}}</template>
+<template id="i-x">{{icon:x}}</template>
+<template id="i-clock">{{icon:clock}}</template>
+<script>
+/*DATA*/
+const D = window.DATA;
+const $ = (id) => document.getElementById(id);
+const ic = (n) => $("i-" + n).innerHTML;
+const el = (tag, cls, html) => {
+  const e = document.createElement(tag);
+  if (cls) e.className = cls;
+  if (html !== undefined) e.innerHTML = html;
+  return e;
+};
+const esc = (s) => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;");
+const NS = "http://www.w3.org/2000/svg";
+
+function card(node) {
+  const c = el("div", "card" + (node.rejected ? " reject" : ""));
+  c.id = "n-" + node.key;
+  const icon = node.rejected ? "shield-x" : node.role === "user" ? "user" : "bot";
+  const head = el("div", "head", ic(icon));
+  if (node.rejected) head.firstChild.classList.add("no");
+  head.append(el("div", "name", esc(node.name)));
+  head.append(el("div", "meta", ic("clock") + `<span>${esc(node.note)}</span>`));
+  c.append(head);
+  const chips = el("div", "chips");
+  for (const chip of node.chips) chips.append(el("span", "pill" + (node.rejected ? " no" : ""), esc(chip.text)));
+  c.append(chips);
+  return c;
+}
+
+function rel(node) {
+  const s = $("stage").getBoundingClientRect();
+  const r = node.getBoundingClientRect();
+  return { l: r.left - s.left, r: r.right - s.left, t: r.top - s.top, b: r.bottom - s.top,
+           cx: (r.left + r.right) / 2 - s.left };
+}
+function path(d, color, dashed, width) {
+  const p = document.createElementNS(NS, "path");
+  p.setAttribute("d", d);
+  p.style.stroke = color;
+  p.setAttribute("stroke-width", width || 2);
+  if (dashed) p.setAttribute("stroke-dasharray", "4 5");
+  $("wires").append(p);
+}
+const head = (x, y, color) => path(`M ${x - 5} ${y - 6} L ${x} ${y} L ${x + 5} ${y - 6}`, color);
+
+window.figure = {
+  async init() {
+    $("title").textContent = D.title;
+    const rows = [["top", ["user"]], ["gap1"], ["top", ["orchestrator"]], ["gap2"],
+                  ["kids", ["research", "mailer", "wider"]]];
+    for (const [kind, keys] of rows) {
+      const row = el("div", kind.startsWith("gap") ? kind : "row " + kind);
+      for (const k of keys || []) row.append(card(D.nodes[k]));
+      $("tree").append(row);
+    }
+    // Neutral structure; each delegation's own drop carries the checker's verdict.
+    const o = rel($("n-orchestrator"));
+    const busY = o.b + 28, r = 12;
+    const xs = D.edges.filter((e) => e.parent === "orchestrator").map((e) => rel($("n-" + e.child)).cx);
+    const lo = Math.min(...xs), hi = Math.max(...xs);
+    path(`M ${o.cx} ${o.b} L ${o.cx} ${busY}`, "var(--wire)");
+    path(`M ${lo} ${busY + r} Q ${lo} ${busY} ${lo + r} ${busY} L ${hi - r} ${busY} Q ${hi} ${busY} ${hi} ${busY + r}`, "var(--wire)");
+    for (const e of D.edges) {
+      const a = rel($("n-" + e.parent));
+      const b = rel($("n-" + e.child));
+      const color = e.ok ? "var(--ok)" : "var(--no)";
+      const fan = e.parent === "orchestrator";
+      const y0 = fan ? busY + (Math.abs(b.cx - o.cx) < 1 ? 0 : r) : a.b;
+      const y1 = b.t - 5;
+      path(`M ${b.cx} ${y0} L ${b.cx} ${y1}`, color, !e.ok);
+      head(b.cx, y1, color);
+      const v = el("div", "verdict " + (e.ok ? "ok" : "no"), `${ic(e.ok ? "check" : "x")}<span>${esc(e.label)}</span>`);
+      v.style.left = b.cx + "px";
+      v.style.top = ((fan ? busY + r : a.b) + b.t) / 2 - 2 + "px";
+      $("stage").append(v);
+    }
+  },
+  frame() {},
+  problems() {
+    const out = [];
+    for (const c of document.querySelectorAll(".card")) {
+      if (c.scrollWidth > c.clientWidth + 0.5) out.push("overflow: " + c.textContent.trim());
+      const r = c.getBoundingClientRect();
+      for (const p of c.querySelectorAll(".pill, .name, .meta")) {
+        const q = p.getBoundingClientRect();
+        if (q.right > r.right - 12 || q.left < r.left) out.push("outside card: " + p.textContent);
+      }
+    }
+    return out;
+  },
+};
+</script>
+</body>
+</html>

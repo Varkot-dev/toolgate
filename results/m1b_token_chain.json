@@ -1,0 +1,347 @@
+{
+  "construction": "HMAC chain (construction 1)",
+  "now": 1800000000,
+  "identifier": "demo-token-1",
+  "root_key_hex_demo_only": "746f6f6c67617465206d316220666967757265206b65792c2064656d6f212121",
+  "grant": {
+    "capabilities": [
+      {
+        "tool": "read_file",
+        "args": {
+          "path": {
+            "glob": "reports/*"
+          }
+        }
+      },
+      {
+        "tool": "send_email",
+        "args": {
+          "to": {
+            "in": [
+              "ana@x.com",
+              "ben@x.com"
+            ]
+          },
+          "body": {
+            "any": true
+          }
+        }
+      }
+    ],
+    "expires_at": 1800003600
+  },
+  "steps": [
+    {
+      "step": 0,
+      "added": null,
+      "signature_rule": "sig0 = HMAC-SHA256(root key, tag + canonical(identifier, grant))",
+      "caveats": [],
+      "signature_hex": "2864a5e7fefc52ff07c86e70a81960e3f3b70cce90e42116f44eff52b6071107",
+      "token": "tgm1.eyJncmFudCI6eyJjYXBhYmlsaXRpZXMiOlt7ImNvbnN0cmFpbnRzIjpbeyJhcmciOiJwYXRoIiwib3AiOiJnbG9iIiwidmFsdWUiOiJyZXBvcnRzLyoifV0sIm1heF9jYWxscyI6bnVsbCwidG9vbCI6InJlYWRfZmlsZSJ9LHsiY29uc3RyYWludHMiOlt7ImFyZyI6InRvIiwib3AiOiJpbiIsInZhbHVlIjpbImFuYUB4LmNvbSIsImJlbkB4LmNvbSJdfSx7ImFyZyI6ImJvZHkiLCJvcCI6ImFueSJ9XSwibWF4X2NhbGxzIjpudWxsLCJ0b29sIjoic2VuZF9lbWFpbCJ9XSwiZXhwaXJlc19hdCI6MTgwMDAwMzYwMH0sImlkIjoiZGVtby10b2tlbi0xIn0.KGSl5_78Uv8HyG5wqBlg4_O3DM6Q5CEW9E7_UrYHEQc",
+      "token_chars": 464,
+      "sample_calls": [
+        {
+          "tool": "read_file",
+          "args": {
+            "path": "reports/q3/a"
+          },
+          "allowed": true,
+          "reason": "ok"
+        },
+        {
+          "tool": "read_file",
+          "args": {
+            "path": "reports/q1/b"
+          },
+          "allowed": true,
+          "reason": "ok"
+        },
+        {
+          "tool": "send_email",
+          "args": {
+            "to": "ana@x.com",
+            "body": "hi"
+          },
+          "allowed": true,
+          "reason": "ok"
+        },
+        {
+          "tool": "send_email",
+          "args": {
+            "to": "ben@x.com",
+            "body": "hi"
+          },
+          "allowed": true,
+          "reason": "ok"
+        }
+      ]
+    },
+    {
+      "step": 1,
+      "added": {
+        "constraint": {
+          "arg": "to",
+          "op": "eq",
+          "value": "ana@x.com"
+        },
+        "tool": "send_email",
+        "type": "arg"
+      },
+      "signature_rule": "sig1 = HMAC-SHA256(sig0, tag + canonical(caveat 1))",
+      "caveats": [
+        {
+          "constraint": {
+            "arg": "to",
+            "op": "eq",
+            "value": "ana@x.com"
+          },
+          "tool": "send_email",
+          "type": "arg"
+        }
+      ],
+      "signature_hex": "f9f492bb519bd7c394309567fb6b9a7e417100f1a343173342916984535ad065",
+      "token": "tgm1.eyJncmFudCI6eyJjYXBhYmlsaXRpZXMiOlt7ImNvbnN0cmFpbnRzIjpbeyJhcmciOiJwYXRoIiwib3AiOiJnbG9iIiwidmFsdWUiOiJyZXBvcnRzLyoifV0sIm1heF9jYWxscyI6bnVsbCwidG9vbCI6InJlYWRfZmlsZSJ9LHsiY29uc3RyYWludHMiOlt7ImFyZyI6InRvIiwib3AiOiJpbiIsInZhbHVlIjpbImFuYUB4LmNvbSIsImJlbkB4LmNvbSJdfSx7ImFyZyI6ImJvZHkiLCJvcCI6ImFueSJ9XSwibWF4X2NhbGxzIjpudWxsLCJ0b29sIjoic2VuZF9lbWFpbCJ9XSwiZXhwaXJlc19hdCI6MTgwMDAwMzYwMH0sImlkIjoiZGVtby10b2tlbi0xIn0.eyJjb25zdHJhaW50Ijp7ImFyZyI6InRvIiwib3AiOiJlcSIsInZhbHVlIjoiYW5hQHguY29tIn0sInRvb2wiOiJzZW5kX2VtYWlsIiwidHlwZSI6ImFyZyJ9.-fSSu1Gb18OUMJVn-2uafkFxAPGjQxczQpFphFNa0GU",
+      "token_chars": 585,
+      "sample_calls": [
+        {
+          "tool": "read_file",
+          "args": {
+            "path": "reports/q3/a"
+          },
+          "allowed": true,
+          "reason": "ok"
+        },
+        {
+          "tool": "read_file",
+          "args": {
+            "path": "reports/q1/b"
+          },
+          "allowed": true,
+          "reason": "ok"
+        },
+        {
+          "tool": "send_email",
+          "args": {
+            "to": "ana@x.com",
+            "body": "hi"
+          },
+          "allowed": true,
+          "reason": "ok"
+        },
+        {
+          "tool": "send_email",
+          "args": {
+            "to": "ben@x.com",
+            "body": "hi"
+          },
+          "allowed": false,
+          "reason": "caveat 1: argument 'to' fails eq"
+        }
+      ]
+    },
+    {
+      "step": 2,
+      "added": {
+        "tools": [
+          "read_file"
+        ],
+        "type": "tools"
+      },
+      "signature_rule": "sig2 = HMAC-SHA256(sig1, tag + canonical(caveat 2))",
+      "caveats": [
+        {
+          "constraint": {
+            "arg": "to",
+            "op": "eq",
+            "value": "ana@x.com"
+          },
+          "tool": "send_email",
+          "type": "arg"
+        },
+        {
+          "tools": [
+            "read_file"
+          ],
+          "type": "tools"
+        }
+      ],
+      "signature_hex": "506a7a90a4e5d7ecf2cd093901ea1e2cf3e5777d394c8e9a8bc6f0adf544e6f6",
+      "token": "tgm1.eyJncmFudCI6eyJjYXBhYmlsaXRpZXMiOlt7ImNvbnN0cmFpbnRzIjpbeyJhcmciOiJwYXRoIiwib3AiOiJnbG9iIiwidmFsdWUiOiJyZXBvcnRzLyoifV0sIm1heF9jYWxscyI6bnVsbCwidG9vbCI6InJlYWRfZmlsZSJ9LHsiY29uc3RyYWludHMiOlt7ImFyZyI6InRvIiwib3AiOiJpbiIsInZhbHVlIjpbImFuYUB4LmNvbSIsImJlbkB4LmNvbSJdfSx7ImFyZyI6ImJvZHkiLCJvcCI6ImFueSJ9XSwibWF4X2NhbGxzIjpudWxsLCJ0b29sIjoic2VuZF9lbWFpbCJ9XSwiZXhwaXJlc19hdCI6MTgwMDAwMzYwMH0sImlkIjoiZGVtby10b2tlbi0xIn0.eyJjb25zdHJhaW50Ijp7ImFyZyI6InRvIiwib3AiOiJlcSIsInZhbHVlIjoiYW5hQHguY29tIn0sInRvb2wiOiJzZW5kX2VtYWlsIiwidHlwZSI6ImFyZyJ9.eyJ0b29scyI6WyJyZWFkX2ZpbGUiXSwidHlwZSI6InRvb2xzIn0.UGp6kKTl1-zyzQk5AeoeLPPld305TI6ai8bwrfVE5vY",
+      "token_chars": 637,
+      "sample_calls": [
+        {
+          "tool": "read_file",
+          "args": {
+            "path": "reports/q3/a"
+          },
+          "allowed": true,
+          "reason": "ok"
+        },
+        {
+          "tool": "read_file",
+          "args": {
+            "path": "reports/q1/b"
+          },
+          "allowed": true,
+          "reason": "ok"
+        },
+        {
+          "tool": "send_email",
+          "args": {
+            "to": "ana@x.com",
+            "body": "hi"
+          },
+          "allowed": false,
+          "reason": "caveat 2: tool 'send_email' is not in the allowed list"
+        },
+        {
+          "tool": "send_email",
+          "args": {
+            "to": "ben@x.com",
+            "body": "hi"
+          },
+          "allowed": false,
+          "reason": "caveat 1: argument 'to' fails eq"
+        }
+      ]
+    },
+    {
+      "step": 3,
+      "added": {
+        "constraint": {
+          "arg": "path",
+          "op": "glob",
+          "value": "reports/q3/*"
+        },
+        "tool": "read_file",
+        "type": "arg"
+      },
+      "signature_rule": "sig3 = HMAC-SHA256(sig2, tag + canonical(caveat 3))",
+      "caveats": [
+        {
+          "constraint": {
+            "arg": "to",
+            "op": "eq",
+            "value": "ana@x.com"
+          },
+          "tool": "send_email",
+          "type": "arg"
+        },
+        {
+          "tools": [
+            "read_file"
+          ],
+          "type": "tools"
+        },
+        {
+          "constraint": {
+            "arg": "path",
+            "op": "glob",
+            "value": "reports/q3/*"
+          },
+          "tool": "read_file",
+          "type": "arg"
+        }
+      ],
+      "signature_hex": "6e3710e45bc73211d4ecc7637b298d44a575b41d3dc988a6c71970f11e797b3c",
+      "token": "tgm1.eyJncmFudCI6eyJjYXBhYmlsaXRpZXMiOlt7ImNvbnN0cmFpbnRzIjpbeyJhcmciOiJwYXRoIiwib3AiOiJnbG9iIiwidmFsdWUiOiJyZXBvcnRzLyoifV0sIm1heF9jYWxscyI6bnVsbCwidG9vbCI6InJlYWRfZmlsZSJ9LHsiY29uc3RyYWludHMiOlt7ImFyZyI6InRvIiwib3AiOiJpbiIsInZhbHVlIjpbImFuYUB4LmNvbSIsImJlbkB4LmNvbSJdfSx7ImFyZyI6ImJvZHkiLCJvcCI6ImFueSJ9XSwibWF4X2NhbGxzIjpudWxsLCJ0b29sIjoic2VuZF9lbWFpbCJ9XSwiZXhwaXJlc19hdCI6MTgwMDAwMzYwMH0sImlkIjoiZGVtby10b2tlbi0xIn0.eyJjb25zdHJhaW50Ijp7ImFyZyI6InRvIiwib3AiOiJlcSIsInZhbHVlIjoiYW5hQHguY29tIn0sInRvb2wiOiJzZW5kX2VtYWlsIiwidHlwZSI6ImFyZyJ9.eyJ0b29scyI6WyJyZWFkX2ZpbGUiXSwidHlwZSI6InRvb2xzIn0.eyJjb25zdHJhaW50Ijp7ImFyZyI6InBhdGgiLCJvcCI6Imdsb2IiLCJ2YWx1ZSI6InJlcG9ydHMvcTMvKiJ9LCJ0b29sIjoicmVhZF9maWxlIiwidHlwZSI6ImFyZyJ9.bjcQ5FvHMhHU7MdjeymNRKV1tB09yYimxxlw8R55ezw",
+      "token_chars": 766,
+      "sample_calls": [
+        {
+          "tool": "read_file",
+          "args": {
+            "path": "reports/q3/a"
+          },
+          "allowed": true,
+          "reason": "ok"
+        },
+        {
+          "tool": "read_file",
+          "args": {
+            "path": "reports/q1/b"
+          },
+          "allowed": false,
+          "reason": "caveat 3: argument 'path' fails glob"
+        },
+        {
+          "tool": "send_email",
+          "args": {
+            "to": "ana@x.com",
+            "body": "hi"
+          },
+          "allowed": false,
+          "reason": "caveat 2: tool 'send_email' is not in the allowed list"
+        },
+        {
+          "tool": "send_email",
+          "args": {
+            "to": "ben@x.com",
+            "body": "hi"
+          },
+          "allowed": false,
+          "reason": "caveat 1: argument 'to' fails eq"
+        }
+      ]
+    }
+  ],
+  "forged": {
+    "what": "the last token with caveat 3 removed and its signature (sig3) kept",
+    "caveats": [
+      {
+        "constraint": {
+          "arg": "to",
+          "op": "eq",
+          "value": "ana@x.com"
+        },
+        "tool": "send_email",
+        "type": "arg"
+      },
+      {
+        "tools": [
+          "read_file"
+        ],
+        "type": "tools"
+      }
+    ],
+    "signature_hex": "6e3710e45bc73211d4ecc7637b298d44a575b41d3dc988a6c71970f11e797b3c",
+    "signature_needed_hex": "506a7a90a4e5d7ecf2cd093901ea1e2cf3e5777d394c8e9a8bc6f0adf544e6f6",
+    "token": "tgm1.eyJncmFudCI6eyJjYXBhYmlsaXRpZXMiOlt7ImNvbnN0cmFpbnRzIjpbeyJhcmciOiJwYXRoIiwib3AiOiJnbG9iIiwidmFsdWUiOiJyZXBvcnRzLyoifV0sIm1heF9jYWxscyI6bnVsbCwidG9vbCI6InJlYWRfZmlsZSJ9LHsiY29uc3RyYWludHMiOlt7ImFyZyI6InRvIiwib3AiOiJpbiIsInZhbHVlIjpbImFuYUB4LmNvbSIsImJlbkB4LmNvbSJdfSx7ImFyZyI6ImJvZHkiLCJvcCI6ImFueSJ9XSwibWF4X2NhbGxzIjpudWxsLCJ0b29sIjoic2VuZF9lbWFpbCJ9XSwiZXhwaXJlc19hdCI6MTgwMDAwMzYwMH0sImlkIjoiZGVtby10b2tlbi0xIn0.eyJjb25zdHJhaW50Ijp7ImFyZyI6InRvIiwib3AiOiJlcSIsInZhbHVlIjoiYW5hQHguY29tIn0sInRvb2wiOiJzZW5kX2VtYWlsIiwidHlwZSI6ImFyZyJ9.eyJ0b29scyI6WyJyZWFkX2ZpbGUiXSwidHlwZSI6InRvb2xzIn0.bjcQ5FvHMhHU7MdjeymNRKV1tB09yYimxxlw8R55ezw",
+    "verifier_error": "signature mismatch: the chain does not lead to this signature",
+    "sample_calls": [
+      {
+        "tool": "read_file",
+        "args": {
+          "path": "reports/q3/a"
+        },
+        "allowed": false,
+        "reason": "invalid token: signature mismatch: the chain does not lead to this signature"
+      },
+      {
+        "tool": "read_file",
+        "args": {
+          "path": "reports/q1/b"
+        },
+        "allowed": false,
+        "reason": "invalid token: signature mismatch: the chain does not lead to this signature"
+      },
+      {
+        "tool": "send_email",
+        "args": {
+          "to": "ana@x.com",
+          "body": "hi"
+        },
+        "allowed": false,
+        "reason": "invalid token: signature mismatch: the chain does not lead to this signature"
+      },
+      {
+        "tool": "send_email",
+        "args": {
+          "to": "ben@x.com",
+          "body": "hi"
+        },
+        "allowed": false,
+        "reason": "invalid token: signature mismatch: the chain does not lead to this signature"
+      }
+    ]
+  }
+}

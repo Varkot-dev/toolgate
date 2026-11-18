@@ -1,0 +1,135 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<!--BASE-->
+<link rel="stylesheet" href="system.css">
+<style>
+  .chain { margin-top: 40px; display: grid; }
+  .gap { height: 36px; }
+  .tok { display: grid; grid-template-columns: 120px 1fr auto; align-items: center; column-gap: 12px; }
+  .tok .text { line-height: 24px; white-space: nowrap; }
+  .sig { gap: 8px; }
+  .sig .k { font-family: var(--font); color: var(--muted); }
+  .card.reject .verdict { grid-column: 2 / 4; justify-self: end; margin-top: 12px; display: flex; align-items: center; gap: 6px;
+    color: var(--no-ink); line-height: 24px; }
+  .card.reject .verdict svg { width: 16px; height: 16px; stroke-width: 2.5; color: var(--no); }
+  .pill.struck { background: transparent; border: 1px dashed var(--wire); color: var(--muted); }
+  .pill.struck span { text-decoration: line-through; text-decoration-thickness: 1.5px; }
+  .pill.sig.no .k { color: var(--no-ink); }
+  .step { position: absolute; display: flex; align-items: center; gap: 6px; color: var(--muted);
+    white-space: nowrap; line-height: 20px; }
+  .step.no { color: var(--no-ink); }
+  .step svg { width: 16px; height: 16px; stroke-width: 2.5; color: var(--no); }
+</style>
+</head>
+<body>
+<div class="stage" id="stage">
+  <div class="title" id="title"></div>
+  <div class="chain" id="chain"></div>
+  <svg class="wires" id="wires"></svg>
+</div>
+<template id="i-ticket">{{icon:ticket}}</template>
+<template id="i-ticket-x">{{icon:ticket-x}}</template>
+<template id="i-x">{{icon:x}}</template>
+<script>
+/*DATA*/
+const D = window.DATA;
+const $ = (id) => document.getElementById(id);
+const ic = (n) => $("i-" + n).innerHTML;
+const el = (tag, cls, html) => {
+  const e = document.createElement(tag);
+  if (cls) e.className = cls;
+  if (html !== undefined) e.innerHTML = html;
+  return e;
+};
+const esc = (s) => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;");
+const NS = "http://www.w3.org/2000/svg";
+
+const sig = (hex) => el("span", "pill mono sig", `<span class="k">sig</span><span>${esc(hex)}</span>`);
+
+function tokenCard(c, i) {
+  const card = el("div", "card tok");
+  card.id = "c" + i;
+  const head = el("div", "head", ic("ticket"));
+  if (i === 0) head.firstChild.classList.add("accent");
+  head.append(el("div", "name", esc(c.name)));
+  card.append(head, el("div", "text", esc(c.text)), sig(c.sig));
+  return card;
+}
+
+function forgedCard(f) {
+  const card = el("div", "card tok reject");
+  card.id = "forged";
+  const head = el("div", "head", ic("ticket-x"));
+  head.firstChild.classList.add("no");
+  head.append(el("div", "name", esc(f.name)));
+  const gone = el("div", "", "");
+  gone.append(el("span", "pill struck", `<span>${esc(f.dropped)}</span>`));
+  const bad = sig(f.sig);
+  bad.classList.add("no");
+  card.append(head, gone, bad);
+  card.append(el("div", "verdict", `${ic("x")}<span>${esc(f.verdict)}</span>`));
+  return card;
+}
+
+function rel(node) {
+  const s = $("stage").getBoundingClientRect();
+  const r = node.getBoundingClientRect();
+  return { l: r.left - s.left, r: r.right - s.left, t: r.top - s.top, b: r.bottom - s.top };
+}
+function path(d, color, dashed) {
+  const p = document.createElementNS(NS, "path");
+  p.setAttribute("d", d);
+  p.style.stroke = color;
+  p.setAttribute("stroke-width", 2);
+  if (dashed) p.setAttribute("stroke-dasharray", "4 5");
+  $("wires").append(p);
+}
+const head = (x, y, color) => path(`M ${x - 5} ${y - 6} L ${x} ${y} L ${x + 5} ${y - 6}`, color);
+
+function connect(a, b, label, bad) {
+  const ra = rel(a), rb = rel(b);
+  const icon = a.querySelector(".head svg").getBoundingClientRect();
+  const s = $("stage").getBoundingClientRect();
+  const x = Math.round((icon.left + icon.right) / 2 - s.left);
+  const y0 = ra.b + 6, y1 = rb.t - 6;
+  const color = bad ? "var(--no)" : "var(--wire)";
+  path(`M ${x} ${y0} L ${x} ${y1}`, color, bad);
+  head(x, y1, color);
+  const note = el("div", "step" + (bad ? " no" : ""), (bad ? ic("x") : "") + `<span>${esc(label)}</span>`);
+  note.style.left = x + 16 + "px";
+  note.style.top = Math.round((y0 + y1) / 2 - 10) + "px";
+  $("stage").append(note);
+}
+
+window.figure = {
+  async init() {
+    $("title").textContent = D.title;
+    const cards = D.cards.map(tokenCard);
+    cards.forEach((c, i) => {
+      if (i) $("chain").append(el("div", "gap"));
+      $("chain").append(c);
+    });
+    const forged = forgedCard(D.forged);
+    $("chain").append(el("div", "gap"), forged);
+    for (let i = 1; i < cards.length; i++) connect(cards[i - 1], cards[i], D.step_label, false);
+    connect(cards[cards.length - 1], forged, D.forged.label, true);
+  },
+  frame() {},
+  problems() {
+    const out = [];
+    for (const c of document.querySelectorAll(".card")) {
+      if (c.scrollWidth > c.clientWidth + 0.5) out.push("overflow: " + c.textContent.trim());
+      const r = c.getBoundingClientRect();
+      for (const p of c.querySelectorAll(".pill, .name, .text")) {
+        const q = p.getBoundingClientRect();
+        if (q.right > r.right - 12 || q.left < r.left) out.push("outside card: " + p.textContent);
+      }
+    }
+    return out;
+  },
+};
+</script>
+</body>
+</html>

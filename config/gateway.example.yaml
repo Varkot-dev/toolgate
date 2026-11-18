@@ -1,0 +1,116 @@
+# Example gateway configuration.
+#
+#   python -m toolgate.server --config config/gateway.example.yaml
+#
+# No secret is ever written in this file. The two secrets are read from the
+# environment variables NAMED here, and the server refuses to start if either
+# is missing or malformed.
+#
+#   signing key   base64 of 32 random bytes (an Ed25519 seed):
+#                   export TOOLGATE_SIGNING_KEY="$(openssl rand -base64 32)"
+#   admin key     a long random string that only the operator holds. The
+#                 server is given its SHA-256, never the key itself:
+#                   ADMIN_KEY="$(openssl rand -base64 32 | tr '+/' '-_' | tr -d '=')"
+#                   export TOOLGATE_ADMIN_KEY_SHA256="$(printf %s "$ADMIN_KEY" | sha256sum | cut -d' ' -f1)"
+#                 A plain SHA-256 is only safe because the key is long and
+#                 random. Do not use a password here. The key may contain
+#                 only letters, digits and . _ ~ + / = - so that it fits in
+#                 an Authorization header unchanged.
+#
+# An all-zero signing key and the hash of an empty admin key are refused.
+# Before exposing this to anything but your own machine, read
+# docs/DEPLOYMENT.md: it lists what a reverse proxy MUST provide.
+#
+# Relative paths are resolved against the directory this file is in.
+# Unknown keys are an error, here and in every section.
+
+issuer: "https://gateway.example"     # `iss` of every token this gateway signs
+audience: "toolgate"                  # `aud`: tokens for another gateway are refused
+
+signing_key_env: TOOLGATE_SIGNING_KEY
+admin_key_hash_env: TOOLGATE_ADMIN_KEY_SHA256
+
+# Operator policy (deny beats approve beats allow, default deny). Read once at
+# startup; restart the server to load a changed policy.
+policy_file: "policy.example.yaml"
+
+# Hash-chained audit log, one JSON entry per decision. One writer per file.
+# Check it offline with:  python -m toolgate.audit verify <path> --head <hash>
+# Created with mode 0600. A symbolic link here is refused, not followed.
+audit_log: "audit.jsonl"
+
+# Revocations and call budgets.
+#   memory   lost on restart: every token issued before the restart then
+#            fails as unknown_token (fails closed)
+#   sqlite   kept in a file; needs `path`. The file is created with mode
+#            0600, and one that group or others can access is refused.
+store:
+  kind: memory
+  # kind: sqlite
+  # path: "toolgate.sqlite"
+
+tokens:
+  max_ttl_seconds: 900    # ceiling for `expires_in` on /token and /token/exchange
+  max_depth: 4            # how many times a token can be delegated onward
+  max_children: 64        # how many child tokens one token may ever hand out
+
+approvals:
+  ttl_seconds: 300            # a pending approval nobody decides expires after this
+  max_pending_per_token: 5    # one token cannot flood the queue...
+  max_pending_per_root: 10    # ...nor can one root token through all the children
+                              # exchanged from it...
+  max_pending_per_sub: 20     # ...nor one principal (`sub`) through several roots...
+  max_pending: 100            # ...and all agents together cannot either
+  retention_seconds: 3600     # how long a decided approval stays readable by its agent
+
+limits:
+  max_body_bytes: 65536       # request bodies above this are refused with 413
+  max_output_bytes: 65536     # a larger tool result is withheld (502), never cut short
+  max_in_flight_per_root: 8   # tool calls running at once under one root token and
+                              # its children; over it: 429 with Retry-After, no charge
+  tool_timeout_seconds: 30    # the caller gets 504 after this. A Python thread cannot
+                              # be killed: the tool may still finish in the background,
+                              # it keeps its in-flight slot until it does, and its
+                              # budget is NOT refunded
+  tool_error_detail: false    # true returns a tool's exception text to the agent;
+                              # false returns only the exception type name
+  unverified_audit_per_second: 20   # audit entries per second for tokens that do not
+  unverified_audit_burst: 100       # verify, and the burst. Past it the caller still
+                                    # gets 401; the attempts are counted and logged as
+                                    # one "unverified: N attempts suppressed" entry
+
+server:
+  host: "127.0.0.1"           # there is no TLS here: put a TLS proxy in front
+  port: 8000                  # before listening on anything but loopback
+  admin_threads: 4            # workers only admin endpoints use, so revocation and
+                              # approvals stay responsive while tools are slow
+  limit_concurrency: 256      # connections and requests in flight; past it uvicorn
+                              # answers 503
+  timeout_keep_alive_seconds: 5     # idle keep-alive connections are closed after this
+  access_log: false           # uvicorn's access log. Off by default; when on, query
+                              # strings are cut out of it
+
+# Operator dashboard at /dashboard: live decision feed, approval queue, and
+# the audit chain with a tamper demo that edits a temporary COPY of the log
+# (never the log itself). Off by default; when off, no /dashboard route exists.
+# Sign-in uses the same admin key as the admin API and exchanges it for an
+# HttpOnly, SameSite=Strict session cookie; the server keeps only a hash of
+# the session id. State-changing requests also need a per-session CSRF token.
+# Sessions are in memory and end on restart.
+dashboard:
+  enabled: false
+  session_ttl_seconds: 900    # absolute session lifetime; sign in again after it
+  secure_cookie: auto         # auto: Secure only when the request came over https.
+                              # Set true behind a TLS proxy: the app itself then
+                              # only sees plain http and auto would leave it off
+  feed_entries: 40            # how many recent audit entries the feed shows (1-500)
+  max_sessions: 16            # live sessions at once; the oldest is dropped past it
+
+# Tool registry: the name agents call -> "package.module:function". The
+# function receives the call's arguments as keyword arguments and may be sync
+# or async. Names may use letters, digits and _ . : / - (at most 128
+# characters). A tool that is not listed here cannot be called, whatever a
+# token or the policy says. Listing a tool imports and runs that module, so
+# this file must be writable only by the operator.
+tools:
+  echo: "toolgate.server:echo"   # example tool that returns its arguments

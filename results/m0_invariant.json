@@ -1,0 +1,203 @@
+{
+  "seed": 0,
+  "cases_requested": 20000,
+  "cases_generated": 20000,
+  "children_narrowed": 14550,
+  "children_random": 5450,
+  "children_accepted": 13057,
+  "children_accepted_narrowed": 12792,
+  "children_accepted_random": 265,
+  "children_accepted_with_at_least_one_capability": 10353,
+  "children_rejected": 6943,
+  "calls_allowed_by_accepted_child": 4987,
+  "non_vacuous_fraction": 0.2493,
+  "parent_also_allowed": 4987,
+  "violations": 0,
+  "violation_examples": [],
+  "accepted_constraint_pairs_by_rule": {
+    "parent any / child any": 1691,
+    "parent any / child eq": 329,
+    "parent any / child glob": 374,
+    "parent any / child in": 367,
+    "parent any / child max": 371,
+    "parent eq / child eq": 4263,
+    "parent eq / child glob literal (star-free child)": 28,
+    "parent eq / child in": 8,
+    "parent glob / child eq": 1291,
+    "parent glob / child glob (identical)": 1462,
+    "parent glob / child glob (longer prefix)": 791,
+    "parent glob / child glob literal (star-free child)": 1651,
+    "parent glob / child in": 1302,
+    "parent in / child eq": 2285,
+    "parent in / child glob literal (star-free child)": 33,
+    "parent in / child in": 4151,
+    "parent max / child eq": 1565,
+    "parent max / child in": 1411,
+    "parent max / child max": 3916
+  },
+  "mutants_tried": 13,
+  "mutants_killed": 13,
+  "mutant_search_budget": 20000,
+  "mutant_search_strategy": "scenarios(fault_one_in=1): every narrowed child has one fault",
+  "mutants": [
+    {
+      "mutant": "any_glob_as_literal",
+      "fault": "every child glob, starred or not, checked as one literal",
+      "invariant": "grant",
+      "killed": true,
+      "counterexample": {
+        "parent": "[read(x in ('*',))] expires_at=1",
+        "child": "[read(x glob '*')] expires_at=1",
+        "call": "read({'x': ''})",
+        "now": "0"
+      }
+    },
+    {
+      "mutant": "arg_names_unchecked",
+      "fault": "child may constrain arguments the parent never named",
+      "invariant": "grant",
+      "killed": true,
+      "counterexample": {
+        "parent": "[read()] expires_at=1",
+        "child": "[read(x eq '')] expires_at=1",
+        "call": "read({'x': ''})",
+        "now": "0"
+      }
+    },
+    {
+      "mutant": "child_any_accepted",
+      "fault": "child `any` accepted under every parent constraint",
+      "invariant": "grant",
+      "killed": true,
+      "counterexample": {
+        "parent": "[read(x eq 'a', x in ('',))] expires_at=1",
+        "child": "[read(x any, x eq '')] expires_at=1",
+        "call": "read({'x': ''})",
+        "now": "0"
+      }
+    },
+    {
+      "mutant": "derivation_first",
+      "fault": "derivation always names parent capability 0",
+      "invariant": "derivation",
+      "killed": true,
+      "counterexample": {
+        "parent": "[send(); read()] expires_at=1",
+        "child": "[read()] expires_at=1",
+        "call": "read({})",
+        "now": "0"
+      }
+    },
+    {
+      "mutant": "expiry_unchecked",
+      "fault": "child may expire later than the parent",
+      "invariant": "grant",
+      "killed": true,
+      "counterexample": {
+        "parent": "[read()] expires_at=1",
+        "child": "[read()] expires_at=2",
+        "call": "read({})",
+        "now": "1"
+      }
+    },
+    {
+      "mutant": "glob_heads_only",
+      "fault": "prefix rule ignores what follows the parent's first star",
+      "invariant": "grant",
+      "killed": true,
+      "counterexample": {
+        "parent": "[read(x glob '')] expires_at=1",
+        "child": "[read(x glob '*')] expires_at=1",
+        "call": "read({'x': 'a'})",
+        "now": "0"
+      }
+    },
+    {
+      "mutant": "glob_prefix_reversed",
+      "fault": "prefix rule asks parent head to start with child head",
+      "invariant": "grant",
+      "killed": true,
+      "counterexample": {
+        "parent": "[read(x glob 'a*')] expires_at=1",
+        "child": "[read(x glob '*')] expires_at=1",
+        "call": "read({'x': ''})",
+        "now": "0"
+      }
+    },
+    {
+      "mutant": "in_any_common",
+      "fault": "finite child accepted if ANY of its values satisfies the parent",
+      "invariant": "grant",
+      "killed": true,
+      "counterexample": {
+        "parent": "[read(x eq 'a')] expires_at=1",
+        "child": "[read(x in ('a', ''))] expires_at=1",
+        "call": "read({'x': ''})",
+        "now": "0"
+      }
+    },
+    {
+      "mutant": "max_calls_unchecked",
+      "fault": "child budget may exceed the parent's",
+      "invariant": "derivation",
+      "killed": true,
+      "counterexample": {
+        "parent": "[read() max_calls=1] expires_at=1",
+        "child": "[read()] expires_at=1",
+        "call": "read({})",
+        "now": "0"
+      }
+    },
+    {
+      "mutant": "max_flipped",
+      "fault": "max under max accepts child ceiling >= parent ceiling",
+      "invariant": "grant",
+      "killed": true,
+      "counterexample": {
+        "parent": "[read(x max 0)] expires_at=1",
+        "child": "[read(x max 1)] expires_at=1",
+        "call": "read({'x': 1})",
+        "now": "0"
+      }
+    },
+    {
+      "mutant": "quantifiers_swapped",
+      "fault": "every child constraint under some parent constraint",
+      "invariant": "grant",
+      "killed": true,
+      "counterexample": {
+        "parent": "[read(x max 0, x eq '')] expires_at=1",
+        "child": "[read(x eq '')] expires_at=1",
+        "call": "read({'x': ''})",
+        "now": "0"
+      }
+    },
+    {
+      "mutant": "star_free_glob_unchecked",
+      "fault": "star-free child glob accepted under every parent",
+      "invariant": "grant",
+      "killed": true,
+      "counterexample": {
+        "parent": "[read(x glob '')] expires_at=1",
+        "child": "[read(x glob 'a')] expires_at=1",
+        "call": "read({'x': 'a'})",
+        "now": "0"
+      }
+    },
+    {
+      "mutant": "tool_unchecked",
+      "fault": "parent capability for a different tool may cover",
+      "invariant": "grant",
+      "killed": true,
+      "counterexample": {
+        "parent": "[read()] expires_at=1",
+        "child": "[send()] expires_at=1",
+        "call": "send({})",
+        "now": "0"
+      }
+    }
+  ],
+  "hypothesis_version": "6.170.15",
+  "python_version": "3.13.18",
+  "seconds": 44.1
+}

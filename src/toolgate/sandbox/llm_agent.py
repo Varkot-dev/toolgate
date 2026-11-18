@@ -143,7 +143,12 @@ ESTIMATE_MARGIN = 1.5  # the budget guard inflates the rough estimate by this
 # Dollars per million tokens. Cache writes are 1.25x input (5-minute TTL).
 PRICES: dict[str, dict[str, float]] = {
     "claude-sonnet-5-5": {"input": 2.0, "output": 10.0, "cache_read": 0.10, "cache_write": 2.50},
+    "claude-haiku-4-5": {"input": 1.0, "output": 5.0, "cache_read": 0.10, "cache_write": 1.25},
 }
+
+# Models that predate adaptive thinking and the effort setting: the API rejects both,
+# so their requests send neither and run without thinking.
+NO_THINKING_MODELS: frozenset[str] = frozenset({"claude-haiku-4-5"})
 
 # Run statuses, as written in the results file.
 END_TURN = "end_turn"
@@ -444,14 +449,18 @@ class LLMAgent:
 
     def request(self, messages: list[dict[str, Any]]) -> dict[str, Any]:
         """The keyword arguments of one messages.create call."""
+        thinking = (
+            {}
+            if self.model in NO_THINKING_MODELS
+            else {"thinking": {"type": "adaptive"}, "output_config": {"effort": self.effort}}
+        )
         return {
             "model": self.model,
             "max_tokens": self.max_tokens,
             "system": SYSTEM_PROMPT,
             "tools": list(TOOL_SCHEMAS),
             "messages": messages,
-            "thinking": {"type": "adaptive"},
-            "output_config": {"effort": self.effort},
+            **thinking,
             "cache_control": {"type": "ephemeral"},
         }
 

@@ -141,6 +141,20 @@ def test_request_prefix_is_identical_across_tasks_and_prompt_is_neutral() -> Non
         assert banned not in words
 
 
+def test_request_omits_thinking_and_effort_for_models_without_them() -> None:
+    old = L.LLMAgent(None, model="claude-haiku-4-5")
+    new = agent(None)
+    messages = [{"role": "user", "content": TASKS["benign-01"].request}]
+    old_request, new_request = old.request(messages), new.request(messages)
+    assert "thinking" not in old_request and "output_config" not in old_request
+    assert new_request["thinking"] == {"type": "adaptive"}
+    assert {k: v for k, v in old_request.items() if k != "model"} == {
+        k: v for k, v in new_request.items() if k not in ("model", "thinking", "output_config")
+    }
+    assert "claude-haiku-4-5" in L.PRICES
+    assert set(L.NO_THINKING_MODELS) <= set(L.PRICES)
+
+
 # -- the loop -------------------------------------------------------------------
 
 

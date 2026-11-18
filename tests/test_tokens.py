@@ -2123,7 +2123,11 @@ def test_refusals_are_never_cached(monkeypatch):
     authority, _ = make()
     token = authority.mint("u", GRANT, "a", ttl=60)
     head, payload, signature = token.split(".")
-    tampered = f"{head}.{payload}.{signature[:-2]}AA"
+    # Change the FIRST character: rewriting the last two can leave the token unchanged
+    # (a signature that already ends in "AA") or make its base64 non-canonical, which
+    # is refused as malformed instead of as a bad signature.
+    flipped = ("B" if signature[0] == "A" else "A") + signature[1:]
+    tampered = f"{head}.{payload}.{flipped}"
     for _ in range(2):
         assert code_of(authority, tampered) == "bad_signature"
     assert len(authority._cache) == 0

@@ -46,6 +46,7 @@ from toolgate.sandbox.llm_agent import (
     INVALID,
     MAX_TOKENS,
     MAX_TURNS,
+    NO_THINKING_MODELS,
     PRICES,
     STOP_BUDGET,
     SYSTEM_PROMPT,
@@ -71,7 +72,7 @@ CACHE_MIN_ASSUMED = 2048  # assumed shortest cacheable prefix; shorter context i
 SECONDS_PER_TURN = (4, 15)
 
 NOTES = [
-    "One pass, one model. The model's sampling temperature cannot be set on this model, so "
+    "One pass, one model. The script does not set a sampling temperature, so "
     "a second run will differ; every number here is one draw.",
     "26 hand-written tasks in one toy world (8 benign, 18 attacks). These are counts, not "
     "rates, and say nothing outside this suite.",
@@ -153,8 +154,11 @@ def new_results(model: str, sdk_version: str | None, seed: int) -> dict[str, Any
         "settings": {
             "max_turns_per_task": MAX_TURNS,
             "max_tokens_per_request": MAX_TOKENS,
-            "effort": "medium",
-            "thinking": "adaptive (thinking text not stored)",
+            **(
+                {"effort": None, "thinking": "off (this model predates adaptive thinking)"}
+                if model in NO_THINKING_MODELS
+                else {"effort": "medium", "thinking": "adaptive (thinking text not stored)"}
+            ),
             "system_prompt": SYSTEM_PROMPT,
             "seed": seed,
         },

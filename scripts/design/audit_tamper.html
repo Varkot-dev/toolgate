@@ -1,0 +1,119 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<!--BASE-->
+<link rel="stylesheet" href="system.css">
+<style>
+  .logs { margin-top: 40px; display: grid; grid-template-columns: 1fr 1fr; gap: 16px; align-items: start; }
+  .head .meta svg { stroke-width: 2.5; }
+  .head .meta.ok { color: var(--ok-ink); }
+  .head .meta.ok svg { color: var(--ok); }
+  .head .meta.no { color: var(--no-ink); }
+  .head .meta.no svg { color: var(--no); }
+  .entries { margin-top: 18px; display: grid; gap: 10px; }
+  .entry { border: 1px solid var(--line); border-radius: 10px; padding: 0 10px; }
+  .entry .line { height: 40px; display: flex; align-items: center; gap: 8px; white-space: nowrap; }
+  .entry .seq { font-family: var(--mono); color: var(--muted); width: 20px; }
+  .entry .tool { font-family: var(--mono); }
+  .entry .hash { font-family: var(--mono); color: var(--muted); margin-left: auto; }
+  .dec { display: inline-flex; align-items: center; height: 24px; padding: 0 8px 2px; border-radius: 6px;
+    background: var(--chip); line-height: 1; }
+  .entry.after { opacity: 0.4; border-style: dashed; }
+  .entry.bad { border: 1.5px solid var(--no); background: var(--no-tint); padding: 0 9.5px; }
+  .entry .change { display: flex; align-items: center; gap: 8px; height: 24px; margin: -4px 0 10px 28px; }
+  .entry .change .k { color: var(--muted); padding-bottom: 2px; }
+  .entry.bad .was { color: var(--muted); text-decoration: line-through; text-decoration-thickness: 1.5px; }
+  .entry.bad .now { color: var(--no-ink); background: var(--card); }
+</style>
+</head>
+<body>
+<div class="stage" id="stage">
+  <div class="title" id="title"></div>
+  <div class="logs" id="logs"></div>
+  <svg class="wires" id="wires"></svg>
+</div>
+<template id="i-scroll-text">{{icon:scroll-text}}</template>
+<template id="i-check">{{icon:check}}</template>
+<template id="i-x">{{icon:x}}</template>
+<script>
+/*DATA*/
+const D = window.DATA;
+const $ = (id) => document.getElementById(id);
+const ic = (n) => $("i-" + n).innerHTML;
+const el = (tag, cls, html) => {
+  const e = document.createElement(tag);
+  if (cls) e.className = cls;
+  if (html !== undefined) e.innerHTML = html;
+  return e;
+};
+const esc = (s) => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;");
+
+function entry(e, edit) {
+  const box = el("div", "entry " + e.state);
+  const line = el("div", "line");
+  line.append(el("span", "seq", "#" + e.seq), el("span", "tool", esc(e.tool)));
+  if (!e.focus) line.append(el("span", "dec", esc(e.decision)));
+  line.append(el("span", "hash", esc(e.hash)));
+  box.append(line);
+  if (e.focus) {
+    box.append(el("div", "change", `<span class="k">${esc(D.field)}</span>` + (e.state === "bad"
+      ? `<span class="dec was">${esc(edit.before)}</span><span class="dec now">${esc(edit.after)}</span>`
+      : `<span class="dec">${esc(e.decision)}</span>`)));
+  }
+  return box;
+}
+
+function log(L) {
+  const card = el("div", "card");
+  const head = el("div", "head", ic("scroll-text"));
+  head.append(el("div", "name", esc(L.name)));
+  head.append(el("div", "meta " + (L.ok ? "ok" : "no"), `${ic(L.ok ? "check" : "x")}<span>${esc(L.badge)}</span>`));
+  card.append(head);
+  const list = el("div", "entries");
+  for (const e of L.entries) list.append(entry(e, L.edit));
+  card.append(list);
+  return card;
+}
+
+window.figure = {
+  async init() {
+    $("title").textContent = D.title;
+    for (const L of D.logs) $("logs").append(log(L));
+    // Each entry carries the previous entry's hash: a short link between neighbours.
+    const s = $("stage").getBoundingClientRect();
+    for (const list of document.querySelectorAll(".entries")) {
+      const rows = [...list.children];
+      for (let i = 1; i < rows.length; i++) {
+        const a = rows[i - 1].getBoundingClientRect(), b = rows[i].getBoundingClientRect();
+        const seq = rows[i].querySelector(".seq").getBoundingClientRect();
+        const x = Math.round((seq.left + seq.right) / 2 - s.left);
+        const broken = rows[i].classList.contains("after") || rows[i - 1].classList.contains("after");
+        const p = document.createElementNS("http://www.w3.org/2000/svg", "path");
+        p.setAttribute("d", `M ${x} ${Math.round(a.bottom - s.top)} L ${x} ${Math.round(b.top - s.top)}`);
+        p.style.stroke = "var(--wire)";
+        p.setAttribute("stroke-width", 2);
+        if (broken) p.style.opacity = 0.4;
+        $("wires").append(p);
+      }
+    }
+  },
+  frame() {},
+  problems() {
+    const out = [];
+    for (const c of document.querySelectorAll(".card, .entry")) {
+      if (c.scrollWidth > c.clientWidth + 0.5) out.push("overflow: " + c.textContent.trim());
+    }
+    for (const c of document.querySelectorAll(".card")) {
+      const r = c.getBoundingClientRect();
+      for (const p of c.querySelectorAll(".name, .meta, .hash, .dec")) {
+        const q = p.getBoundingClientRect();
+        if (q.right > r.right - 12 || q.left < r.left) out.push("outside card: " + p.textContent);
+      }
+    }
+    return out;
+  },
+};
+</script>
+</body>
+</html>

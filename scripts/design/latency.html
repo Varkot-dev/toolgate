@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<!--BASE-->
+<link rel="stylesheet" href="system.css">
+<link rel="stylesheet" href="charts.css">
+</head>
+<body>
+<div class="stage" id="stage">
+  <div class="title" id="title"></div>
+  <div class="tiles" id="tiles"></div>
+  <div id="charts"></div>
+</div>
+<template id="i-timer">{{icon:timer}}</template>
+<template id="i-clock">{{icon:clock}}</template>
+<script>
+/*DATA*/
+const D = window.DATA;
+const $ = (id) => document.getElementById(id);
+const ic = (n) => $("i-" + n).innerHTML;
+const el = (tag, cls, html) => {
+  const e = document.createElement(tag);
+  if (cls) e.className = cls;
+  if (html !== undefined) e.innerHTML = html;
+  return e;
+};
+
+window.figure = {
+  async init() {
+    $("title").textContent = D.title;
+    if (!D.tiles.length) $("tiles").remove();
+    else $("tiles").style.gridTemplateColumns = `repeat(${D.tiles.length}, 1fr)`;
+    for (const t of D.tiles) {
+      const c = el("div", "card tile " + t.tone);
+      c.append(el("div", "top", ic(t.icon) + `<span class="lab">${t.label}</span>`));
+      c.append(el("div", "num", t.value));
+      c.append(el("div", "sub", t.sub));
+      $("tiles").append(c);
+    }
+    for (const ch of D.charts) {
+      const c = el("div", "card chartcard");
+      const head = el("div", "head", ic(ch.icon) + `<div class="name">${ch.name}</div>`);
+      if (ch.meta) head.append(el("div", "meta", `<span>${ch.meta}</span>`));
+      c.append(head);
+      c.insertAdjacentHTML("beforeend", ch.svg);
+      if (ch.aside) c.append(el("div", "aside", ch.aside.map((a) => `<span>${a}</span>`).join("")));
+      $("charts").append(c);
+    }
+  },
+  frame() {},
+  problems() {
+    const out = [];
+    for (const c of document.querySelectorAll(".card")) {
+      const r = c.getBoundingClientRect();
+      for (const t of c.querySelectorAll(".lab, .num, .sub, .name, .meta, text")) {
+        const q = t.getBoundingClientRect();
+        if (q.right > r.right - 10 || q.left < r.left + 10) out.push("outside card: " + t.textContent);
+      }
+    }
+    return out;
+  },
+};
+</script>
+</body>
+</html>

@@ -1,17 +1,20 @@
-"""Label creep figure for M4b: what provenance stops, what it asks a person, and why.
+"""Label creep figure for M4b: what provenance stops, and what it asks a person.
 
 Runs toolgate.sandbox.runner.label_creep() (scripted agents, not a language
-model), writes results/m4b_label_creep.json, then draws from that JSON only:
+model), writes results/m4b_label_creep.json, then draws from that JSON (and
+results/m5_scripted.json, which it is checked against) only:
 
-    assets/label_creep.png
-    assets/label_creep.svg
+    assets/label_creep.png    2x, drawn from scripts/design/label_creep.html
 
-Left: per configuration, attacks that still succeeded (of 18) and approvals
-the honest agent asked for (mean per task, 26 tasks): two panels on one row
-per configuration, never one dual axis. Right: the fraction of values labeled
-untrusted at each step number of a task, for configurations 3, 4 and 5.
+One row per configuration, careful approver: attacks that still succeeded
+(of 18) on the left, approvals the honest agent asked for (mean per task, 26
+tasks) on the right. Two panels with their own scales on shared rows, never
+one dual axis.
 
-Deterministic: running it twice writes the same bytes.
+The page is drawn as inline SVG from coordinates computed here, on the shared
+design system in scripts/design/, and captured with headless Chromium (see
+scripts/design/render.py). Deterministic: running it twice writes the same
+bytes.
 
 Run from the repo root: .venv/bin/python scripts/fig_label_creep.py
 """
@@ -19,139 +22,129 @@ Run from the repo root: .venv/bin/python scripts/fig_label_creep.py
 from __future__ import annotations
 
 import json
-
-import matplotlib.pyplot as plt
+from typing import Any
 
 import style
+from design.render import Shot, render
 from toolgate.sandbox.runner import label_creep
 
-# Categorical slots in fixed order (validated: scripts of the dataviz method).
-SERIES = (
-    ("3-session-labels", "3 session labels", "#2a78d6"),
-    ("4-value-labels", "4 value labels (handles)", "#eb6834"),
-    ("5-plan-execute", "5 plan-then-execute", "#1baf7a"),
+# The configurations drawn, in order, with their row labels. Careful approver
+# throughout; the rubber-stamp variants and 1c stay in the JSON.
+ROWS = (
+    ("0-no-gateway", "no gateway"),
+    ("1-grant-only", "grant only"),
+    ("2-policy-careful", "plus policy"),
+    ("3-session-labels", "plus session labels"),
+    ("4-value-labels", "plus value labels"),
+    ("5-plan-execute", "plan-then-execute"),
 )
-BASELINE = "#8c8b87"
+
+WIDTH = 682  # chart width in CSS px: the stage's 720 px content minus card padding
+LABEL_W = 176
+A_X, A_ROOM = 184, 180  # attacks panel: left edge and longest bar
+B_X, B_ROOM = 448, 180  # approvals panel
+HEAD_H = 34
+ROW_H = 40
+BAR_H = 18
+CHECK = "M20 6 9 17l-5-5"  # Lucide "check", 24 px box
+
+
+def text(x: float, y: float, body: str, cls: str = "", anchor: str = "start") -> str:
+    a = f' text-anchor="{anchor}"' if anchor != "start" else ""
+    c = f' class="{cls}"' if cls else ""
+    return f'<text x="{x:.1f}" y="{y:.1f}" dominant-baseline="central"{a}{c}>{body}</text>'
+
+
+def bar(x: float, y: float, w: float, fill: str) -> str:
+    return f'<rect x="{x:.1f}" y="{y:.1f}" width="{w:.1f}" height="{BAR_H}" rx="4" fill="{fill}"/>'
+
+
+def chart(rows: list[dict[str, Any]], attacks: int, top_approvals: float) -> str:
+    parts = [
+        text(A_X, 8, f'attacks that succeeded <tspan class="quiet">of {attacks}</tspan>', "head"),
+        text(B_X, 8, 'approvals asked <tspan class="quiet">per task</tspan>', "head"),
+        f'<line class="rule" x1="0" x2="{WIDTH}" y1="{HEAD_H - 11}" y2="{HEAD_H - 11}"/>',
+    ]
+    for i, row in enumerate(rows):
+        y = HEAD_H + i * ROW_H
+        mid = y + BAR_H / 2
+        parts.append(text(0, mid, row["name"]))
+        hits = row["attacks_succeeded"]
+        if hits:
+            w = A_ROOM * hits / attacks
+            parts.append(bar(A_X, y, w, "var(--no)"))
+            parts.append(text(A_X + w + 8, mid, str(hits)))
+        else:  # nothing got through: a check mark and a zero, not an empty row
+            parts.append(
+                f'<path class="icon" d="{CHECK}" transform="translate({A_X - 1} {mid - 8}) '
+                f'scale({16 / 24})" stroke="var(--ok)" stroke-width="3.4"/>'
+            )
+            parts.append(text(A_X + 22, mid, "0", "ok strong"))
+        asks = row["honest_approvals_mean_per_task"]
+        if asks:
+            w = B_ROOM * asks / top_approvals
+            parts.append(bar(B_X, y, w, "var(--accent)"))
+            parts.append(text(B_X + w + 8, mid, f"{asks:.2f}"))
+        else:
+            parts.append(text(B_X, mid, "none", "muted"))
+    height = HEAD_H + len(rows) * ROW_H - ROW_H + BAR_H + 2
+    body = "".join(parts)
+    return (
+        f'<svg class="chart" width="{WIDTH}" height="{height}" '
+        f'viewBox="0 0 {WIDTH} {height}">{body}</svg>'
+    )
+
+
+def view(data: dict[str, Any], scripted: dict[str, Any]) -> dict[str, Any]:
+    by_key = {r["configuration"]: r for r in data["protection_vs_approvals"]}
+    m5 = {c["key"]: c["summary"] for c in scripted["configurations"]}
+    rows = []
+    for key, name in ROWS:
+        r = by_key[key]
+        # The two result files must agree on every number drawn.
+        assert r["attacks_succeeded"] == m5[key]["attacks_succeeded"], key
+        honest = m5[key]["approvals_requested"]["honest"]
+        assert r["honest_approvals_total"] == honest["total"], key
+        assert r["honest_approvals_mean_per_task"] == honest["mean_per_task"], key
+        rows.append({**r, "name": name})
+    attacks = {r["attacks"] for r in rows}
+    assert len(attacks) == 1
+    tasks = len(scripted["tasks"])
+    assert "scripted" in scripted["agents"]
+    return {
+        "title": "Provenance stops attacks, at the cost of questions",
+        "tiles": [],
+        "charts": [
+            {
+                "icon": "shield-check",
+                "name": "What each setup stops, and what it asks",
+                "meta": "scripted agents",
+                "svg": chart(
+                    rows,
+                    attacks.pop(),
+                    max(r["honest_approvals_mean_per_task"] for r in rows),
+                ),
+                "aside": [
+                    f"Approvals: asked by an honest agent, mean over {tasks} tasks",
+                    "careful approver",
+                ],
+            }
+        ],
+    }
 
 
 def main() -> None:
-    style.apply()
     data = label_creep()
     out = style.RESULTS / "m4b_label_creep.json"
     out.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
     data = json.loads(out.read_text(encoding="utf-8"))
+    scripted = json.loads((style.RESULTS / "m5_scripted.json").read_text(encoding="utf-8"))
 
-    fig = plt.figure(figsize=style.SIZE)
-    fig.text(
-        0.04,
-        0.94,
-        "Provenance in the sandbox: protection, approvals and label creep",
-        fontsize=20,
-        fontweight="bold",
-    )
-    fig.text(
-        0.04,
-        0.905,
-        "Scripted agents, planner and extractor, not a language model. "
-        "26 tasks, 18 of them attacks. Careful approver unless marked rubber stamp.",
-        fontsize=12.5,
-        color=style.MUTED,
-    )
-    rows = data["protection_vs_approvals"]
-    names = [r["configuration"] for r in rows]
-    y = list(range(len(rows)))[::-1]
-    color = {key: c for key, _, c in SERIES}
-
-    def bar_color(name: str) -> str:
-        for key, c in color.items():
-            if name.startswith(key):
-                return c
-        return BASELINE
-
-    ax1 = fig.add_axes((0.17, 0.15, 0.17, 0.67))
-    ax2 = fig.add_axes((0.36, 0.15, 0.13, 0.67))
-    for ax, field, title, limit, fmt in (
-        (ax1, "attacks_succeeded", "attacks that succeeded\n(of 18, fewer is better)", 18, "{:d}"),
-        (
-            ax2,
-            "honest_approvals_mean_per_task",
-            "approvals asked per task\n(honest agent)",
-            1.3,
-            "{:.2f}",
-        ),
-    ):
-        values = [r[field] for r in rows]
-        ax.barh(y, values, height=0.62, color=[bar_color(n) for n in names], edgecolor="none")
-        for yy, v in zip(y, values, strict=True):
-            ax.text(
-                v + limit * 0.02, yy, fmt.format(v), va="center", fontsize=11.5, color=style.INK
-            )
-        ax.set_xlim(0, limit * 1.18)
-        ax.set_ylim(-0.6, len(rows) - 0.4)
-        ax.set_title(title, fontsize=13, color=style.INK, loc="left", pad=10)
-        ax.set_xticks([])
-        for side in ("top", "right", "bottom"):
-            ax.spines[side].set_visible(False)
-        ax.tick_params(axis="y", length=0)
-    ax1.set_yticks(y, [n.replace("-rubber-stamp", " (rubber stamp)") for n in names], fontsize=11.5)
-    ax2.set_yticks([])
-
-    ax3 = fig.add_axes((0.58, 0.15, 0.38, 0.67))
-    creep = data["configurations"]
-    for key, label, c in SERIES:
-        steps = [s for s in creep[key]["by_step"] if s["fraction_values_untrusted"] is not None]
-        xs = [s["step"] for s in steps]
-        ys = [s["fraction_values_untrusted"] for s in steps]
-        ax3.plot(
-            xs,
-            ys,
-            color=c,
-            linewidth=2,
-            marker="o",
-            markersize=8,
-            markeredgecolor=style.SURFACE,
-            markeredgewidth=2,
-            label=label,
-        )
-        ax3.text(
-            xs[-1] + 0.12,
-            ys[-1],
-            label.split(" ", 1)[1],
-            color=style.INK,
-            fontsize=11.5,
-            va="center",
-        )
-    tasks = [s["tasks"] for s in creep["3-session-labels"]["by_step"]]
-    ax3.set_xticks(
-        range(1, len(tasks) + 1),
-        [f"{i + 1}\n{n} tasks" for i, n in enumerate(tasks)],
-        fontsize=10.5,
-    )
-    ax3.set_xlim(0.7, len(tasks) + 1.9)
-    ax3.set_ylim(0, 1.05)
-    ax3.set_yticks([0, 0.25, 0.5, 0.75, 1.0], ["0%", "25%", "50%", "75%", "100%"])
-    ax3.grid(axis="y", color=style.RULE, linewidth=0.8)
-    ax3.set_axisbelow(True)
-    for side in ("top", "right"):
-        ax3.spines[side].set_visible(False)
-    ax3.set_title(
-        "values labeled untrusted, by step within a task\n(honest agent, all 26 tasks)",
-        fontsize=13,
-        loc="left",
-        pad=10,
-    )
-    ax3.set_xlabel("step number (calls that reached a decision)", fontsize=11.5)
-    ax3.legend(loc="lower right", frameon=False, fontsize=11)
-    fig.text(
-        0.04,
-        0.025,
-        "In 4 (both approvers) one attack (args-03) never reached the agent: label creep "
-        "denied the fetch that carried it. Session mode counts every value after the first "
-        "untrusted result as untrusted.",
-        fontsize=11,
-        color=style.MUTED,
-    )
-    style.save(fig, "label_creep")
+    style.ASSETS.mkdir(exist_ok=True)
+    png = style.ASSETS / "label_creep.png"
+    render("label_creep.html", view(data, scripted), [Shot(str(png), scale=2)])
+    for path in (png, out):
+        print(path.relative_to(style.ROOT))
 
 
 if __name__ == "__main__":

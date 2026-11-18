@@ -6,9 +6,12 @@ asks the real verifier about four sample calls at every step, then removes
 the last caveat the way an attacker would and records the verifier's error.
 Writes
 
-    assets/token_chain.png
-    assets/token_chain.svg
     results/m1b_token_chain.json
+    assets/token_chain.png    2x, drawn from scripts/design/token_chain.html
+
+The figure is an HTML page on the shared design system in scripts/design/,
+captured with headless Chromium (see scripts/design/render.py), and drawn
+only from the record above.
 
 Run from the repo root: .venv/bin/python scripts/fig_token_chain.py
 """
@@ -16,14 +19,10 @@ Run from the repo root: .venv/bin/python scripts/fig_token_chain.py
 from __future__ import annotations
 
 import json
-import textwrap
 from dataclasses import replace
 
-import matplotlib.pyplot as plt
-from matplotlib.axes import Axes
-from matplotlib.patches import FancyBboxPatch
-
 import style
+from design.render import Shot, render
 from toolgate import Call, Capability, Constraint, Grant
 from toolgate.chain import (
     ArgCaveat,
@@ -52,19 +51,10 @@ GRANT = Grant(
     ),
     T0 + 3600,
 )
-GRANT_LINES = (
-    "read_file(path ~ reports/*)",
-    "send_email(to in {ana@x.com, ben@x.com}, body: any)",
-)
-
-# (caveat, how the figure writes it)
 CAVEATS = (
-    (ArgCaveat("send_email", Constraint("to", "eq", "ana@x.com")), "send_email: to = ana@x.com"),
-    (ToolsCaveat(("read_file",)), "tool in {read_file}"),
-    (
-        ArgCaveat("read_file", Constraint("path", "glob", "reports/q3/*")),
-        "read_file: path ~ reports/q3/*",
-    ),
+    ArgCaveat("send_email", Constraint("to", "eq", "ana@x.com")),
+    ToolsCaveat(("read_file",)),
+    ArgCaveat("read_file", Constraint("path", "glob", "reports/q3/*")),
 )
 
 # (call, first header line, second header line)
@@ -74,12 +64,6 @@ SAMPLES = (
     (Call("send_email", {"to": "ana@x.com", "body": "hi"}), "send_email", "to ana@x.com"),
     (Call("send_email", {"to": "ben@x.com", "body": "hi"}), "send_email", "to ben@x.com"),
 )
-
-
-def short(signature: bytes) -> str:
-    """First 8 bytes as hex, in groups of four, with a mark that more follows."""
-    h = signature.hex()[:16]
-    return " ".join(h[i : i + 4] for i in range(0, 16, 4)) + " …"
 
 
 def decide_all(authority: HmacAuthority, token: HmacToken | str) -> list[dict]:
@@ -109,7 +93,7 @@ def build() -> dict:
         }
     ]
     tokens = [token]
-    for n, (caveat, _) in enumerate(CAVEATS, start=1):
+    for n, caveat in enumerate(CAVEATS, start=1):
         # The holder's step: only the serialized token goes in, no authority is used.
         token = attenuate(HmacToken.parse(token.serialize()), caveat)
         tokens.append(token)
@@ -161,225 +145,75 @@ def build() -> dict:
     }
 
 
-# --- drawing ---------------------------------------------------------------
+# --- the page ----------------------------------------------------------------
 
-LEFT, RIGHT = 40, 1560
-SIG_X = 690  # left edge of the signature column
-CELL_X = (1090, 1224, 1358, 1492)  # centers of the four sample-call columns
-PAD = 22
-
-
-def card(ax: Axes, top: float, height: float, rejected: bool = False) -> None:
-    ax.add_patch(
-        FancyBboxPatch(
-            (LEFT, top),
-            RIGHT - LEFT,
-            height,
-            boxstyle="round,pad=0,rounding_size=12",
-            facecolor=style.SURFACE if rejected else style.PANEL,
-            edgecolor=style.DENY if rejected else style.RULE,
-            linewidth=2 if rejected else 1.2,
-            linestyle=(0, (5, 4)) if rejected else "solid",
-        )
-    )
+VERB = {"read_file": "read", "send_email": "email"}
+NOUN = {"read_file": "file reads", "send_email": "email"}
+SIG_CHARS = 8  # hex characters of each signature shown on a card
 
 
-def cells(ax: Axes, y: float, decisions: list[dict]) -> None:
-    for x, d in zip(CELL_X, decisions, strict=True):
-        ok = d["allowed"]
-        ax.text(
-            x,
-            y,
-            "✓ allow" if ok else "✕ deny",
-            fontsize=15,
-            fontweight="bold",
-            color=style.ALLOW if ok else style.DENY,
-            ha="center",
-            va="center",
-        )
+def who(value: str) -> str:
+    return value.split("@")[0] if "@" in value else value
 
 
-def signature(ax: Axes, y: float, rule: str, hex_text: str) -> None:
-    ax.text(SIG_X, y - 17, rule, fontsize=13, color=style.MUTED, va="center")
-    ax.text(
-        SIG_X,
-        y + 13,
-        hex_text,
-        fontsize=16,
-        fontweight="bold",
-        family=style.MONO,
-        color=style.ACCENT,
-        va="center",
-    )
+def value_text(constraint: dict) -> str:
+    """A constraint's allowed values in plain words: "ana or ben", "reports/q3/*"."""
+    op, value = constraint["op"], constraint.get("value")
+    if op == "in":
+        return " or ".join(who(v) for v in value)
+    if op in ("eq", "glob"):
+        return who(value)
+    raise ValueError(f"no plain wording for op {op!r}")
 
 
-def arrow(ax: Axes, y0: float, y1: float, label: str, ok: bool = True) -> None:
-    color = style.MUTED if ok else style.DENY
-    dash = "solid" if ok else (0, (5, 4))
-    ax.annotate(
-        "",
-        xy=(92, y1 - 3),
-        xytext=(92, y0 + 3),
-        arrowprops={
-            "arrowstyle": "-|>",
-            "color": color,
-            "linewidth": 2,
-            "linestyle": dash,
-            "mutation_scale": 16,
-            "shrinkA": 0,
-            "shrinkB": 0,
-        },
-    )
-    ax.text(
-        112,
-        (y0 + y1) / 2,
-        label,
-        fontsize=13,
-        fontweight="bold" if not ok else "normal",
-        color=color,
-        va="center",
-    )
+def describe_grant(grant: dict) -> str:
+    """The issued grant as one phrase: "read reports/*, email ana or ben"."""
+    parts = []
+    for cap in grant["capabilities"]:
+        main = next(iter(cap["args"].items()))  # the first argument names the target
+        arg, rule = main
+        op, value = next(iter(rule.items()))
+        parts.append(f"{VERB[cap['tool']]} {value_text({'op': op, 'value': value})}")
+    return ", ".join(parts)
 
 
-def draw(record: dict) -> plt.Figure:
-    style.apply()
-    fig = plt.figure(figsize=style.SIZE)
-    ax = fig.add_axes((0, 0, 1, 1))
-    ax.set_xlim(0, 1600)
-    ax.set_ylim(900, 0)
-    ax.axis("off")
+def describe_caveat(caveat: dict) -> str:
+    """One caveat as a plain restriction: "email only ana", "file reads only"."""
+    if caveat["type"] == "tools":
+        return " and ".join(NOUN[t] for t in caveat["tools"]).capitalize() + " only"
+    if caveat["type"] == "arg":
+        return f"{VERB[caveat['tool']].capitalize()} only {value_text(caveat['constraint'])}"
+    raise ValueError(f"no plain wording for caveat {caveat!r}")
 
-    ax.text(
-        40,
-        50,
-        "A token its holder can narrow offline, and nobody can widen",
-        fontsize=26,
-        fontweight="bold",
-    )
-    ax.text(
-        40,
-        88,
-        "Each restriction is chained into the signature. Every row is a real token, "
-        "checked by the real verifier against four sample calls.",
-        fontsize=14,
-        color=style.MUTED,
-    )
 
-    # Column heads.
-    ax.text(LEFT + PAD, 150, "token", fontsize=13, color=style.MUTED, va="center")
-    ax.text(
-        SIG_X,
-        150,
-        "signature (first 8 of 32 bytes)",
-        fontsize=13,
-        color=style.MUTED,
-        va="center",
-    )
-    for x, (_, tool, detail) in zip(CELL_X, SAMPLES, strict=True):
-        ax.text(x, 138, tool, fontsize=13, fontweight="bold", ha="center", va="center")
-        ax.text(x, 160, detail, fontsize=11.5, family=style.MONO, ha="center", va="center")
-
+def view(record: dict) -> dict:
     steps = record["steps"]
-    rules = [
-        "sig0 = HMAC(root key, id + grant)",
-        "sig1 = HMAC(sig0, caveat 1)",
-        "sig2 = HMAC(sig1, caveat 2)",
-        "sig3 = HMAC(sig2, caveat 3)",
+    cards = [
+        {
+            "name": "Issued" if s["step"] == 0 else f"Caveat {s['step']}",
+            "text": describe_grant(record["grant"])
+            if s["step"] == 0
+            else describe_caveat(s["added"]),
+            "sig": s["signature_hex"][:SIG_CHARS],
+        }
+        for s in steps
     ]
-    top = 180
-    heights = [112, 88, 88, 88]
-    gap = 36
-    for n, step in enumerate(steps):
-        h = heights[n]
-        if n:
-            arrow(
-                ax,
-                top - gap,
-                top,
-                f"holder appends caveat {n} by itself: no root key, no network call",
-            )
-        card(ax, top, h)
-        mid = top + h / 2
-        if n == 0:
-            ax.text(
-                LEFT + PAD,
-                top + 28,
-                "issued by the gateway",
-                fontsize=16,
-                fontweight="bold",
-                va="center",
-            )
-            for k, line in enumerate(GRANT_LINES):
-                ax.text(
-                    LEFT + PAD,
-                    top + 60 + 26 * k,
-                    line,
-                    fontsize=14,
-                    family=style.MONO,
-                    va="center",
-                )
-        else:
-            ax.text(
-                LEFT + PAD, mid - 15, f"+ caveat {n}", fontsize=16, fontweight="bold", va="center"
-            )
-            ax.text(
-                LEFT + PAD,
-                mid + 15,
-                CAVEATS[n - 1][1],
-                fontsize=14,
-                family=style.MONO,
-                va="center",
-            )
-        signature(ax, mid, rules[n], short(bytes.fromhex(step["signature_hex"])))
-        cells(ax, mid, step["sample_calls"])
-        top += h + gap
-
-    # The failed attempt.
+    cards[0]["text"] = cards[0]["text"].capitalize()
     forged = record["forged"]
-    top += 6
-    arrow(ax, top - gap - 6, top, "✕ attacker removes caveat 3 and keeps sig3", ok=False)
-    h = 900 - top - 48
-    card(ax, top, h, rejected=True)
-    ax.text(
-        LEFT + PAD,
-        top + 28,
-        "grant + caveat 1 + caveat 2, signed sig3",
-        fontsize=16,
-        fontweight="bold",
-        va="center",
-    )
-    ax.text(LEFT + PAD, top + 60, "verifier says:", fontsize=13, color=style.MUTED, va="center")
-    for k, line in enumerate(textwrap.wrap(forged["verifier_error"], 56)):
-        ax.text(
-            LEFT + PAD + 124, top + 60 + 24 * k, line, fontsize=13, color=style.DENY, va="center"
-        )
-    mid = top + h / 2
-    signature(
-        ax,
-        mid - 12,
-        "needs sig2, holds only sig3",
-        short(bytes.fromhex(forged["signature_hex"])),
-    )
-    ax.text(
-        SIG_X,
-        mid + 34,
-        "HMAC cannot be run backwards",
-        fontsize=13,
-        color=style.MUTED,
-        va="center",
-    )
-    cells(ax, mid, forged["sample_calls"])
-
-    ax.text(
-        40,
-        882,
-        "Notation:   ~ glob pattern    = exact value    in {..} allow-list    "
-        "A call must pass the grant AND every caveat.        "
-        "Data: results/m1b_token_chain.json",
-        fontsize=12.5,
-        color=style.MUTED,
-    )
-    return fig
+    dropped = steps[-1]["added"]
+    assert forged["verifier_error"].startswith("signature mismatch")
+    return {
+        "title": "Anyone can narrow a token. No one can widen it.",
+        "cards": cards,
+        "step_label": "holder adds, no key",
+        "forged": {
+            "name": "Forged",
+            "dropped": describe_caveat(dropped),
+            "sig": forged["signature_hex"][:SIG_CHARS],
+            "verdict": "signature does not match",
+            "label": f"drop caveat {len(steps) - 1}, keep its sig",
+        },
+    }
 
 
 def main() -> None:
@@ -399,9 +233,10 @@ def main() -> None:
     out = style.RESULTS / "m1b_token_chain.json"
     out.write_text(json.dumps(record, indent=2) + "\n")
 
-    fig = draw(record)
-    png, svg = style.save(fig, "token_chain")
-    for path in (png, svg, out):
+    style.ASSETS.mkdir(exist_ok=True)
+    png = style.ASSETS / "token_chain.png"
+    render("token_chain.html", view(record), [Shot(str(png), scale=2)])
+    for path in (png, out):
         print(path.relative_to(style.ROOT))
     for step in record["steps"]:
         print(f"sig{step['step']} {step['signature_hex'][:16]}  {step['token_chars']} chars")

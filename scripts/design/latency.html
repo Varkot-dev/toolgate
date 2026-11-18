@@ -38,6 +38,7 @@ window.figure = {
       c.append(el("div", "sub", t.sub));
       $("tiles").append(c);
     }
+    if (D.note) $("tiles").after(el("div", "tilenote", D.note));
     for (const ch of D.charts) {
       const c = el("div", "card chartcard");
       const head = el("div", "head", ic(ch.icon) + `<div class="name">${ch.name}</div>`);

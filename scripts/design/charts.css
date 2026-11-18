@@ -20,6 +20,9 @@
 .tile.quiet .num { color: var(--muted); }
 .tile .sub { margin-top: 2px; color: var(--muted); line-height: 20px; white-space: nowrap; }
 
+.tilenote { margin: 10px 2px 0; color: var(--muted); font-size: 14px; line-height: 20px; }
+.tilenote + .chartcard, .tilenote + #charts > .chartcard:first-child { margin-top: 20px; }
+
 .chartcard { margin-top: 12px; padding: 18px 18px 16px; }
 .chartcard .head .meta { font-size: var(--size-body); }
 .chartcard svg.chart { display: block; margin-top: 16px; overflow: visible; }

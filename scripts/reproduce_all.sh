@@ -44,6 +44,7 @@ run scripts/demo_mcp_proxy.py                            # results/m4_demo.json
 run scripts/m5_scripted_eval.py                          # results/m5_scripted.json
 run scripts/fig_label_creep.py                           # results/m4b_label_creep.json, assets/label_creep.*
 run scripts/fig_provenance_graph.py                      # results/m4b_provenance_graph.json, assets/provenance_graph.*
+run scripts/fig_real_model.py                            # assets/real_model.png (reads the committed real-model results; calls no model)
 
 # M6: hero animation, latency, dashboard screenshots
 run scripts/fig_hero.py                                  # results/m6_hero.json, assets/hero.gif, hero_poster.png

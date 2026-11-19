@@ -740,7 +740,7 @@ def evaluate(seed: int = SEED) -> dict[str, Any]:
         if config["status"] == "ok"
     }
     return {
-        "description": "M5 sandbox evaluation of the gateway with " + STAND_IN,
+        "description": "Sandbox evaluation of the gateway with " + STAND_IN,
         "agents": STAND_IN,
         "read_this_first": [
             "Scripted agents, not a language model. The hijacked agent obeys every injection, "
@@ -770,9 +770,10 @@ def evaluate(seed: int = SEED) -> dict[str, Any]:
             "extractor returns the accurate answer, or, in the hijacked run, the attacker's text "
             "whenever its input holds the injection. It shows the mechanism, not how well a "
             "model plans or how often an extractor is fooled.",
-            "The expected labels were written for M3 (none-at-M3 means nothing at M3 stops the "
-            "attack). They are not predictions for configurations 3 to 5, so mismatches there "
-            "are listed, not corrected.",
+            "The expected labels were written for the gateway without provenance ('none before "
+            "provenance' means no grant, budget or policy layer stops the attack). They are "
+            "not predictions for configurations 3 to 5, so mismatches there are listed, not "
+            "corrected.",
         ],
         "seed": seed,
         "clock_unix": START,
@@ -804,7 +805,7 @@ def evaluate(seed: int = SEED) -> dict[str, Any]:
 
 
 def dumps(result: Mapping[str, Any]) -> str:
-    """The exact text written to results/m5_scripted.json."""
+    """The exact text written to results/scripted_eval.json."""
     return json.dumps(result, indent=2) + "\n"
 
 
@@ -847,7 +848,7 @@ def format_table(result: Mapping[str, Any]) -> str:
     return "\n".join(lines)
 
 
-# -- label creep (results/m4b_label_creep.json) --------------------------------
+# -- label creep (results/label_creep.json) --------------------------------
 
 CREEP_CONFIGS = ("2-policy-careful", "3-session-labels", "4-value-labels", "5-plan-execute")
 

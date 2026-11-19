@@ -1,4 +1,4 @@
-"""Run the sandbox task suite with scripted agents and write results/m5_scripted.json.
+"""Run the sandbox task suite with scripted agents and write results/scripted_eval.json.
 
 Scripted agents, not a language model: an honest agent that performs exactly
 the user's task and a hijacked agent that also obeys every injected
@@ -15,7 +15,7 @@ the defence layers, not a model.
 Deterministic: fixed seed, fixed clock, counting ids. Running it twice writes
 the same bytes.
 
-Usage:  python scripts/m5_scripted_eval.py [--out PATH] [--seed N]
+Usage:  python scripts/eval_scripted.py [--out PATH] [--seed N]
 """
 
 from __future__ import annotations
@@ -30,7 +30,7 @@ ROOT = Path(__file__).resolve().parent.parent
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("--out", type=Path, default=ROOT / "results" / "m5_scripted.json")
+    parser.add_argument("--out", type=Path, default=ROOT / "results" / "scripted_eval.json")
     parser.add_argument("--seed", type=int, default=SEED)
     options = parser.parse_args()
 

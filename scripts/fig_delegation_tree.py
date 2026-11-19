@@ -1,9 +1,9 @@
-"""Delegation tree figure for M0: authority only shrinks down the chain.
+"""Delegation tree figure: authority only shrinks down the chain.
 
 Builds four grants with the real library, validates every edge with
 caveat.check_attenuation, adds one request the checker rejects, and writes
 
-    results/m0_delegation_tree.json
+    results/delegation_tree.json
     assets/delegation_tree.png    2x, drawn from scripts/design/delegation_tree.html
 
 The figure is an HTML page on the shared design system in scripts/design/,
@@ -141,7 +141,7 @@ def main() -> None:
         + [edge_record(*REJECTED_EDGE, denied)],
     }
     style.RESULTS.mkdir(exist_ok=True)
-    out = style.RESULTS / "m0_delegation_tree.json"
+    out = style.RESULTS / "delegation_tree.json"
     out.write_text(json.dumps(record, indent=2) + "\n")
 
     # 3. Draw, from the same grants the checker just judged.

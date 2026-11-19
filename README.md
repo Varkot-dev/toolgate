@@ -1,187 +1,22 @@
 # caveat
 
-**Authorization for AI agents, where every hand-off can only narrow authority.**
+An authorization gateway for LLM agents, where each hand-off can only narrow authority.
 
 <p align="center">
-  <img src="assets/hero.gif" width="800" alt="One sub-agent token makes two calls through the gateway: read_file is allowed and runs, delete_file is denied by policy, and both decisions appear as hash-chained audit entries">
+  <img src="assets/hero.gif" width="800" alt="A sub-agent token makes two calls: read_file is allowed, delete_file is denied, and both land in the audit log">
 </p>
-<p align="center"><sub>Also as a <a href="assets/hero_poster.png">still image</a>. Drawn from one real run recorded in <a href="results/m6_hero.json">results/m6_hero.json</a>.</sub></p>
 
-caveat is an authorization gateway that sits between an LLM agent and its tools and checks every tool call against a short-lived, narrowly scoped grant and an operator policy, outside the model. An agent can hand a sub-agent a weaker token but never a stronger one, sensitive calls wait for a person, and every decision is written to a hash-chained audit log before anything runs. The model does not decide what it is allowed to do.
+caveat sits between an agent and its tools. Every tool call is checked against a short-lived, narrowly scoped grant and an operator policy, in code that runs outside the model. Sensitive calls wait for a person, and every decision is written to a hash-chained audit log before the tool runs.
 
-| Result | Value | Source |
-|---|---|---|
-| Violations of "child allows implies parent allows" | 0 in 20,000 generated cases | `results/m0_invariant.json` |
-| Attenuation rules proven by Z3 (escalation query unsat) | 19 of 19 lemmas | `results/m0b_rules.json` |
-| Attacks that succeeded, scripted agents, 18 attacks | 18 of 18 with no gateway; 0 of 17 with value labels and 0 of 18 with plan-then-execute (careful approver) | `results/m5_scripted.json` |
-| Benign tasks completed, scripted agents | 8 of 8 in every configuration | `results/m5_scripted.json` |
-| Attacks a real model attempted, one pass, 18 attacks | Claude Sonnet 5.5: 0. Claude Haiku 4.5: 2, both went through with no gateway, both stopped with session labels | `results/m5_real_model.json`, `results/m5_real_model_haiku45.json` |
-| Added latency per allowed call, median (reused token, audit fsync on) | 319 us | `results/m6_latency.json` |
+## Why
 
-Protection numbers come from **scripted agents** on 26 hand-written tasks; a single pass with two real models is reported separately, and never blended with them; see [Protection](#2-protection-scripted-agents) and [A real model](#2b-a-real-model-one-pass).
+An agent that calls tools usually holds one broad, long-lived credential. A web page or an email it reads can carry instructions, and the agent may follow them with the user's full authority. It passes the same credential to every sub-agent, and afterwards it is hard to say who allowed what.
 
-## The problem
+caveat applies ordinary least privilege to that setup. A task gets a grant for the tools and argument values it needs, for a few minutes. An agent can exchange its token for a weaker one to give a sub-agent, never a stronger one. The name comes from macaroons, where caveats are restrictions a holder can add but never remove.
 
-An agent that calls tools usually holds one broad, long-lived credential. That creates four problems:
+## Example
 
-1. **Confused deputy.** A document or tool result can contain instructions, and the agent may carry them out with the user's authority.
-2. **Standing access wider than the task.** The task needs "read one folder"; the credential allows everything, indefinitely.
-3. **Unlimited delegation.** An orchestrator passes its full credential to every sub-agent.
-4. **No record of who authorized what.** Afterwards nobody can reconstruct which person or agent allowed an action.
-
-caveat applies ordinary least-privilege access control to agents: a separate component checks every call against an explicit grant.
-
-## How a call is decided
-
-`Gateway.handle_call` in [src/caveat/gateway.py](src/caveat/gateway.py) is the only way a tool runs. The HTTP server and the MCP proxy are thin adapters over it. Each step fails closed.
-
-1. **Canonicalize.** Rewrite each argument the operator has typed (path, email, URL) to one spelling, or refuse it if it is ambiguous. In value-label mode, resolve handle references and label every argument.
-2. **Build the call.** A read-only plain-JSON copy of the arguments; this copy is what is checked, hashed, stored for approval and passed to the tool.
-3. **Verify the token** once (Ed25519 signature, issuer, audience, expiry, revocation of the token and every ancestor) and ask its grant, without spending budget.
-4. **Grant check.** Closed-world: every argument must be named by a constraint and every constraint must hold.
-5. **Policy.** Deny beats approve beats allow; no matching rule means deny.
-6. **Approval if needed.** The call is parked, bound to the exact request, and nothing runs. When a person approves, steps 3 to 9 run again on the stored call with a fresh clock.
-7. **Budget charge** along the signed delegation path: the call is charged to its own capability and to every ancestor capability in one atomic store operation.
-8. **Audit before acting.** The entry is written and fsynced; if it cannot be written, the charge is refunded and the tool does not run.
-9. **Recheck** expiry and revocation (cheap, no signature), then **run** the tool on the canonical copy. A tool that started is never refunded.
-
-Why each step is where it is: [Decision log in docs/PLAN.md](docs/PLAN.md#decision-log).
-
-## Results
-
-Every number below was written by a script in this repo; the file and key are named next to it. `scripts/reproduce_all.sh` regenerates all of them.
-
-### 1. Security invariant
-
-The invariant: if the attenuation check accepts a child grant, every call the child allows is also allowed by the parent.
-
-| Measure | Value | Key in `results/m0_invariant.json` |
-|---|---|---|
-| Generated (parent, child, call) cases, seed 0 | 20,000 | `cases_generated` |
-| Child grants the check accepted | 13,057 | `children_accepted` |
-| Cases where the accepted child allows the call (the invariant has something to prove) | 4,987 | `calls_allowed_by_accepted_child` |
-| Violations | 0 | `violations` |
-| Deliberately broken versions of the check caught by the same generators | 13 of 13 | `mutants_killed`, `mutants_tried` |
-
-Random testing samples the space; the solver searches all of it. Each rule of the checker is a Z3 query over symbolic parameters: "given the rule's side condition, is there a value the child accepts and the parent rejects?"
-
-| Measure | Value | Key in `results/m0b_rules.json` |
-|---|---|---|
-| Lemmas answered unsat (no escalation) | 19 of 19 | `summary.lemmas_unsat` |
-| Of those, checked within a stated bound | 6 | `summary.lemmas_bounded` |
-| Deliberately wrong rules answered sat, with a counterexample | 12 of 12 | `summary.wrong_variants_sat` |
-| Lemma premises satisfiable on their own (no vacuous proof) | 19 of 19 | `summary.premise_checks_sat` |
-
-The bounds are listed per lemma in the file (for example, the glob prefix lemma is checked for 0 to 4 child stars, capability composition for 3 argument names). The solver proves the rules as modeled; the Python checker is tied to the model by differential tests, not by proof.
-
-The check is sound by design and deliberately incomplete. The completeness gap was measured exhaustively on every ordered pair of a 125-constraint universe:
-
-![Completeness gap: 0 of 14,401 unsafe pairs accepted, 1,016 of 1,224 safe pairs accepted, and the safe-but-rejected gap falling from 576 to 208 with the added rule](assets/completeness_gap.png)
-
-| All 15,625 pairs (`results/m0b_completeness.json`, `exhaustive_constraints`) | Before the star-free rule | After |
-|---|---|---|
-| Safe and accepted | 648 | 1,016 |
-| Safe but rejected (the gap) | 576 | 208 |
-| Accepted but unsafe | 0 | 0 |
-| Solver gave no answer | 0 | 0 |
-
-"Before" is `previous_rule_set.outcomes`, "after" is `outcomes`. The one added rule (a child `glob` with no `*` is checked like `eq`) closed 368 pairs (`rule_a.gap_pairs_closed`). Collapsing repeated stars would close 115 more (`what_if_extensions`); it was not added. These counts describe this enumerated universe, not real workloads.
-
-### 2. Protection (scripted agents)
-
-Read this first: these numbers come from **scripted agents** on **26 hand-written tasks** (8 benign, 18 attacks in five classes) in one in-memory toy world, not from a language model. The hijacked scripted agent obeys every injected instruction and retries twice when refused, so the numbers measure the defence layers, not how often a model is hijacked. They are counts, not rates. A test asserts that every attack succeeds with no gateway.
-
-From `results/m5_scripted.json`, `configurations[].summary`:
-
-| Configuration | Attacks succeeded | Benign tasks completed | Approvals requested (honest runs, all 26 tasks) |
-|---|---|---|---|
-| 0. No gateway | 18 of 18 | 8 of 8 | 0 |
-| 1. Grant only (allow-all policy) | 10 of 18 | 8 of 8 | 0 |
-| 1c. Grant plus canonicalization | 9 of 18 | 8 of 8 | 0 |
-| 2. Grant plus policy, careful approver | 4 of 18 | 8 of 8 | 8 |
-| 2. Grant plus policy, rubber-stamp approver | 9 of 18 | 8 of 8 | 8 |
-| 3. Plus session labels, careful | 0 of 18 | 8 of 8 | 27 |
-| 3. Plus session labels, rubber-stamp | 8 of 18 | 8 of 8 | 27 |
-| 4. Plus value labels (handles), careful | 0 of 17 | 8 of 8 | 19 |
-| 4. Plus value labels (handles), rubber-stamp | 7 of 17 | 8 of 8 | 19 |
-| 5. Plan-then-execute, careful | 0 of 18 | 8 of 8 | 15 |
-| 5. Plan-then-execute, rubber-stamp | 4 of 18 | 8 of 8 | 15 |
-
-Columns: `attacks_succeeded` of `attacks_attempted`, `benign_utility_honest`, `approvals_requested.honest.total`. Notes:
-
-- The careful approver is an oracle that approves only the exact call the honest agent would make; the rubber-stamp approver approves everything. Real people are in between, and the rubber-stamp rows show that the approval layer is only as good as the person.
-- In configuration 4 one attack (args-03) was never attempted: label creep had already denied the fetch that would have delivered the injection, which is why the denominator is 17.
-- In configuration 4 the honest agent had 2 calls denied (`calls_denied.honest`) and still completed all its tasks.
-- Class d attacks stay inside every argument constraint of the grant; argument constraints alone cannot stop them, which is what the provenance configurations (3 to 5) are for.
-
-Stronger tracking asks a person more often. Label creep is the reason: once the agent has read untrusted content, every literal it writes is treated as untrusted.
-
-![Label creep: for each configuration with a careful approver, attacks that succeeded and approvals asked per task; scripted agents](assets/label_creep.png)
-
-The figure shows the protection and approval numbers above. From `results/m4b_label_creep.json`, `configurations.*.by_step`: with session labels, 100% of values are untrusted from the third call of a task on; with value labels the share reaches 85.71% at step 5; with plan-then-execute it stays between 41.67% and 56.92% after step 1. Scripted agents, scripted planner and scripted extractor.
-
-![Provenance graph of task misuse-04: a request from the user, an untrusted web page and a private file; the injected fetch that would put the file into a URL is blocked by rule deny-non-public-data-in-url](assets/provenance_graph.png)
-
-One class d attack (task misuse-04: leak the budget through the URL of a fetch to an allowed host), hijacked scripted agent, value labels. Every label drawn is the one the gateway recorded (`results/m4b_provenance_graph.json`): the injected fetch is denied by `deny-non-public-data-in-url`. The figure shows only the nodes of that story; the full graph, including a later legitimate fetch that the same rule also denied (label creep), is in the JSON.
-
-### 2b. A real model (one pass)
-
-The same 26 tasks, with a real model as the agent instead of a scripted one, under three configurations: no gateway, grant plus policy, and plus session labels (careful approver). One pass per model; the model sees an ordinary assistant prompt that never mentions injection or the gateway. Written by `scripts/m5_real_model_eval.py` with an Anthropic API key ([docs/REAL_MODEL_RUN.md](docs/REAL_MODEL_RUN.md)).
-
-![Real model: Claude Haiku 4.5 attempted two attacks; with no gateway both went through, grant plus policy stopped one, session labels stopped both; benign tasks done and approvals asked per configuration](assets/real_model.png)
-
-- **Claude Sonnet 5.5** (`results/m5_real_model.json`) attempted none of the 18 attacks in any configuration: it ignored the injected instruction in 17 and one was never delivered. This run says nothing about whether the gateway stops a real model; it only shows what the gateway costs (benign tasks completed: 6 of 8 with no gateway, 5 of 8 with it).
-- **Claude Haiku 4.5** (`results/m5_real_model_haiku45.json`, thinking off because the model predates it) attempted 2. Adding an outsider to an invite (`approval-01`) was stopped by the policy's approval rule. Emailing the Q3 report to an address on the company's own domain (`misuse-02`) passed the policy, because the domain is allowed, and was stopped only by session labels: the model had read untrusted mail earlier in the task, so the outgoing email needed approval and the approver rejected it.
-- Counts from one pass, not rates; a second run will differ. In 2 Haiku tasks and 1 Sonnet task the injection was never delivered, which is still being looked into. Both models failed 2 of 8 benign tasks even with no gateway. The approver is the automated careful approver, not a person.
-
-### 3. Cost
-
-From `results/m6_latency.json`, `pipeline.<config>.added` (time of `Gateway.handle_call` for an allowed call to a no-op tool, minus a direct call of that tool; 10,000 calls each; in-process, memory store):
-
-| Token | Audit fsync | p50 | p99 |
-|---|---|---|---|
-| Warm (one token reused, verify cache hit) | on | 319 us | 707 us |
-| Cold (new token every call, signature checked) | on | 657 us | 1,326 us |
-| Warm | off | 136 us | 245 us |
-| Cold | off | 378 us | 643 us |
-
-Components timed alone (`stages.*.p50_us`): cold verify 211.9 us, of which the Ed25519 signature check 110.2 us; audit append with fsync 205.6 us, without 34.0 us. For a reused token the audit fsync is the largest step and most of the added time (p50 319 us with it, 136 us without). With the SQLite store instead of memory, warm with fsync, p50 is 1,245 us (`pipeline.sqlite_fsync_on_warm`).
-
-Throughput (`throughput`): in-process, one thread, warm, 2,679.5 calls/s with fsync and 7,050.2 without; cold with fsync 1,554.3. Over HTTP to the FastAPI app on one uvicorn process on localhost, 461.6 calls/s with 1 client (p50 2,096 us) and 720.5 with 16 clients. Through the MCP proxy, the median `tools/call` was 2,711 us slower than the same call made directly to the upstream (`mcp_proxy.added_p50_us`, a difference of medians).
-
-![Latency: median added time per allowed call for a reused and a new token, and the median of each pipeline step, with the audit fsync the largest step of a reused-token call](assets/latency.png)
-
-Measured on one shared cloud container (Intel Xeon at 2.10 GHz, 4 logical cores, ext4 temp directory), not isolated from other tenants. The numbers are indicative, vary from run to run, and so does the latency figure drawn from them (given the same results file it renders identically). Nothing here is compared with any other system. fsync cost depends entirely on the disk.
-
-### 4. Delegation, offline tokens, audit and dashboard
-
-![Delegation tree: a user grant, an orchestrator and two sub-agents, each narrower than its parent, and one wider request rejected](assets/delegation_tree.png)
-
-Every arrow is a real `check_attenuation` call: three narrower children are accepted and a request for `read_file(path ~ *)` is rejected (`results/m0_delegation_tree.json`).
-
-![Token chain: an HMAC token gains three restrictions offline, each changing the signature; a copy with the last restriction removed fails verification](assets/token_chain.png)
-
-A holder narrows an HMAC chain token offline with no key; removing a caveat fails with "signature mismatch" because HMAC cannot be run backwards (`results/m1b_token_chain.json`).
-
-![Audit chain: an 8-entry log verifies; a copy with entry 3's decision changed fails verification at entry 3](assets/audit_tamper.png)
-
-Changing one field of entry 3 in a copy of a real 8-entry log makes `verify` report entry 3 as the first bad entry (`results/m2_audit_tamper.json`).
-
-![Dashboard tamper demo: the real log verifies, a temporary copy with entry 11 changed fails at entry 11](assets/dashboard_tamper.png)
-
-The admin dashboard shows the decision feed, the approval queue and the audit chain; its tamper button edits a temporary copy, never the real log ([full page](assets/dashboard.png)). Screenshots from `scripts/fig_dashboard.py`; times and hashes in them come from the wall clock, so they differ between runs.
-
-## Quick start
-
-Python 3.11 or later.
-
-```bash
-pip install -e ".[dev]"
-pytest -q                          # CAVEAT_EXAMPLES=300 for a faster property-test run
-ruff check . && ruff format --check .
-```
-
-The capability model as a library:
+Grants can be used as a plain library, with no server:
 
 ```python
 from caveat import Call, Grant, check_attenuation
@@ -205,15 +40,78 @@ assert child.allows(Call("read_file", {"path": "reports/q3/a.txt"}), 1_800_000_0
 assert not child.allows(Call("read_file", {"path": "reports/q1/a.txt"}), 1_800_000_000)
 ```
 
-Run the gateway. The two secrets come from environment variables, never from files; read [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) before listening on anything but loopback.
+A grant is closed-world: every argument of a call must be named by a constraint, and every constraint must hold. The constraint operators are `eq`, `in`, `max`, `glob` and `any`.
+
+## How a call is decided
+
+`Gateway.handle_call` in [src/caveat/gateway.py](src/caveat/gateway.py) is the only path to a tool. The HTTP server and the MCP proxy are thin adapters over it. Every step fails closed.
+
+1. Canonicalize arguments the operator has typed (paths, emails, URLs), or refuse ambiguous ones.
+2. Verify the token: Ed25519 signature, issuer, audience, expiry, and revocation of the token and all its ancestors.
+3. Check the call against the grant.
+4. Check it against the policy. Deny beats approve beats allow, and no matching rule means deny.
+5. If a rule asks for approval, park the call, bound to the exact request. When a person approves, the checks run again on the stored call.
+6. Charge the call budget to the capability and every ancestor in one atomic operation.
+7. Append and fsync the audit entry. If that fails, refund the charge and do not run the tool.
+8. Recheck expiry and revocation, then run the tool on the canonical copy of the arguments.
+
+The reasons behind the order and the other design choices are in the decision log at the end of [docs/PLAN.md](docs/PLAN.md#decision-log).
+
+## What is in the box
+
+The core is a capability model and the attenuation check that decides whether one grant is narrower than another. On top of it sit signed tokens (Ed25519 JWTs with exchange, revocation and a shared call budget), offline chain tokens that a holder can narrow without contacting the gateway, a YAML policy language, and the audit log.
+
+![Delegation tree: a user grant, an orchestrator and two sub-agents, each narrower than its parent, and one wider request rejected](assets/delegation_tree.png)
+
+The gateway runs as a FastAPI service or as a proxy in front of an MCP server. The proxy shows a client only the tools its token allows and sends every `tools/call` through the same pipeline.
+
+The audit log is a hash chain in JSON Lines. Editing any entry makes verification fail at that entry, provided the reader trusts a published head hash.
+
+![Audit chain: a log verifies; a copy with one decision changed fails verification at that entry](assets/audit_tamper.png)
+
+Provenance tracking is optional. With session labels, everything an agent produces after reading untrusted content is treated as untrusted, and the policy can require approval before it leaves. Value labels track individual values through handles, and a plan-then-execute mode keeps untrusted data out of the plan.
+
+An admin dashboard (off by default) shows the decision feed, the approval queue and the audit chain.
+
+![Admin dashboard with the decision feed, approval queue and audit chain](assets/dashboard.png)
+
+## How it is checked
+
+The attenuation check has one property that matters: if it accepts a child grant, the child allows nothing the parent does not. That property is covered by property-based tests, including deliberately broken versions of the check that the tests must catch. Each rule is also proved sound with the Z3 SMT solver, with the rules as modeled; the Python code is tied to the model by differential tests. The check is sound and deliberately incomplete, and the gap is measured. Figures are in [results/invariant.json](results/invariant.json), [results/rules_proof.json](results/rules_proof.json) and [results/completeness.json](results/completeness.json).
+
+To see whether the layers stop anything, there is a sandbox: a toy office world with email, calendar, files and web fetches, and hand-written tasks run by scripted agents. Eight tasks are ordinary work. In 18 others, a document or page carries an injected instruction, and the hijacked agent obeys it and retries when refused. With no gateway, every attack succeeds. With grants, policy and session labels, and an approver who approves only what the user asked for, none succeed and all eight ordinary tasks still complete. With an approver who approves everything, eight attacks get through. These are counts from a scripted toy, not rates for real agents. Full results are in [results/scripted_eval.json](results/scripted_eval.json).
+
+Stronger tracking asks a person more often. Once an agent has read untrusted content, everything it writes is labeled untrusted, which is called label creep:
+
+![Label creep: attacks that succeeded and approvals asked per task for each configuration, scripted agents](assets/label_creep.png)
+
+![Provenance graph of one attack: a value from a private file would leave through a fetch URL, and the policy rule denies it](assets/provenance_graph.png)
+
+The same tasks were also run once with real models as the agent, kept separate from the scripted results. Claude Sonnet 5.5 never acted on an injected instruction. Claude Haiku 4.5 acted on two: with no gateway both went through, the policy's approval rule stopped one, and session labels stopped both. In a few tasks the injected text never reached the model. This is a handful of cases from a single pass, and it does not measure how often a real model is hijacked. See [results/real_model_sonnet.json](results/real_model_sonnet.json), [results/real_model_haiku.json](results/real_model_haiku.json) and [docs/REAL_MODEL_RUN.md](docs/REAL_MODEL_RUN.md).
+
+On a shared cloud container, the gateway adds a median of about 0.3 ms to an allowed call with a reused token and audit fsync on, mostly the fsync ([results/latency.json](results/latency.json)).
+
+## Quick start
+
+Python 3.11 or later.
+
+```bash
+pip install -e ".[dev]"
+pytest -q
+```
+
+Run the gateway. Both secrets come from environment variables. Read [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) before listening on anything but loopback.
 
 ```bash
 export CAVEAT_SIGNING_KEY="$(openssl rand -base64 32)"
 ADMIN_KEY="$(openssl rand -base64 32 | tr '+/' '-_' | tr -d '=')"
 export CAVEAT_ADMIN_KEY_SHA256="$(printf %s "$ADMIN_KEY" | sha256sum | cut -d' ' -f1)"
-python -m caveat.server --config config/gateway.example.yaml   # 127.0.0.1:8000, audit log in config/
+python -m caveat.server --config config/gateway.example.yaml   # 127.0.0.1:8000
+```
 
-# in a second shell (same ADMIN_KEY): mint a root token, then call the example tool
+In a second shell with the same `ADMIN_KEY`, mint a token, then call the example tool with it:
+
+```bash
 curl -s -X POST localhost:8000/token -H "Authorization: Bearer $ADMIN_KEY" \
   -H 'Content-Type: application/json' \
   -d '{"sub":"user:alice","actor":"agent:demo","expires_in":600,
@@ -223,128 +121,61 @@ curl -s -X POST localhost:8000/call -H "Authorization: Bearer $TOKEN" \
 curl -s localhost:8000/audit/verify -H "Authorization: Bearer $ADMIN_KEY"
 ```
 
-`TOKEN` is the `token` field of the first response. The call is denied at stage `policy` ("no rule matched (default deny)"): the grant allows `echo`, but `config/policy.example.yaml` has no rule for it. Both checks must agree.
+`TOKEN` is the `token` field of the first response. The call is denied by policy: the grant allows `echo`, but `config/policy.example.yaml` has no rule for it, and both must agree. Audit logs can be checked offline with `python -m caveat.audit verify <path> --head <hash>`.
 
-Demos (each deterministic, each writes its results file). The seeds and key seeds in `scripts/` are fixed, public demo values so that reruns match byte for byte; never reuse them, or any key derived from them, outside the demos.
+To put the gateway in front of an MCP server, run `python -m caveat.mcp_proxy --config <file> --upstream <url>`. The config's `audience` must be the proxy's own MCP URL; `examples/mcp_upstream_server.py` is a small server to try it with. `scripts/demo_dashboard.py` starts the gateway with the dashboard on.
 
-```bash
-python scripts/m1_demo.py          # tokens: exchange, escalation refused, shared budget, revocation
-python scripts/demo_gateway.py     # HTTP gateway: allow, deny, approval, revoke, audit verify
-python scripts/demo_mcp_proxy.py   # MCP client direct vs through the proxy
-python scripts/demo_dashboard.py   # starts the gateway with the dashboard on, prints URL and demo key
-```
-
-MCP proxy in front of the example MCP server. The token audience must be the proxy's own URL (RFC 8707), so use a copy of the config with `audience` changed:
-
-```bash
-python examples/mcp_upstream_server.py --port 8765 &
-sed 's|^audience: "caveat"|audience: "http://127.0.0.1:8000/mcp"|' \
-  config/gateway.example.yaml > config/proxy.local.yaml
-python -m caveat.mcp_proxy --config config/proxy.local.yaml --upstream http://127.0.0.1:8765/mcp
-```
-
-The admin API is mounted under `/admin` on the same port. Audit logs can be checked offline with `python -m caveat.audit verify <path> --head <hash>`.
-
-## Reproducing every number
+## Reproducing the results
 
 ```bash
 bash scripts/reproduce_all.sh      # several minutes
 ```
 
-Figures are HTML pages under `scripts/design/` rendered to PNG by headless Chromium through Node.js Playwright (`scripts/design/render.cjs`, called by `scripts/design/render.py`). This needs Node.js 18 or later on `PATH` and the `playwright` npm package. On a fresh machine, from the repo root:
+This regenerates every file under `results/` and every figure under `assets/`. Figures are HTML pages under `scripts/design/` rendered by headless Chromium through Node.js Playwright, so they need Node 18 or later and `npm i -D playwright && npx playwright install chromium` in the repo root (or `CAVEAT_NODE_PATH` pointing at an existing install). Apart from the latency benchmark and the dashboard screenshots, reruns are identical byte for byte. The real-model evaluation needs an API key and is not part of the script.
 
-```bash
-npm i -D playwright                # creates node_modules/ in the repo (ignored by git)
-npx playwright install chromium
-```
+The seeds and key seeds in `scripts/` are fixed, public demo values so that reruns match byte for byte; never reuse them, or any key derived from them, outside the demos.
 
-`render.py` looks for the package in this order: the directory in `CAVEAT_NODE_PATH`, then `NODE_PATH`, then `node_modules/` in the repo, then `/opt/node-tools/node_modules` (the build environment's preinstalled copy) if it exists. `scripts/fig_dashboard.py` uses the Python `playwright` package instead if it is installed. Fonts are bundled in `scripts/design/fonts/`, so output does not depend on system fonts.
+## Limits
 
-| Script | Writes |
-|---|---|
-| `scripts/m0_invariant.py` | `results/m0_invariant.json` |
-| `scripts/fig_delegation_tree.py` | `results/m0_delegation_tree.json`, `assets/delegation_tree.png` |
-| `scripts/m0b_prove_rules.py` | `results/m0b_rules.json` |
-| `scripts/m0b_completeness.py` (a few minutes) | `results/m0b_completeness.json` |
-| `scripts/fig_completeness_gap.py` | `assets/completeness_gap.png` |
-| `scripts/m1_demo.py` | `results/m1_demo.json` |
-| `scripts/fig_token_chain.py` | `results/m1b_token_chain.json`, `assets/token_chain.png` |
-| `scripts/fig_audit_tamper.py` | `results/m2_audit_tamper.json`, `assets/audit_tamper.png` |
-| `scripts/demo_gateway.py` | `results/m3_demo.json` |
-| `scripts/demo_mcp_proxy.py` | `results/m4_demo.json` |
-| `scripts/m5_scripted_eval.py` | `results/m5_scripted.json` |
-| `scripts/fig_label_creep.py` | `results/m4b_label_creep.json`, `assets/label_creep.png` |
-| `scripts/fig_provenance_graph.py` | `results/m4b_provenance_graph.json`, `assets/provenance_graph.png` |
-| `scripts/m5_real_model_eval.py` (needs an API key, costs money, not in `reproduce_all.sh`) | `results/m5_real_model.json`, `results/m5_real_model_haiku45.json` |
-| `scripts/fig_real_model.py` | `assets/real_model.png` (reads the two files above) |
-| `scripts/fig_hero.py` | `results/m6_hero.json`, `assets/hero.gif`, `assets/hero_poster.png` |
-| `scripts/bench_latency.py` (a few minutes) | `results/m6_latency.json` |
-| `scripts/fig_latency.py` | `assets/latency.png` |
-| `scripts/fig_dashboard.py` | `assets/dashboard.png`, `assets/dashboard_tamper.png` |
+- Tokens are bearer tokens. There is no proof of possession (DPoP), so a stolen token works until it expires or is revoked.
+- There is one shared admin key. The log records "by admin", and the approver name is whatever the key holder types. Actor names in `act` are attribution only.
+- `glob` is string matching with `*` as its only special character, and it knows nothing about paths. Safety depends on per-tool canonicalization, which the operator configures; path canonicalization is lexical and cannot see symbolic links.
+- Labels follow data, not control flow. Which branch ran, whether a call happened, and which handle or field the agent picked are not labeled.
+- Labels attach to whole results, not fields, and are not stored with files: untrusted text written to a private folder reads back as trusted.
+- Value labels assume a runtime that passes handles. Ordinary agents do not, unless they run plan-then-execute.
+- Plan-then-execute is scripted here. The planner and the quarantined extractor are per-task functions, so they show the mechanism and say nothing about how well a model plans.
+- Approvals are only as good as the person giving them, and stronger labeling asks more often.
+- A tool that times out keeps running, because Python threads cannot be killed. It keeps its in-flight slot and its budget is not refunded.
+- It runs on a single node. The store is in memory or one SQLite file; the approval queue, in-flight counters and unverified-token rate limit are in memory and lost on restart, which fails closed.
+- Anything but loopback needs a reverse proxy for TLS, read timeouts, per-address limits and a body size limit. Path-based ACLs at the proxy must not be relied on ([docs/DEPLOYMENT.md](docs/DEPLOYMENT.md)).
+- The audit chain is tamper-evident only against a trusted head. Without a published head or checkpoint, someone who can rewrite the file can truncate it or rebuild every hash. External anchoring is not built, and rotated files are not linked.
+- Budgets have edge cases. First-fit derivation can strand budget, a limited capability does not cap an overlapping unlimited one, and offline chain tokens carry no budget.
+- Expiry depends on the clock. A clock set backwards can revive an expired token.
+- Policy conditions see top-level arguments only. `absent` and `any` on a deny or approve rule are presence tests the caller controls, and an approve rule opens a path to execution that no allow rule covers.
+- The MCP proxy handles tools only (resources, prompts and sampling are refused), fixes the tool set at startup, passes tool descriptions and results through unchanged, and is not an OAuth authorization server.
+- The attenuation check rejects some safe grants, and the proofs cover the rules as modeled, within the bounds stated in the results file.
 
-Seeds, clocks and ids are fixed, so every file except `m6_latency.json`, the latency figure and the dashboard screenshots is identical byte for byte on a rerun.
+## Related work
 
-## What this does not do
-
-- **Bearer tokens.** There is no proof of possession (DPoP is not built): a stolen token works until it expires or is revoked.
-- **One shared admin key, self-declared approver.** The log records "by admin", and the approver name is any printable name the admin-key holder types. Actor names in `act` are self-declared attribution, never used for a decision.
-- **Glob is string matching.** `*` is the only special character and it does not understand paths. Safety depends on canonicalization, which the operator must configure per tool; path canonicalization is lexical and cannot see symbolic links.
-- **No implicit flows.** Labels follow data, not control flow: which branch ran, or whether a call happened, is not labeled, and neither is which handle or field the agent selects.
-- **Labels per result, not per field, and not persisted with files.** Untrusted text written to a private folder reads back as trusted.
-- **Value labels assume a runtime that passes handles.** Ordinary agents do not, unless they run plan-then-execute.
-- **Plan-then-execute is scripted here.** The planner and the quarantined extractor are per-task functions, not models; they show the mechanism, not how well a model plans or how often an extractor is fooled.
-- **Approvals are only as good as the human.** Compare the careful and rubber-stamp rows; stronger labeling also asks more often.
-- **A timed-out tool keeps running.** Python threads cannot be killed; it keeps its in-flight slot and its budget is not refunded.
-- **Single node.** The store is in memory or one SQLite file; the approval queue, in-flight counters and unverified-token rate limit are in memory and lost on restart (which fails closed).
-- **A reverse proxy is required for anything but loopback.** It must provide TLS, header and body read timeouts, per-address connection and rate limits, and a body size limit; path-based ACLs at the proxy must not be relied on ([docs/DEPLOYMENT.md](docs/DEPLOYMENT.md)).
-- **The audit chain is tamper-evident only against a trusted head.** Without a published head or checkpoint, someone who can rewrite the file can truncate it or rebuild every hash. External anchoring is not built, and rotated files are not linked to each other.
-- **Budget edge cases.** First-fit derivation can strand budget; a limited capability does not cap an overlapping unlimited one; offline chain tokens carry no budget at all.
-- **Expiry is only as good as the clock.** A clock set backwards can revive an expired token.
-- **Policy limits.** Conditions see top-level arguments only; `absent` and `any` on a deny or approve rule are presence tests the caller controls; an approve rule opens a path to execution that no allow rule covers.
-- **MCP proxy scope.** Only tools are proxied (resources, prompts and sampling are refused); the tool set is fixed at startup; tool descriptions and results pass through as the upstream wrote them; caveat is not an OAuth authorization server.
-- **Incomplete by design.** The attenuation check rejects 208 safe pairs in the measured universe; the proofs cover the rules as modeled, within the stated bounds.
-
-## Relation to prior work
-
-Statements in this section are about other work and are quoted from the named source; none of our numbers is derived from them.
-
-- **MCP authorization**, spec revision 2026-07-28 (modelcontextprotocol.io/specification/2026-07-28/basic/authorization): OAuth 2.1, the MCP server is a resource server, servers publish Protected Resource Metadata (RFC 9728), clients send the `resource` parameter (RFC 8707), and token passthrough is forbidden. caveat's proxy follows these (it serves the RFC 9728 document, requires the token audience to be its own URL, and never sends the caller's token upstream) and adds what the spec leaves out: per-call argument limits, narrowing down a chain of sub-agents, and human approval.
-- **OAuth 2.0 Token Exchange, RFC 8693**, and the IETF WIMSE drafts `draft-sweeney-wimse-credential-delegation-02` and `draft-asor-wimse-agent-delegation-chain-03`: both drafts state monotonic attenuation, monotonic expiry, bounded depth, an unchanged principal and deny on unknown constraint types, and both treat the nested `act` claim as attribution only. caveat enforces the same invariants and uses `act` the same way; where the Asor draft links hops with a hash of the parent token (`par_hash`), caveat carries ancestor token ids (`chain`).
-- **Macaroons** (Birgisson et al., NDSS 2014) and **Biscuit** (github.com/biscuit-auth/biscuit): tokens whose holder can only add restrictions. The name caveat comes from macaroon caveats: restrictions that can only be added, which is how delegation narrows here. caveat's offline chains are an HMAC construction in the macaroon style and an Ed25519 block chain in the Biscuit style, with a much smaller caveat language and no Datalog.
-- **CaMeL**, "Defeating Prompt Injections by Design" (Debenedetti et al., arXiv 2503.18813): a privileged model writes the plan from the user's request, a quarantined model parses untrusted data, and a custom interpreter tracks data and control-flow dependencies and checks policies at tool calls. caveat borrows the plan-then-execute shape but enforces at the tool boundary, sees only tool calls and the references they carry, and does not claim CaMeL's guarantees.
-- **Cedar** (AWS) and **Open Policy Agent** are general policy languages and engines; caveat's policy is a small YAML rule language with three-valued matching. A Cedar or OPA backend was a stretch goal and is not built.
-- **Zanzibar** (Google, 2019) is relationship-based access control at global scale. caveat has no relationship graph and runs on a single node; the contrast is the point: it authorizes individual tool calls and arguments for one delegation chain.
+- The [MCP authorization spec](https://modelcontextprotocol.io/specification/2026-07-28/basic/authorization) makes an MCP server an OAuth resource server. The proxy follows it (RFC 9728 metadata, token audience bound to its own URL, no token passthrough) and adds per-call argument limits, delegation and approval.
+- OAuth 2.0 Token Exchange (RFC 8693) and the IETF WIMSE delegation drafts (`draft-sweeney-wimse-credential-delegation`, `draft-asor-wimse-agent-delegation-chain`) describe the same invariants caveat enforces: narrowing at each hop, monotonic expiry, an unchanged principal, and `act` as attribution only.
+- Macaroons (Birgisson et al., NDSS 2014) and [Biscuit](https://github.com/biscuit-auth/biscuit) are tokens whose holders can only add restrictions. The offline chain tokens follow both, with a much smaller caveat language and no Datalog.
+- CaMeL ([Debenedetti et al., 2025](https://arxiv.org/abs/2503.18813)) separates a privileged planner from a quarantined model and tracks dependencies in its own interpreter. caveat borrows the plan-then-execute shape but enforces at the tool boundary, and does not claim CaMeL's guarantees.
+- Cedar, OPA and Zanzibar are general policy engines or relationship-based systems; caveat's policy is a small YAML rule language for single tool calls on one node.
 
 ## Project layout
 
 ```
-src/caveat/
-  constraints.py   the five argument operators: eq, in, max, glob, any
-  capability.py    Call, Capability, Grant and the closed-world allows(call)
-  attenuation.py   check_attenuation: sound, deliberately incomplete
-  smt.py           Z3 model of the constraint language
-  proofs.py        solver lemmas, wrong variants and premise checks
-  tokens.py        Ed25519 JWTs: mint, verify, exchange, revoke, authorize
-  store.py         revocations and the atomic budget ledger (memory, SQLite)
-  chain.py         offline attenuation: HMAC chain and Ed25519 block chain
-  policy.py        YAML operator policy, three-valued matching
-  audit.py         hash-chained JSON Lines log, verify command
-  gateway.py       the decision pipeline (handle_call)
-  approvals.py     approval queue bound to the exact request
-  server.py        FastAPI front: tokens, calls, approvals, audit
-  mcp_proxy.py     MCP proxy: filtered tools/list, every tools/call through the gateway
-  canonical.py     per-tool argument canonicalization
-  provenance.py    session labels, value labels and handles
-  plan.py          plan-then-execute executor
-  dashboard.py     admin dashboard (off by default)
-  sandbox/         world, 26 tasks, scripted agents, planner, runner
-scripts/           every results file and figure, plus reproduce_all.sh
+src/caveat/        the library, gateway, server, MCP proxy and dashboard
+  sandbox/         toy world, tasks, scripted and model agents, runner
+scripts/           one script per results file or figure, plus reproduce_all.sh
 config/            example gateway config and policy, sandbox grants and policies
-examples/          a small real MCP server to put behind the proxy
-docs/              PLAN.md (design and decision log), DEPLOYMENT.md
+examples/          a small MCP server to put behind the proxy
+docs/              design plan and decision log, deployment notes, real-model run
 results/ assets/   saved outputs and figures
+tests/
 ```
 
-## Status
+## License
 
-All ten milestones in [docs/PLAN.md](docs/PLAN.md) are built and tested: the capability model and its proofs, tokens and offline chains, policy and audit, the HTTP gateway, the MCP proxy, provenance labels and the dashboard. The agent evaluation (M5) has scripted runs of every configuration plus one real-model pass with each of two models ([2b](#2b-a-real-model-one-pass)); one pass with two attempted attacks is evidence that the layers work against a real model, not a measurement of how often one is hijacked. The known limits are listed under [What this does not do](#what-this-does-not-do).
+MIT, see [LICENSE](LICENSE).

@@ -1,6 +1,6 @@
-"""Completeness gap figure for M0b: never unsafe, and less often too strict.
+"""Completeness gap figure: never unsafe, and less often too strict.
 
-Reads results/m0b_completeness.json (written by scripts/m0b_completeness.py)
+Reads results/completeness.json (written by scripts/measure_completeness.py)
 and writes
 
     assets/completeness_gap.png    2x, drawn from scripts/design/completeness_gap.html
@@ -139,7 +139,7 @@ def view(data: dict[str, Any]) -> dict[str, Any]:
 
 
 def main() -> None:
-    source = style.RESULTS / "m0b_completeness.json"
+    source = style.RESULTS / "completeness.json"
     data = json.loads(source.read_text())
     style.ASSETS.mkdir(exist_ok=True)
     png = style.ASSETS / "completeness_gap.png"

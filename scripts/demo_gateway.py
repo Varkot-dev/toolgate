@@ -1,4 +1,4 @@
-"""Run the M3 gateway story in-process and write results/m3_demo.json.
+"""Run the gateway story in-process and write results/gateway_demo.json.
 
 The same story as tests/test_server_e2e.py, told through the real HTTP app
 (FastAPI over an in-process ASGI transport, no socket):
@@ -312,7 +312,7 @@ async def story(app: Any, gateway: Gateway, tools: Tools) -> list[dict[str, Any]
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("--out", type=Path, default=ROOT / "results" / "m3_demo.json")
+    parser.add_argument("--out", type=Path, default=ROOT / "results" / "gateway_demo.json")
     options = parser.parse_args()
 
     with tempfile.TemporaryDirectory() as directory:
@@ -358,7 +358,7 @@ def main() -> None:
         raise SystemExit(f"demo invariants failed: {checks}")
 
     result = {
-        "description": "M3 gateway story: scripted, in-process HTTP, fixed clock and ids",
+        "description": "Gateway story: scripted, in-process HTTP, fixed clock and ids",
         "config": {
             "issuer": ISSUER,
             "audience": AUDIENCE,

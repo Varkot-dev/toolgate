@@ -1,4 +1,4 @@
-# Operator policy for the sandbox evaluation (scripts/m5_scripted_eval.py).
+# Operator policy for the sandbox evaluation (scripts/eval_scripted.py).
 #
 # The organization is Northwind (northwind.example). The policy was written
 # from the organization's point of view, the way config/policy.example.yaml

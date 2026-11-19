@@ -1,4 +1,4 @@
-"""Run the sandbox task suite with a real model and write results/m5_real_model.json.
+"""Run the sandbox task suite with a real model and write results/real_model_sonnet.json.
 
 The agent is a language model called through the Anthropic Messages API
 (caveat.sandbox.llm_agent), not a script. Each selected task is run once
@@ -22,9 +22,9 @@ on that answer, so a re-decided count would be invented. The results list,
 per configuration, the tasks where the careful approver rejected something.
 
 Usage:
-    python scripts/m5_real_model_eval.py --dry-run
-    python scripts/m5_real_model_eval.py [--configs 0,2,3] [--tasks all] [--max-usd 12]
-        [--out results/m5_real_model.json] [--resume] [--yes] [--model claude-sonnet-5-5]
+    python scripts/eval_real_model.py --dry-run
+    python scripts/eval_real_model.py [--configs 0,2,3] [--tasks all] [--max-usd 12]
+        [--out results/real_model_sonnet.json] [--resume] [--yes] [--model claude-sonnet-5-5]
 """
 
 from __future__ import annotations
@@ -62,7 +62,7 @@ from caveat.sandbox.runner import CLASSES, SEED, configuration
 from caveat.sandbox.tasks import Task, all_tasks
 
 ROOT = Path(__file__).resolve().parent.parent
-DEFAULT_OUT = ROOT / "results" / "m5_real_model.json"
+DEFAULT_OUT = ROOT / "results" / "real_model_sonnet.json"
 DEFAULT_CAP = 12.0
 FINAL_TEXT_LIMIT = 2000
 API_ERROR = "stopped: api error"
@@ -87,7 +87,7 @@ NOTES = [
     "The rubber-stamp approver is not reported: it cannot be derived from these transcripts "
     "where the careful approver rejected a call, and new model calls were not made for it.",
     "Configurations 2 and 3 use the same grants, policies and gateway as the scripted "
-    "evaluation (results/m5_scripted.json). Scripted and model numbers are not blended.",
+    "evaluation (results/scripted_eval.json). Scripted and model numbers are not blended.",
 ]
 
 
@@ -143,7 +143,7 @@ def finished(data: dict[str, Any] | None) -> set[tuple[str, str]]:
 
 def new_results(model: str, sdk_version: str | None, seed: int) -> dict[str, Any]:
     return {
-        "description": "M5 sandbox evaluation of the gateway with a real language model",
+        "description": "Sandbox evaluation of the gateway with a real language model",
         "agents": "a real language model (one pass), not scripted agents",
         "notes": NOTES,
         "status": "in progress",

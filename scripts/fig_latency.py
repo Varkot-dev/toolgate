@@ -1,6 +1,6 @@
-"""Latency figure for M6: what the gateway adds to one tool call.
+"""Latency figure: what the gateway adds to one tool call.
 
-Reads results/m6_latency.json (written by scripts/bench_latency.py; this
+Reads results/latency.json (written by scripts/bench_latency.py; this
 script never runs the benchmark) and writes
 
     assets/latency.png    2x, drawn from scripts/design/latency.html
@@ -26,7 +26,7 @@ from typing import Any
 import style
 from design.render import Shot, render
 
-DATA = style.RESULTS / "m6_latency.json"
+DATA = style.RESULTS / "latency.json"
 
 # (key in "stages", row label, bar color). In the order a call goes through
 # them; a call verifies once, with a reused token or a new one.

@@ -1,4 +1,4 @@
-"""Token chain figure for M1b: a token gains restrictions offline, and none can be dropped.
+"""Token chain figure: a token gains restrictions offline, and none can be dropped.
 
 Issues one HMAC chain token with the real library and a fixed demo root key,
 appends three caveats with caveat.chain.attenuate (no key, no authority),
@@ -6,7 +6,7 @@ asks the real verifier about four sample calls at every step, then removes
 the last caveat the way an attacker would and records the verifier's error.
 Writes
 
-    results/m1b_token_chain.json
+    results/token_chain.json
     assets/token_chain.png    2x, drawn from scripts/design/token_chain.html
 
 The figure is an HTML page on the shared design system in scripts/design/,
@@ -230,7 +230,7 @@ def main() -> None:
     assert len({s["signature_hex"] for s in record["steps"]}) == len(record["steps"])
 
     style.RESULTS.mkdir(exist_ok=True)
-    out = style.RESULTS / "m1b_token_chain.json"
+    out = style.RESULTS / "token_chain.json"
     out.write_text(json.dumps(record, indent=2) + "\n")
 
     style.ASSETS.mkdir(exist_ok=True)

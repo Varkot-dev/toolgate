@@ -1,10 +1,10 @@
-"""Real-model figure for M5: the attacks a real model fell for, and which setup stopped them.
+"""Real-model figure: the attacks a real model fell for, and which setup stopped them.
 
 Reads only the two committed real-model results files (one pass each, written by
-scripts/m5_real_model_eval.py with an Anthropic API key; this script calls no model):
+scripts/eval_real_model.py with an Anthropic API key; this script calls no model):
 
-    results/m5_real_model.json            Claude Sonnet 5.5
-    results/m5_real_model_haiku45.json    Claude Haiku 4.5
+    results/real_model_sonnet.json            Claude Sonnet 5.5
+    results/real_model_haiku.json    Claude Haiku 4.5
 
 and draws
 
@@ -26,8 +26,8 @@ from typing import Any
 import style
 from design.render import Shot, render
 
-SONNET = "m5_real_model.json"
-HAIKU = "m5_real_model_haiku45.json"
+SONNET = "real_model_sonnet.json"
+HAIKU = "real_model_haiku.json"
 COLUMNS = (
     ("0-no-gateway", "no gateway"),
     ("2-policy-careful", "plus policy"),

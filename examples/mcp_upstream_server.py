@@ -36,7 +36,7 @@ SERVER_VERSION = "0.1.0"
 SEED_FILES: dict[str, str] = {
     "reports/q3.txt": "Q3 revenue was 4.2M, up 8 percent.",
     "reports/q4-draft.txt": "Q4 draft: numbers pending.",
-    "notes/todo.txt": "1. ship M4\n2. write the README",
+    "notes/todo.txt": "1. ship the proxy\n2. write the README",
     "secrets/payroll.csv": "name,salary\nalice,100\nbob,90",
 }
 SEED_EVENTS: tuple[dict[str, str], ...] = (

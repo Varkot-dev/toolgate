@@ -1,6 +1,6 @@
-# Running the M5 evaluation with a real model
+# Running the sandbox evaluation with a real model
 
-This runs the 26 sandbox tasks with a real model (`claude-sonnet-5-5`) as the agent, under three configurations: no gateway (0), grant plus policy with the careful approver (2), and configuration 2 plus session labels (3). It writes `results/m5_real_model.json`. It spends real money on your Anthropic API key, capped in code.
+This runs the 26 sandbox tasks with a real model (`claude-sonnet-5-5`) as the agent, under three configurations: no gateway (0), grant plus policy with the careful approver (2), and configuration 2 plus session labels (3). It writes `results/real_model_sonnet.json`; the Claude Haiku 4.5 run in `results/real_model_haiku.json` was made the same way with `--model` and `--out` set. It spends real money on your Anthropic API key, capped in code.
 
 How the harness works, and the exact rules for "attempted", "ignored" and "stopped", are in the docstring of `src/caveat/sandbox/llm_agent.py`.
 
@@ -28,7 +28,7 @@ pip install -e ".[dev,llm]"
 ## 3. Dry run (free)
 
 ```bash
-python scripts/m5_real_model_eval.py --dry-run
+python scripts/eval_real_model.py --dry-run
 ```
 
 This uses a fake client that replays each task's legitimate plan through the real gateway. It needs no key, makes no network call and writes nothing. It prints the number of task runs (78 by default), a projected cost range and a projected time. The projection counts tokens roughly, as characters divided by 4, not with the API's token counter. On this repository it printed: low $1.91, high $13.40, about 22 to 84 minutes. The high end assumes no caching, 3 extra turns per task and 2000 output tokens per turn, so the real cost should be well below it, but the default cap ($12) can stop a run before the end; continue it with `--resume`.
@@ -36,7 +36,7 @@ This uses a fake client that replays each task's legitimate plan through the rea
 ## 4. The real run
 
 ```bash
-python scripts/m5_real_model_eval.py --max-usd 12
+python scripts/eval_real_model.py --max-usd 12
 ```
 
 It prints a one-line warning and asks for confirmation (`--yes` skips the question). After every task it prints the task's status, cost and the running spend, and rewrites the results file, so nothing finished is lost.
@@ -48,7 +48,7 @@ Useful options: `--configs 0,2` (a subset), `--tasks benign-01,args-02` (a subse
 ## 5. Resume a stopped run
 
 ```bash
-python scripts/m5_real_model_eval.py --resume --max-usd 6
+python scripts/eval_real_model.py --resume --max-usd 6
 ```
 
 Tasks already in the file are skipped and not paid for again. A task that was cut off by the budget is run again from the start (its partial cost stays recorded under `incomplete_tasks`). The script refuses to resume a file written for a different model, and refuses to overwrite an existing file without `--resume`.
@@ -59,12 +59,12 @@ Either commit the one file on a branch of your own and push it:
 
 ```bash
 git switch -c real-model-run
-git add results/m5_real_model.json
-git commit -m "Real-model M5 run"
+git add results/real_model_sonnet.json
+git commit -m "Real-model sandbox run"
 git push -u origin real-model-run
 ```
 
-or attach `results/m5_real_model.json` to a message. Check with `git status` that nothing else is staged.
+or attach `results/real_model_sonnet.json` to a message. Check with `git status` that nothing else is staged.
 
 The results file contains no secrets: the script never writes the key, request headers or the client configuration. It holds the task transcripts (tool calls, arguments, gateway decisions; not the model's thinking), the model's final reply text, token counts, costs, the model id the API reported, the SDK version and the date. A test (`tests/test_llm_agent.py`) runs the script with a fake key in the environment and checks that neither the key nor any header name appears in the file. The arguments contain the sandbox's fake canary strings (for example a fake API key), which are made up and harmless.
 

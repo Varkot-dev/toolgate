@@ -1,4 +1,4 @@
-"""Measure how incomplete the attenuation checker is (milestone M0b).
+"""Measure how incomplete the attenuation checker is.
 
 For a pair (parent, child) the checker says accept or reject, and the Z3 model
 (src/caveat/smt.py) says whether the child is truly safe. Four outcomes:
@@ -34,7 +34,7 @@ in src/ implements them.
 Every rate in the output describes this universe and this sampling
 distribution. None of them says anything about real workloads.
 
-Usage:  python scripts/m0b_completeness.py [--out PATH] [--seed 0] [--samples 5000]
+Usage:  python scripts/measure_completeness.py [--out PATH] [--seed 0] [--samples 5000]
 """
 
 from __future__ import annotations
@@ -215,7 +215,7 @@ def categorize(parent: Constraint, child: Constraint) -> str:
 
 RULE_A = "A: a star-free child glob is checked like eq (implemented in src/)"
 PREVIOUS_NOTE = (
-    "The checker WITHOUT rule A, re-created in scripts/m0b_completeness.py and compared "
+    "The checker WITHOUT rule A, re-created in scripts/measure_completeness.py and compared "
     "with the same solver answers. This is the previous rule set, not the code in src/."
 )
 
@@ -699,7 +699,7 @@ def section_sampled(samples: int, seed_value: int) -> dict[str, Any]:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n")[0])
-    parser.add_argument("--out", type=Path, default=ROOT / "results" / "m0b_completeness.json")
+    parser.add_argument("--out", type=Path, default=ROOT / "results" / "completeness.json")
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--samples", type=int, default=5000, help="pairs per level in section 2")
     args = parser.parse_args()

@@ -1,4 +1,4 @@
-"""Measure the M0 security invariant and write results/m0_invariant.json.
+"""Measure the security invariant and write results/invariant.json.
 
 Runs the same generators as tests/test_properties.py with a fixed seed and
 counts what happened, so the README can state not just "the property passed"
@@ -12,7 +12,7 @@ but how many generated cases actually exercised it:
   * whether each deliberately broken checker (mutant) was caught, and the
     shrunk counterexample that caught it
 
-Usage:  python scripts/m0_invariant.py [--cases 20000] [--seed 0] [--out PATH]
+Usage:  python scripts/check_invariant.py [--cases 20000] [--seed 0] [--out PATH]
 """
 
 from __future__ import annotations
@@ -147,7 +147,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--cases", type=int, default=20000)
     parser.add_argument("--seed", type=int, default=0)
-    parser.add_argument("--out", type=Path, default=Path("results/m0_invariant.json"))
+    parser.add_argument("--out", type=Path, default=Path("results/invariant.json"))
     args = parser.parse_args()
 
     started = time.perf_counter()

@@ -1,8 +1,8 @@
-"""Label creep figure for M4b: what provenance stops, and what it asks a person.
+"""Label creep figure: what provenance stops, and what it asks a person.
 
 Runs caveat.sandbox.runner.label_creep() (scripted agents, not a language
-model), writes results/m4b_label_creep.json, then draws from that JSON (and
-results/m5_scripted.json, which it is checked against) only:
+model), writes results/label_creep.json, then draws from that JSON (and
+results/scripted_eval.json, which it is checked against) only:
 
     assets/label_creep.png    2x, drawn from scripts/design/label_creep.html
 
@@ -139,10 +139,10 @@ def view(data: dict[str, Any], scripted: dict[str, Any]) -> dict[str, Any]:
 
 def main() -> None:
     data = label_creep()
-    out = style.RESULTS / "m4b_label_creep.json"
+    out = style.RESULTS / "label_creep.json"
     out.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
     data = json.loads(out.read_text(encoding="utf-8"))
-    scripted = json.loads((style.RESULTS / "m5_scripted.json").read_text(encoding="utf-8"))
+    scripted = json.loads((style.RESULTS / "scripted_eval.json").read_text(encoding="utf-8"))
 
     style.ASSETS.mkdir(exist_ok=True)
     png = style.ASSETS / "label_creep.png"

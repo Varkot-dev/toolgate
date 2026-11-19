@@ -1,4 +1,4 @@
-"""Differential tests: the Python checker against the Z3 model (milestone M0b).
+"""Differential tests: the Python checker against the Z3 model.
 
 The solver proves things about formulas (src/caveat/smt.py). These tests are
 what ties the Python implementation to those formulas, in three layers:
@@ -12,7 +12,7 @@ what ties the Python implementation to those formulas, in three layers:
 
 A case where the checker accepts and the solver finds a witness is a security
 bug. The reverse (checker rejects, solver proves safe) is the completeness gap,
-which is expected; scripts/m0b_completeness.py measures it.
+which is expected; scripts/measure_completeness.py measures it.
 
 Solver calls are slow, so the default is 2,000 examples per test. Set
 CAVEAT_SMT_EXAMPLES to change it.

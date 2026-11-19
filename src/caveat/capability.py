@@ -182,7 +182,7 @@ class Decision:
 class Capability:
     tool: str
     constraints: tuple[Constraint, ...] = ()
-    max_calls: int | None = None  # call budget; enforced by the token ledger (M1)
+    max_calls: int | None = None  # call budget; enforced by the token ledger
 
     def __post_init__(self) -> None:
         if type(self.tool) is not str or not self.tool:
@@ -264,7 +264,7 @@ class Grant:
     """What was delegated: a set of capabilities and when the grant expires.
 
     `expires_at` is seconds since the Unix epoch. The delegation chain is
-    carried by the token layer (M1), not here.
+    carried by the token layer, not here.
     """
 
     capabilities: tuple[Capability, ...]

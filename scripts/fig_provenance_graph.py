@@ -1,9 +1,9 @@
-"""Provenance graph for M4b: one class d attack, every value labeled by where it came from.
+"""Provenance graph: one class d attack, every value labeled by where it came from.
 
 Runs task misuse-04 (the budget leaked through the URL of a fetch to the
 allowed host) with the hijacked scripted agent under configuration
 4-value-labels, takes the provenance layer's RECORDED labels for that run and
-writes the full graph to results/m4b_provenance_graph.json. The figure is
+writes the full graph to results/provenance_graph.json. The figure is
 drawn from that JSON and the same run's transcript:
 
     assets/provenance_graph.png    2x, drawn from scripts/design/provenance_graph.html
@@ -231,7 +231,7 @@ def main() -> None:
     task = next(t for t in all_tasks() if t.id == TASK)
     run = run_task(task, HijackedAgent(), configuration(CONFIG))
     data = build(run)
-    out = style.RESULTS / "m4b_provenance_graph.json"
+    out = style.RESULTS / "provenance_graph.json"
     out.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
     data = json.loads(out.read_text(encoding="utf-8"))
 

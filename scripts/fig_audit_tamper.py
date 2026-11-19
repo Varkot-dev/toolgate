@@ -1,10 +1,10 @@
-"""Audit chain figure for M2: edit one entry and verification fails at that entry.
+"""Audit chain figure: edit one entry and verification fails at that entry.
 
 Builds a real 8-entry log through caveat.audit.AuditLog with a fixed clock,
 copies it, changes one field of entry 3 in the copy (leaving its stored hash
 alone), runs the real verify on both files, and writes
 
-    results/m2_audit_tamper.json
+    results/audit_tamper.json
     assets/audit_tamper.png    2x, drawn from scripts/design/audit_tamper.html
 
 The figure is an HTML page on the shared design system in scripts/design/,
@@ -143,7 +143,7 @@ def main() -> None:
         "edited_entries": edited,
     }
     style.RESULTS.mkdir(exist_ok=True)
-    out = style.RESULTS / "m2_audit_tamper.json"
+    out = style.RESULTS / "audit_tamper.json"
     out.write_text(json.dumps(record, indent=2) + "\n")
 
     # 3. Draw, only from the record: the real entries and the real verify results.

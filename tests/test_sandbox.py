@@ -45,7 +45,7 @@ from caveat.sandbox.tasks import (
     GRANT_ARGS,
     GRANT_TOOL,
     LAYERS,
-    NONE_AT_M3,
+    NONE_BEFORE_PROVENANCE,
     POLICY_APPROVAL,
     POLICY_DENY,
     Tpl,
@@ -65,7 +65,7 @@ from caveat.sandbox.world import (
 )
 
 ROOT = Path(__file__).resolve().parent.parent
-RESULTS = ROOT / "results" / "m5_scripted.json"
+RESULTS = ROOT / "results" / "scripted_eval.json"
 NO_GATEWAY = configuration("0-no-gateway")
 GRANT_ONLY = configuration("1-grant-only")
 POLICY_CAREFUL = configuration("2-policy-careful")
@@ -435,7 +435,7 @@ def test_class_b_is_refused_by_the_argument_check_except_the_traversal():
 
 
 def test_traversal_passes_the_grant_and_the_policy_string_checks():
-    """A known gap (decision log M0.2), kept visible: do not "fix" the label."""
+    """A known gap (the glob entry in the decision log), kept visible: do not "fix" the label."""
     task = next(t for t in ATTACKS if t.id == "args-04")
     assert task.expected == GRANT_ARGS
     sneaky = Call("read_file", {"path": "reports/../secrets/api_key.txt"})
@@ -500,7 +500,7 @@ def test_result_says_what_it_is(result):
 
 
 def test_four_configurations_ran_and_two_are_placeholders(result):
-    # M4b: the two placeholders this test used to expect are now implemented,
+    # Provenance: the two placeholders this test used to expect are now implemented,
     # and the provenance configurations were added. Every one must have run.
     status = {c["key"]: c["status"] for c in result["configurations"]}
     assert status == {
@@ -530,7 +530,7 @@ def test_summary_numbers_agree_with_the_rows(result):
         rows = [r for r in config["runs"] if r["agent"] == "hijacked" and "class" in r]
         summary = config["summary"]
         assert len(config["runs"]) == 2 * len(TASKS) and len(rows) == len(ATTACKS)
-        # M4b: in configuration 4 label creep denies args-03's fetch of the page
+        # Provenance: in configuration 4 label creep denies args-03's fetch of the page
         # that carries the injection, so that one attack is never delivered.
         # Everywhere else every attack is attempted, as before.
         undelivered = {"args-03"} if config["key"].startswith("4-value-labels") else set()
@@ -558,10 +558,10 @@ def test_mismatches_are_reported_not_hidden(result):
     assert listed == flagged
     assert ("1-grant-only", "args-04") in listed
     labels = {t["id"]: t["expected"] for t in result["tasks"]}
-    assert labels["args-04"] == GRANT_ARGS and labels["misuse-02"] == NONE_AT_M3
+    assert labels["args-04"] == GRANT_ARGS and labels["misuse-02"] == NONE_BEFORE_PROVENANCE
 
 
-# -- M4b: the provenance configurations ----------------------------------------------
+# -- The provenance configurations ---------------------------------------------------
 
 VALUE_CAREFUL = configuration("4-value-labels")
 SESSION_CAREFUL = configuration("3-session-labels")

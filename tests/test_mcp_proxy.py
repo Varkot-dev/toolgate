@@ -1,4 +1,4 @@
-"""M4: the MCP proxy, driven by the real MCP SDK client over real sockets.
+"""The MCP proxy, driven by the real MCP SDK client over real sockets.
 
 Layout of every test: the example upstream server (examples/mcp_upstream_server.py)
 and the proxy each run under uvicorn on their own thread, bound to 127.0.0.1
@@ -786,7 +786,7 @@ def test_admin_api_mounted_beside_the_proxy_can_approve(env: Env) -> None:
     # Imported here so that the rest of this file does not depend on the HTTP gateway module.
     from caveat.server import create_app, hash_admin_key
 
-    # What `main` does: the M3 admin API under /admin, on the same Gateway.
+    # What `main` does: the admin API under /admin, on the same Gateway.
     env.proxy.app.mount("/admin", create_app(env.proxy.gateway, hash_admin_key("admin-key")))
     token = env.mint(ORCH_CAPS)
     parked = run(call(env.url, token, "send_email", EXTERNAL))
@@ -1830,9 +1830,9 @@ def test_demo_is_deterministic_and_matches_the_saved_result(tmp_path: Path) -> N
     assert demo_mcp_proxy.main(["--out", str(first)]) == 0
     assert demo_mcp_proxy.main(["--out", str(second)]) == 0
     assert first.read_text() == second.read_text()
-    saved = ROOT / "results" / "m4_demo.json"
+    saved = ROOT / "results" / "mcp_proxy_demo.json"
     assert json.loads(first.read_text()) == json.loads(saved.read_text()), (
-        "results/m4_demo.json is stale: run python scripts/demo_mcp_proxy.py"
+        "results/mcp_proxy_demo.json is stale: run python scripts/demo_mcp_proxy.py"
     )
     result = json.loads(first.read_text())
     assert result["tools_seen"]["without_proxy"] == UPSTREAM_TOOLS

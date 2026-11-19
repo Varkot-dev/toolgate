@@ -1,5 +1,5 @@
 {
-  "description": "M4 MCP proxy story: real MCP SDK client, real MCP upstream server, in-process HTTP, fixed clock and ids",
+  "description": "MCP proxy story: real MCP SDK client, real MCP upstream server, in-process HTTP, fixed clock and ids",
   "config": {
     "mcp_sdk": "2.3.0",
     "protocol_version": "2026-07-28",

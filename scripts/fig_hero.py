@@ -7,10 +7,10 @@ throwaway directory) through two calls made with one sub-agent token:
   1. read_file on a path inside the grant: allowed, the tool runs
   2. delete_file, which the grant allows but operator policy denies
 
-The real outcomes and audit entries go to results/m6_hero.json, and the
+The real outcomes and audit entries go to results/hero.json, and the
 figure is drawn only from that record. Writes
 
-    results/m6_hero.json
+    results/hero.json
     assets/hero.gif          the animation, 1200 px wide (1.5x), loops
     assets/hero_poster.png   the final state at 2x, for places that do not animate
 
@@ -276,7 +276,7 @@ def main() -> None:
     data = run_gateway()
     data["animation"] = {"fps": FPS, "loop_seconds": DURATION, "poster_at_seconds": FINAL}
     style.RESULTS.mkdir(exist_ok=True)
-    out = style.RESULTS / "m6_hero.json"
+    out = style.RESULTS / "hero.json"
     out.write_text(json.dumps(data, indent=2) + "\n")
     data = json.loads(out.read_text())  # draw only from what was recorded
 

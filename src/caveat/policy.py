@@ -23,7 +23,7 @@ File format (YAML, version 1)
 max, glob, any), so the project has one constraint language. Several operators
 on one argument are a conjunction.
 
-Provenance conditions (plan section 3.7, milestone M4b)
+Provenance conditions (plan section 3.7)
 -------------------------------------------------------
 
 Two more per-argument operators and one rule key read where the arguments
@@ -535,7 +535,7 @@ class Rule:
     unless: tuple[Constraint | ProvenanceCondition, ...] = ()
     absent: tuple[str, ...] = ()
     reason: str | None = None
-    session: str | None = None  # "tainted": an extra `when` condition (M4b)
+    session: str | None = None  # "tainted": an extra `when` condition (provenance)
 
     def __post_init__(self) -> None:
         if type(self.id) is not str or not self.id:
@@ -735,7 +735,7 @@ class Policy:
     def decide(self, call: Call, context: PolicyContext | None = None) -> PolicyDecision:
         """Deny beats approve beats allow; no matching rule means deny.
 
-        `context` carries provenance (M4b); None means none is known, which
+        `context` carries provenance; None means none is known, which
         makes every provenance condition UNKNOWN.
         """
         if type(call) is not Call:

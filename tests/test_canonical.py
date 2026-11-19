@@ -232,7 +232,7 @@ RULES = {"read_file": {"path": "path"}, "send_email": {"to": "email"}}
 
 
 def test_without_a_canonicalizer_the_traversal_passes_the_glob():
-    """The M0.2 gap, kept visible: the raw string matches reports/*."""
+    """The glob gap from the decision log, kept visible: the raw string matches reports/*."""
     gateway, token, calls, directory, _ = build(None)
     with directory:
         out = gateway.handle_call(token, "read_file", {"path": "reports/../secrets/key"})

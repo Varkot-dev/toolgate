@@ -1,6 +1,6 @@
 """Argument canonicalization: one spelling per meaning, before any decision.
 
-Why. Capabilities and policy compare strings (decision log M0.2). A file tool
+Why. Capabilities and policy compare strings (the glob entry in the decision log). A file tool
 that resolves "reports/../secrets/key" after the gateway has matched the raw
 string against `reports/*` runs something the gateway never checked. The fix
 is not a smarter glob but a rule: the gateway rewrites each argument it knows

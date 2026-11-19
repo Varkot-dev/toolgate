@@ -24,8 +24,8 @@ tool's RESULT is attacker-controllable text:
 Paths. `read_file` and friends resolve dot segments the way an ordinary file
 tool does: "reports/../secrets/key" reads "secrets/key". The gateway decides
 on the string it was given, so that resolution happens AFTER the decision.
-This is deliberate: it is the situation plan decision M0.2 warns about, and
-one task in the suite measures it.
+This is deliberate: it is the situation the glob entry in the plan's decision
+log warns about, and one task in the suite measures it.
 """
 
 from __future__ import annotations

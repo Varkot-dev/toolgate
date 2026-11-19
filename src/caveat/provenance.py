@@ -1,4 +1,4 @@
-"""Provenance: permissions that depend on where data came from (plan 3.7, M4b).
+"""Provenance: permissions that depend on where data came from (plan 3.7).
 
 Argument constraints ask "may this agent call this tool with these
 arguments?". This module adds "where did these arguments come from, and who
@@ -39,7 +39,7 @@ Where labels come from, explicitly:
     intersection of the readers of everything returned so far, because the
     agent could have copied any of it into the text it writes. This is the
     sound rule for an agent that reads what it is given, and it is where
-    label creep comes from (results/m4b_label_creep.json measures it);
+    label creep comes from (results/label_creep.json measures it);
   * a value made by the quarantined extractor of plan-then-execute
     (caveat.plan): the join of the labels of its inputs.
 

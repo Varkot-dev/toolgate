@@ -185,7 +185,7 @@
       "completeness_rate": 0.8301
     },
     "previous_rule_set": {
-      "note": "The checker WITHOUT rule A, re-created in scripts/m0b_completeness.py and compared with the same solver answers. This is the previous rule set, not the code in src/.",
+      "note": "The checker WITHOUT rule A, re-created in scripts/measure_completeness.py and compared with the same solver answers. This is the previous rule set, not the code in src/.",
       "outcomes": {
         "accepted_safe": 648,
         "rejected_safe_gap": 576,
@@ -1733,7 +1733,7 @@
         "completeness_rate": 0.9369
       },
       "previous_rule_set": {
-        "note": "The checker WITHOUT rule A, re-created in scripts/m0b_completeness.py and compared with the same solver answers. This is the previous rule set, not the code in src/.",
+        "note": "The checker WITHOUT rule A, re-created in scripts/measure_completeness.py and compared with the same solver answers. This is the previous rule set, not the code in src/.",
         "outcomes": {
           "accepted_safe": 2901,
           "rejected_safe_gap": 235,
@@ -1828,7 +1828,7 @@
         "completeness_rate": 0.956
       },
       "previous_rule_set": {
-        "note": "The checker WITHOUT rule A, re-created in scripts/m0b_completeness.py and compared with the same solver answers. This is the previous rule set, not the code in src/.",
+        "note": "The checker WITHOUT rule A, re-created in scripts/measure_completeness.py and compared with the same solver answers. This is the previous rule set, not the code in src/.",
         "outcomes": {
           "accepted_safe": 3115,
           "rejected_safe_gap": 202,
@@ -1944,7 +1944,7 @@
   "hypothesis_version": "6.170.15",
   "python_version": "3.13.18",
   "seconds": {
-    "exhaustive": 59.3,
-    "total": 103.7
+    "exhaustive": 58.2,
+    "total": 101.3
   }
 }

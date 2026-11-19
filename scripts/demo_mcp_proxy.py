@@ -1,4 +1,4 @@
-"""Run the M4 story in-process and write results/m4_demo.json.
+"""Run the MCP proxy story in-process and write results/mcp_proxy_demo.json.
 
 A real MCP server (examples/mcp_upstream_server.py, six tools) sits behind the
 caveat MCP proxy. A real MCP client (the SDK's `mcp.Client`) connects three
@@ -317,7 +317,7 @@ async def story(audit_path: Path) -> dict[str, Any]:
     entries = [json.loads(line) for line in audit_path.read_text().splitlines()]
     return {
         "description": (
-            "M4 MCP proxy story: real MCP SDK client, real MCP upstream server, in-process "
+            "MCP proxy story: real MCP SDK client, real MCP upstream server, in-process "
             "HTTP, fixed clock and ids"
         ),
         "config": {
@@ -373,7 +373,7 @@ async def story(audit_path: Path) -> dict[str, Any]:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("--out", default=str(ROOT / "results" / "m4_demo.json"))
+    parser.add_argument("--out", default=str(ROOT / "results" / "mcp_proxy_demo.json"))
     options = parser.parse_args(argv)
     with tempfile.TemporaryDirectory() as scratch:
         result = asyncio.run(story(Path(scratch) / "audit.jsonl"))

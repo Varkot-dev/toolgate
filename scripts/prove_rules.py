@@ -1,11 +1,11 @@
-"""Prove the attenuation rules with Z3 and write results/m0b_rules.json.
+"""Prove the attenuation rules with Z3 and write results/rules_proof.json.
 
 Runs every lemma in caveat.proofs (each must be unsat), every wrong variant
 (each must be sat, with the solver's counterexample recorded) and the premise
 check of every lemma (each must be sat). Exits non-zero if any of them comes
 back otherwise, including `unknown`.
 
-Usage:  python scripts/m0b_prove_rules.py [--out PATH]
+Usage:  python scripts/prove_rules.py [--out PATH]
 """
 
 from __future__ import annotations
@@ -40,7 +40,7 @@ def print_table(title: str, records: list[proofs.Lemma], expected: str) -> None:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("--out", type=Path, default=ROOT / "results" / "m0b_rules.json")
+    parser.add_argument("--out", type=Path, default=ROOT / "results" / "rules_proof.json")
     args = parser.parse_args()
 
     lemmas = proofs.all_lemmas()

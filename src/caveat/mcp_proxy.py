@@ -94,7 +94,7 @@ and the result it hands over was audited when the person approved it. This is
 the same choice the HTTP gateway makes for `GET /approvals/{id}`. A wrong id
 and somebody else's id get the same "not found" answer.
 
-A person approves through `McpProxy.resolve_approval` or through the M3 admin
+A person approves through `McpProxy.resolve_approval` or through the admin
 API mounted next to the proxy (see `main`).
 
 The caller's token never goes upstream
@@ -1183,7 +1183,7 @@ def main(argv: list[str] | None = None) -> int:
 
     The config is the one `caveat.server` reads. Its `audience` must be the
     proxy's public MCP URL, and its `tools` section is ignored: the tools are
-    the upstream's. The M3 admin API (approvals, revocation, minting, audit
+    the upstream's. The admin API (approvals, revocation, minting, audit
     verification) is served under /admin on the same port, backed by the same
     Gateway, so a person can approve a parked call.
     """

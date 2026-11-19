@@ -1,4 +1,4 @@
-"""Measure what the gateway costs per tool call, and write results/m6_latency.json.
+"""Measure what the gateway costs per tool call, and write results/latency.json.
 
 Sections (each timed with time.perf_counter_ns, after a warm-up, with the
 garbage collector left on as it is in production and run once before each
@@ -99,7 +99,7 @@ from caveat.tokens import DEFAULT_VERIFY_CACHE_SIZE, Authority, Verified
 
 ROOT = Path(__file__).resolve().parent.parent
 POLICY_FILE = ROOT / "config" / "policy.example.yaml"
-OUT = ROOT / "results" / "m6_latency.json"
+OUT = ROOT / "results" / "latency.json"
 SEED = 20261117
 KEY_SEED = "caveat m6 benchmark key, not a secret"
 ADMIN_KEY = "bench-admin-key-not-a-secret"
@@ -1193,7 +1193,7 @@ def main(argv: list[str] | None = None) -> int:
     runtime = time.perf_counter() - began
 
     result = {
-        "description": "M6: latency and throughput the gateway adds to one tool call",
+        "description": "Latency and throughput the gateway adds to one tool call",
         "framing": FRAMING,
         "mode": "quick (smoke test, not a result)" if options.quick else "full",
         "created_utc": datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),

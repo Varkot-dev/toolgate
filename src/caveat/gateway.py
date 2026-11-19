@@ -99,7 +99,7 @@ argument names.
 
 Not in the log: requests that never present a token.
 
-Optional hooks (M4b), both off by default; with neither configured the
+Optional provenance hooks, both off by default; with neither configured the
 pipeline above is unchanged.
 
   canonicalizer  `canonicalizer(tool, args) -> (tool, args)`, e.g. a
@@ -430,7 +430,7 @@ class Gateway:
         self.unverified_audit_burst = unverified_audit_burst
         self.canonicalizer = canonicalizer
         self.provenance = provenance
-        # approval id -> (session key, argument labels, handles used), for M4b
+        # approval id -> (session key, argument labels, handles used), for provenance
         self._parked_labels: dict[str, tuple[str, Any, Any]] = {}
         # One lock for the small bookkeeping below. It is never held while a
         # tool runs; it is held across the write of a summary entry.

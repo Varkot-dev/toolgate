@@ -1,4 +1,4 @@
-"""Property-based security tests for the attenuation check (milestone M0).
+"""Property-based security tests for the attenuation check.
 
 The invariant of the whole system (docs/PLAN.md section 3.2):
 

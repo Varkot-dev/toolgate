@@ -7,7 +7,7 @@ runner uses for scripted agents: `LLMAgent.run(task, call_tool) -> transcript`.
 gateway (configurations 2 and 3); the agent cannot tell which.
 
 The client is injected. Tests and the dry run pass a fake; only
-scripts/m5_real_model_eval.py constructs the real `anthropic.Anthropic`.
+scripts/eval_real_model.py constructs the real `anthropic.Anthropic`.
 
 The loop (manual tool use, one task)
 

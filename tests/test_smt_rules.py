@@ -1,4 +1,4 @@
-"""M0b: the solver proofs of the attenuation rules (PLAN.md 3.2 and 3.9).
+"""The solver proofs of the attenuation rules (PLAN.md 3.2 and 3.9).
 
 Every lemma must be `unsat` (no escalation exists under the rule), every wrong
 variant must be `sat` with a counterexample (the queries can find an escalation

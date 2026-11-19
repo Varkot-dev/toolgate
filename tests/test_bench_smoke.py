@@ -17,7 +17,7 @@ PERCENTILES = ("p50_us", "p90_us", "p99_us", "p99_9_us", "max_us", "mean_us")
 
 
 def test_quick_benchmark_runs_and_writes_every_section(tmp_path: Path) -> None:
-    out = tmp_path / "m6_latency.json"
+    out = tmp_path / "latency.json"
     done = subprocess.run(
         [sys.executable, str(SCRIPT), "--quick", "--out", str(out)],
         cwd=ROOT,

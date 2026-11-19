@@ -1,4 +1,4 @@
-"""Tests for offline attenuation with chained signatures (milestone M1b).
+"""Tests for offline attenuation with chained signatures.
 
 Most tests run twice, once per construction, through the `kit` fixture:
 
@@ -397,7 +397,7 @@ def test_caveat_constructors_validate(build: Any) -> None:
 
 
 class LyingStr(str):
-    """A str subclass that claims to equal everything (the M0 review attack)."""
+    """A str subclass that claims to equal everything (an attack found in review)."""
 
     def __eq__(self, other: object) -> bool:
         return True
@@ -675,7 +675,7 @@ def test_things_that_are_not_tokens_are_refused(kit: Kit, junk: Any) -> None:
 
 
 def test_a_token_object_changed_in_place_is_caught(kit: Kit) -> None:
-    """Frozen dataclasses can still be written with object.__setattr__ (M0 review).
+    """Frozen dataclasses can still be written with object.__setattr__ (found in review).
 
     verify never reads authority from the live object: it serializes it and
     rebuilds everything from those bytes, so an in-place edit is just another

@@ -1,4 +1,4 @@
-"""Run the M1 token scenario and write results/m1_demo.json.
+"""Run the token scenario and write results/token_demo.json.
 
 One user grant, one orchestrator, two sub-agents, and everything the token
 layer is supposed to stop:
@@ -15,7 +15,7 @@ The run is deterministic: the signing key comes from a fixed seed, the clock
 is a counter the script moves by hand, and token ids are tok-1, tok-2, ...
 The key is derived from a public string and protects nothing.
 
-Usage:  python scripts/m1_demo.py [--out PATH]
+Usage:  python scripts/demo_tokens.py [--out PATH]
 """
 
 from __future__ import annotations
@@ -218,7 +218,7 @@ def run() -> dict[str, Any]:
         serialization.Encoding.Raw, serialization.PublicFormat.Raw
     )
     return {
-        "description": "M1 token scenario: scripted, fixed clock, fixed key, no network",
+        "description": "Token scenario: scripted, fixed clock, fixed key, no network",
         "config": {
             "issuer": ISSUER,
             "audience": AUDIENCE,
@@ -247,7 +247,7 @@ def run() -> dict[str, Any]:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("--out", type=Path, default=ROOT / "results" / "m1_demo.json")
+    parser.add_argument("--out", type=Path, default=ROOT / "results" / "token_demo.json")
     args = parser.parse_args()
 
     result = run()

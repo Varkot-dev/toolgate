@@ -2,7 +2,7 @@
 
 Covers caveat.sandbox.llm_agent (the tool-use loop, schemas, the budget,
 the careful approver for real models, the attack classifier) and
-scripts/m5_real_model_eval.py (budget stop with partial results, --resume,
+scripts/eval_real_model.py (budget stop with partial results, --resume,
 the dry run, no key material in the output).
 """
 
@@ -29,7 +29,7 @@ SECRET = "sk-ant-api03-THIS-IS-A-FAKE-KEY-0123456789"
 
 def load_script() -> Any:
     spec = importlib.util.spec_from_file_location(
-        "m5_real_model_eval", ROOT / "scripts" / "m5_real_model_eval.py"
+        "eval_real_model", ROOT / "scripts" / "eval_real_model.py"
     )
     module = importlib.util.module_from_spec(spec)
     assert spec.loader is not None

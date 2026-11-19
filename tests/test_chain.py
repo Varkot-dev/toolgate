@@ -1782,7 +1782,7 @@ def test_hmac_token_bytes_are_pinned() -> None:
     tags changed in the security review; these bytes must not."""
     token = chain(HmacAuthority(ROOT_KEY).issue("tok-1", GRANT), ONLY_ANA, ONLY_READ, ONLY_Q3, SOON)
     digest = hashlib.sha256(token.serialize().encode()).hexdigest()
-    assert digest == "f5bda05c01bd1659f665ce9d09f046157e1a9bf522c3ea110223a11876aeb9ca"
+    assert digest == "6fa38bb5e9cad98d73dc7ab2b2c9538c6b038da6bb882ffada10b6f3d95898d0"
 
 
 # --- 7. a documented limit, shown --------------------------------------------

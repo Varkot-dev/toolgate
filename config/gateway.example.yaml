@@ -25,7 +25,7 @@
 # Unknown keys are an error, here and in every section.
 
 issuer: "https://gateway.example"     # `iss` of every token this gateway signs
-audience: "caveat"                  # `aud`: tokens for another gateway are refused
+audience: "caveat"                    # `aud`: tokens for another gateway are refused
 
 signing_key_env: CAVEAT_SIGNING_KEY
 admin_key_hash_env: CAVEAT_ADMIN_KEY_SHA256

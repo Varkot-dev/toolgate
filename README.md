@@ -1,5 +1,7 @@
 # caveat
 
+**Authorization for AI agents, where every hand-off can only narrow authority.**
+
 <p align="center">
   <img src="assets/hero.gif" width="800" alt="One sub-agent token makes two calls through the gateway: read_file is allowed and runs, delete_file is denied by policy, and both decisions appear as hash-chained audit entries">
 </p>
@@ -149,7 +151,7 @@ Throughput (`throughput`): in-process, one thread, warm, 1,768.3 calls/s with fs
 
 ![Latency: median added time per allowed call for a reused and a new token, and the median of each pipeline step, with the audit fsync the largest](assets/latency.png)
 
-Caveat: one shared cloud container (Intel Xeon at 2.10 GHz, 4 logical cores, ext4 temp directory), not isolated from other tenants. The numbers are indicative, vary from run to run, and so does the latency figure drawn from them (given the same results file it renders identically). Nothing here is compared with any other system. fsync cost depends entirely on the disk.
+Measured on one shared cloud container (Intel Xeon at 2.10 GHz, 4 logical cores, ext4 temp directory), not isolated from other tenants. The numbers are indicative, vary from run to run, and so does the latency figure drawn from them (given the same results file it renders identically). Nothing here is compared with any other system. fsync cost depends entirely on the disk.
 
 ### 4. Delegation, offline tokens, audit and dashboard
 
@@ -308,7 +310,7 @@ Statements in this section are about other work and are quoted from the named so
 
 - **MCP authorization**, spec revision 2026-07-28 (modelcontextprotocol.io/specification/2026-07-28/basic/authorization): OAuth 2.1, the MCP server is a resource server, servers publish Protected Resource Metadata (RFC 9728), clients send the `resource` parameter (RFC 8707), and token passthrough is forbidden. caveat's proxy follows these (it serves the RFC 9728 document, requires the token audience to be its own URL, and never sends the caller's token upstream) and adds what the spec leaves out: per-call argument limits, narrowing down a chain of sub-agents, and human approval.
 - **OAuth 2.0 Token Exchange, RFC 8693**, and the IETF WIMSE drafts `draft-sweeney-wimse-credential-delegation-02` and `draft-asor-wimse-agent-delegation-chain-03`: both drafts state monotonic attenuation, monotonic expiry, bounded depth, an unchanged principal and deny on unknown constraint types, and both treat the nested `act` claim as attribution only. caveat enforces the same invariants and uses `act` the same way; where the Asor draft links hops with a hash of the parent token (`par_hash`), caveat carries ancestor token ids (`chain`).
-- **Macaroons** (Birgisson et al., NDSS 2014) and **Biscuit** (github.com/biscuit-auth/biscuit): tokens whose holder can only add restrictions. caveat's offline chains are an HMAC construction in the macaroon style and an Ed25519 block chain in the Biscuit style, with a much smaller caveat language and no Datalog.
+- **Macaroons** (Birgisson et al., NDSS 2014) and **Biscuit** (github.com/biscuit-auth/biscuit): tokens whose holder can only add restrictions. The project is named after them: a macaroon caveat is a restriction that can only be added, which is how delegation narrows here. caveat's offline chains are an HMAC construction in the macaroon style and an Ed25519 block chain in the Biscuit style, with a much smaller caveat language and no Datalog.
 - **CaMeL**, "Defeating Prompt Injections by Design" (Debenedetti et al., arXiv 2503.18813): a privileged model writes the plan from the user's request, a quarantined model parses untrusted data, and a custom interpreter tracks data and control-flow dependencies and checks policies at tool calls. caveat borrows the plan-then-execute shape but enforces at the tool boundary, sees only tool calls and the references they carry, and does not claim CaMeL's guarantees.
 - **Cedar** (AWS) and **Open Policy Agent** are general policy languages and engines; caveat's policy is a small YAML rule language with three-valued matching. A Cedar or OPA backend was a stretch goal and is not built.
 - **Zanzibar** (Google, 2019) is relationship-based access control at global scale. caveat has no relationship graph and runs on a single node; the contrast is the point: it authorizes individual tool calls and arguments for one delegation chain.

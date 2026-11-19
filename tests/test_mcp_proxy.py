@@ -64,20 +64,20 @@ import mcp_upstream_server as upstream_example  # noqa: E402
 
 sys.dont_write_bytecode = _WRITE_BYTECODE
 
-from toolgate.approvals import ApprovalQueue  # noqa: E402
-from toolgate.audit import AuditLog, verify  # noqa: E402
-from toolgate.capability import Capability, Grant  # noqa: E402
-from toolgate.gateway import CallOutcome  # noqa: E402
-from toolgate.mcp_proxy import (  # noqa: E402
+from caveat.approvals import ApprovalQueue  # noqa: E402
+from caveat.audit import AuditLog, verify  # noqa: E402
+from caveat.capability import Capability, Grant  # noqa: E402
+from caveat.gateway import CallOutcome  # noqa: E402
+from caveat.mcp_proxy import (  # noqa: E402
     APPROVAL_TOOL,
     McpProxy,
     create_proxy,
     discover_tool_names,
     policy_denies_outright,
 )
-from toolgate.policy import Policy  # noqa: E402
-from toolgate.store import MemoryStore  # noqa: E402
-from toolgate.tokens import Authority  # noqa: E402
+from caveat.policy import Policy  # noqa: E402
+from caveat.store import MemoryStore  # noqa: E402
+from caveat.tokens import Authority  # noqa: E402
 
 KEY = Ed25519PrivateKey.from_private_bytes(bytes(range(32)))
 OTHER_KEY = Ed25519PrivateKey.from_private_bytes(bytes(range(1, 33)))
@@ -427,7 +427,7 @@ def test_each_grant_sees_only_its_own_tools(env: Env) -> None:
             # Results of parked or refused calls could not satisfy an output schema.
             assert all(t.output_schema is None for t in listing.tools)
             assert client.server_info is not None
-            assert client.server_info.name == "toolgate-mcp-proxy"
+            assert client.server_info.name == "caveat-mcp-proxy"
         assert await names_seen(env.url, sub) == sorted([*SUB_SEES, APPROVAL_TOOL])
 
     run(scenario())
@@ -482,7 +482,7 @@ def test_permitted_call_runs_upstream_and_has_its_side_effect(env: Env) -> None:
     assert decisions(env) == [("write_file", "allow")]
     # The result carries the proxy's identity, and nothing of the upstream's.
     dumped = result.model_dump_json(by_alias=True)
-    assert "toolgate-mcp-proxy" in dumped
+    assert "caveat-mcp-proxy" in dumped
     assert upstream_example.SERVER_NAME not in dumped
 
     read = run(call(env.url, token, "read_file", {"path": "reports/q3.txt"}))
@@ -521,10 +521,10 @@ def test_argument_constraint_denial_is_readable_and_has_no_effect(env: Env) -> N
     token = env.mint(ORCH_CAPS)
     result = run(call(env.url, token, "read_file", {"path": "secrets/payroll.csv"}))
     assert result.is_error is True
-    assert "Denied by toolgate at the grant check (constraint_failed)" in text(result)
+    assert "Denied by caveat at the grant check (constraint_failed)" in text(result)
     assert "argument 'path' fails glob" in text(result)
     assert result.structured_content == {
-        "toolgate": "denied",
+        "caveat": "denied",
         "stage": "grant",
         "reason": "argument 'path' fails glob",
         "rule": None,
@@ -611,7 +611,7 @@ def test_upstream_failure_reaches_the_agent_whatever_the_gateways_error_detail(
     assert "no such file: missing.txt" in text(missing)
     assert "UpstreamError" not in text(missing) and "withheld" not in text(missing)
     assert missing.structured_content is not None
-    assert missing.structured_content["toolgate"] == "error"
+    assert missing.structured_content["caveat"] == "error"
     # A long upstream message is cut, visibly.
     long_path = "p" * 20_000
     long = run(call(env.url, token, "read_file", {"path": long_path}))
@@ -695,7 +695,7 @@ def test_approval_flow_end_to_end_through_the_status_tool(env: Env) -> None:
             assert parked.is_error is False
             assert "has NOT run" in text(parked)
             assert parked.structured_content is not None
-            assert parked.structured_content["toolgate"] == "pending_approval"
+            assert parked.structured_content["caveat"] == "pending_approval"
             assert parked.structured_content["rule"] == "approve-external-email"
             approval_id = parked.structured_content["approval_id"]
             assert approval_id in text(parked)
@@ -784,7 +784,7 @@ def test_approval_after_revocation_does_not_run(env: Env) -> None:
 def test_admin_api_mounted_beside_the_proxy_can_approve(env: Env) -> None:
     assert env.world is not None
     # Imported here so that the rest of this file does not depend on the HTTP gateway module.
-    from toolgate.server import create_app, hash_admin_key
+    from caveat.server import create_app, hash_admin_key
 
     # What `main` does: the M3 admin API under /admin, on the same Gateway.
     env.proxy.app.mount("/admin", create_app(env.proxy.gateway, hash_admin_key("admin-key")))
@@ -1514,7 +1514,7 @@ def test_meta_and_extra_fields_change_nothing(env: Env) -> None:
         meta={
             "progressToken": "p1",
             "io.modelcontextprotocol/serverInfo": {"name": "spoof"},
-            "toolgate.verified": {"jti": "tok-0"},
+            "caveat.verified": {"jti": "tok-0"},
             "name": "delete_file",
         },
     )
@@ -1618,8 +1618,8 @@ def test_request_shapes_that_must_not_run_anything(env: Env) -> None:
             )
             assert response.status_code == status, scheme
     # The status tool's name is exact too, and its argument is not a path.
-    wrong_case = env.raw(token, "tools/call", {"name": "Toolgate_Approval_Status", "arguments": {}})
-    assert wrong_case.json()["error"]["message"] == "Unknown tool: Toolgate_Approval_Status"
+    wrong_case = env.raw(token, "tools/call", {"name": "Caveat_Approval_Status", "arguments": {}})
+    assert wrong_case.json()["error"]["message"] == "Unknown tool: Caveat_Approval_Status"
     odd = env.raw(
         token, "tools/call", {"name": APPROVAL_TOOL, "arguments": {"approval_id": "../x"}}
     )

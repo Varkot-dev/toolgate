@@ -93,8 +93,8 @@ from typing import Any
 from cryptography.exceptions import InvalidSignature
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey, Ed25519PublicKey
 
-from toolgate.capability import Call, Capability, Decision, Grant
-from toolgate.constraints import Constraint
+from caveat.capability import Call, Capability, Decision, Grant
+from caveat.constraints import Constraint
 
 MAX_TOKEN_CHARS = 32768
 MAX_CAVEATS = 64
@@ -107,11 +107,11 @@ KEY_PREFIX = "tgk1"
 # Domain separation: every signed or MACed message starts with a tag naming the
 # construction and the role of the message, so bytes made for one purpose can
 # never be accepted for another, even if a key were reused.
-_TAG_HMAC_ROOT = b"toolgate.chain.hmac.v1.root\n"
-_TAG_HMAC_CAVEAT = b"toolgate.chain.hmac.v1.caveat\n"
-_TAG_KEY_ROOT = b"toolgate.chain.ed25519.v1.root\n"
-_TAG_KEY_CAVEAT = b"toolgate.chain.ed25519.v1.caveat\n"
-_TAG_KEY_SEAL = b"toolgate.chain.ed25519.v1.seal\n"
+_TAG_HMAC_ROOT = b"caveat.chain.hmac.v1.root\n"
+_TAG_HMAC_CAVEAT = b"caveat.chain.hmac.v1.caveat\n"
+_TAG_KEY_ROOT = b"caveat.chain.ed25519.v1.root\n"
+_TAG_KEY_CAVEAT = b"caveat.chain.ed25519.v1.caveat\n"
+_TAG_KEY_SEAL = b"caveat.chain.ed25519.v1.seal\n"
 
 _SIG_LEN = 64  # Ed25519 signature
 _KEY_LEN = 32  # Ed25519 private seed, Ed25519 public key

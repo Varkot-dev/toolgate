@@ -1,7 +1,7 @@
 """Measure how incomplete the attenuation checker is (milestone M0b).
 
 For a pair (parent, child) the checker says accept or reject, and the Z3 model
-(src/toolgate/smt.py) says whether the child is truly safe. Four outcomes:
+(src/caveat/smt.py) says whether the child is truly safe. Four outcomes:
 
     accepted and safe       the checker did its job
     rejected and unsafe     the checker did its job
@@ -59,7 +59,7 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "tests"))
 
 import strategies as pools  # noqa: E402
-from toolgate import (  # noqa: E402
+from caveat import (  # noqa: E402
     Capability,
     Constraint,
     Grant,

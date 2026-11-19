@@ -108,10 +108,10 @@ from dataclasses import dataclass, field
 from typing import Any
 from urllib.parse import unquote, urlsplit
 
-from toolgate.gateway import DENIED as GATEWAY_DENIED
-from toolgate.gateway import PENDING as GATEWAY_PENDING
-from toolgate.gateway import plain_args
-from toolgate.sandbox.agents import (
+from caveat.gateway import DENIED as GATEWAY_DENIED
+from caveat.gateway import PENDING as GATEWAY_PENDING
+from caveat.gateway import plain_args
+from caveat.sandbox.agents import (
     CAREFUL,
     DENIED,
     ERROR,
@@ -122,15 +122,15 @@ from toolgate.sandbox.agents import (
     ToolResult,
     contains_text,
 )
-from toolgate.sandbox.runner import (
+from caveat.sandbox.runner import (
     DirectSession,
     GatewaySession,
     configuration,
     layer_of,
     legitimate_calls,
 )
-from toolgate.sandbox.tasks import Step, Task, Tpl
-from toolgate.sandbox.world import TODAY, TOOLS, USER, World, canonical_path, result_is_untrusted
+from caveat.sandbox.tasks import Step, Task, Tpl
+from caveat.sandbox.world import TODAY, TOOLS, USER, World, canonical_path, result_is_untrusted
 
 DEFAULT_MODEL = "claude-sonnet-5-5"
 MAX_TURNS = 12
@@ -891,7 +891,7 @@ class PlanReplayClient:
 
 def legitimate_plan_in_order(task: Task, seed: int = 0) -> list[tuple[str, dict[str, Any]]]:
     """The honest agent's calls in the order it makes them (resolved arguments)."""
-    from toolgate.sandbox.agents import HonestAgent
+    from caveat.sandbox.agents import HonestAgent
 
     world = task.build_world(seed)
     transcript = HonestAgent().run(task, DirectSession(task, world, None, seed).call)

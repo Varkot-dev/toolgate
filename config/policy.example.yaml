@@ -1,6 +1,6 @@
 # Example operator policy for an assistant with email, calendar and file tools.
 #
-# How a call is decided (full semantics: src/toolgate/policy.py):
+# How a call is decided (full semantics: src/caveat/policy.py):
 #   1. Every rule that matches the call is collected.
 #   2. deny beats approve, approve beats allow.
 #   3. If no rule matches, the call is denied.

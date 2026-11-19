@@ -20,7 +20,7 @@ from dataclasses import dataclass, field
 from types import MappingProxyType
 from typing import Any
 
-from toolgate.constraints import Constraint
+from caveat.constraints import Constraint
 
 _MISSING = object()
 _MAX_DEPTH = 32

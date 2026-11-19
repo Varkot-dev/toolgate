@@ -5,8 +5,8 @@
 # any run. It does not include the level 1 session rule: value labels replace
 # it with rules about the arguments themselves.
 #
-# Labels are explained in src/toolgate/provenance.py and where they start in
-# src/toolgate/sandbox/labels.py. Every condition here is three-valued: an
+# Labels are explained in src/caveat/provenance.py and where they start in
+# src/caveat/sandbox/labels.py. Every condition here is three-valued: an
 # argument with no label is UNKNOWN, which makes these restrictive rules fire.
 #
 # A person can declassify (approve), except for the web: data that is not
@@ -38,7 +38,7 @@ rules:
       url: {readers_include: {literal: "public"}}
     reason: A URL is sent to its host; only public data may go into one.
 
-  # A file's readers come from its directory (src/toolgate/sandbox/labels.py),
+  # A file's readers come from its directory (src/caveat/sandbox/labels.py),
   # so writing is sending: the content goes to everyone who may later read
   # that directory. Every label includes the user, so only reports/ (adds the
   # organization) and public/ (adds everyone) can widen. Writing into a

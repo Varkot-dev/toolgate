@@ -2,8 +2,8 @@
 
 Scripted agents, not a language model: an honest agent that performs exactly
 the user's task and a hijacked agent that also obeys every injected
-instruction it reads (toolgate.sandbox.agents). Each of the 26 tasks is run
-with both agents under every configuration of toolgate.sandbox.runner: no
+instruction it reads (caveat.sandbox.agents). Each of the 26 tasks is run
+with both agents under every configuration of caveat.sandbox.runner: no
 gateway; grant only; grant plus canonicalization; grant plus
 config/sandbox_policy.yaml (careful and rubber-stamp approver); plus session
 labels; plus value labels with handles; plan-then-execute (each of the last
@@ -23,7 +23,7 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
-from toolgate.sandbox.runner import SEED, dumps, evaluate, format_table
+from caveat.sandbox.runner import SEED, dumps, evaluate, format_table
 
 ROOT = Path(__file__).resolve().parent.parent
 

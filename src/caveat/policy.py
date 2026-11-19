@@ -28,7 +28,7 @@ Provenance conditions (plan section 3.7, milestone M4b)
 
 Two more per-argument operators and one rule key read where the arguments
 CAME FROM rather than what they are. They are only ever evaluated against a
-`PolicyContext` handed in by trusted code (toolgate.provenance), never
+`PolicyContext` handed in by trusted code (caveat.provenance), never
 against anything the caller sends.
 
     source_in: [user, "tool:search_contacts"]
@@ -196,8 +196,8 @@ from typing import Any
 
 import yaml
 
-from toolgate.capability import Call
-from toolgate.constraints import OPS, Constraint, glob_match
+from caveat.capability import Call
+from caveat.constraints import OPS, Constraint, glob_match
 
 ALLOW, DENY, APPROVE = "allow", "deny", "approve"
 EFFECTS: tuple[str, ...] = (ALLOW, DENY, APPROVE)
@@ -360,7 +360,7 @@ class PolicyContext:
     session  "tainted", "clean", or None (unknown)
     labels   argument name -> label, or None. A label needs `sources` (a
              frozenset of strings) and `readable_by(principal) -> bool`;
-             toolgate.provenance.Label is the one used.
+             caveat.provenance.Label is the one used.
     """
 
     session: str | None = None

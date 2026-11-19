@@ -89,22 +89,22 @@ from typing import Any
 
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
-from toolgate.approvals import ApprovalQueue
-from toolgate.audit import AuditLog, hash_args
-from toolgate.capability import Call, Capability, Grant
-from toolgate.gateway import Gateway, plain_args
-from toolgate.policy import Policy
-from toolgate.store import MemoryStore, SqliteStore
-from toolgate.tokens import DEFAULT_VERIFY_CACHE_SIZE, Authority, Verified
+from caveat.approvals import ApprovalQueue
+from caveat.audit import AuditLog, hash_args
+from caveat.capability import Call, Capability, Grant
+from caveat.gateway import Gateway, plain_args
+from caveat.policy import Policy
+from caveat.store import MemoryStore, SqliteStore
+from caveat.tokens import DEFAULT_VERIFY_CACHE_SIZE, Authority, Verified
 
 ROOT = Path(__file__).resolve().parent.parent
 POLICY_FILE = ROOT / "config" / "policy.example.yaml"
 OUT = ROOT / "results" / "m6_latency.json"
 SEED = 20261117
-KEY_SEED = "toolgate m6 benchmark key, not a secret"
+KEY_SEED = "caveat m6 benchmark key, not a secret"
 ADMIN_KEY = "bench-admin-key-not-a-secret"
 ISSUER = "https://gateway.example"
-AUDIENCE = "toolgate-bench"
+AUDIENCE = "caveat-bench"
 BIG = 10**9  # a real budget that the benchmark never reaches
 
 CAPS: list[dict[str, Any]] = [
@@ -192,7 +192,7 @@ def sample(fn: Callable[[], Any], n: int, warmup: int, check: Callable[[Any], bo
 
 @contextlib.contextmanager
 def audit_fsync(enabled: bool) -> Iterator[None]:
-    """With enabled=False, os.fsync is a no-op (toolgate.audit calls os.fsync).
+    """With enabled=False, os.fsync is a no-op (caveat.audit calls os.fsync).
 
     SQLite syncs from C and is not affected: SqliteStore keeps its own syncs.
     """
@@ -787,7 +787,7 @@ def serve(port: int, directory: Path) -> None:
     """Child-process mode: the real FastAPI app on uvicorn, until killed."""
     import uvicorn
 
-    from toolgate.server import create_app, hash_admin_key
+    from caveat.server import create_app, hash_admin_key
 
     rig = Rig(
         directory,
@@ -930,7 +930,7 @@ def bench_http(scratch: Path, duration: float) -> dict[str, Any]:
                 f"p50 {row['latency']['p50_us']:.1f} us, p99 {row['latency']['p99_us']:.1f} us"
             )
         return {
-            "server": "toolgate.server.create_app on uvicorn "
+            "server": "caveat.server.create_app on uvicorn "
             f"{version('uvicorn')}, 1 worker process, 127.0.0.1, HTTP/1.1 keep-alive",
             "gateway_options": {
                 "tool_timeout": 30,
@@ -971,7 +971,7 @@ async def _mcp(scratch: Path, n: int, warmup: int) -> dict[str, Any]:
     import mcp_upstream_server as upstream_example
 
     sys.dont_write_bytecode = before
-    from toolgate.mcp_proxy import create_proxy
+    from caveat.mcp_proxy import create_proxy
 
     proxy_url = "http://proxy.bench/mcp"
     upstream_url = "http://127.0.0.1:8765/mcp"  # a name for the in-memory transport
@@ -1100,7 +1100,7 @@ def git(*args: str) -> str:
 
 def packages() -> dict[str, str]:
     out = {}
-    for name in ("toolgate", "PyJWT", "cryptography", "PyYAML", "fastapi", "starlette",
+    for name in ("caveat", "PyJWT", "cryptography", "PyYAML", "fastapi", "starlette",
                  "uvicorn", "httpx", "httpx2", "pydantic", "anyio", "mcp"):  # fmt: skip
         try:
             out[name] = version(name)
@@ -1167,7 +1167,7 @@ def main(argv: list[str] | None = None) -> int:
     durations = {k: v[pick] for k, v in DURATIONS.items()}
     random.seed(SEED)
     began = time.perf_counter()
-    with tempfile.TemporaryDirectory(prefix="toolgate-bench-") as directory:
+    with tempfile.TemporaryDirectory(prefix="caveat-bench-") as directory:
         scratch = Path(directory)
         print("direct call of the no-op tool")
         direct = direct_baseline(c)
@@ -1226,7 +1226,7 @@ def main(argv: list[str] | None = None) -> int:
             "its own syncs (default rollback journal, synchronous=FULL)",
             "clock": "real time.time for tokens and policy, time.time_ns for the audit log",
             "gateway_options": "library defaults (tool runs on the calling thread, no "
-            "in-flight limit) unless stated; 'server_options' matches toolgate.server.build",
+            "in-flight limit) unless stated; 'server_options' matches caveat.server.build",
         },
         "direct_tool_call": direct,
         "pipeline": pipeline,

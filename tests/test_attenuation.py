@@ -6,9 +6,9 @@ The check is sound but deliberately incomplete. Tests whose name starts with
 
 import pytest
 
-from toolgate.attenuation import AttenuationResult, at_least_as_strict, check_attenuation, covers
-from toolgate.capability import Call, Capability, Grant
-from toolgate.constraints import Constraint
+from caveat.attenuation import AttenuationResult, at_least_as_strict, check_attenuation, covers
+from caveat.capability import Call, Capability, Grant
+from caveat.constraints import Constraint
 
 
 def C(op, value=None, arg="x"):

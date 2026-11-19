@@ -37,13 +37,13 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from typing import Any
 
-from toolgate.sandbox.tasks import Step, Task, Tpl
-from toolgate.sandbox.world import result_is_untrusted
+from caveat.sandbox.tasks import Step, Task, Tpl
+from caveat.sandbox.world import result_is_untrusted
 
 OK, DENIED, ERROR, SKIPPED = "ok", "denied", "error", "skipped"
 LEGIT, INJECTED, FALLBACK = "legit", "injected", "fallback"
 # Plan-then-execute only: a planned call whose arguments carry a value that a
-# fooled extractor produced (toolgate.sandbox.plans).
+# fooled extractor produced (caveat.sandbox.plans).
 INFLUENCED = "influenced"
 MAX_FALLBACKS = 2
 CAREFUL, RUBBER_STAMP = "careful", "rubber_stamp"
@@ -120,7 +120,7 @@ class _Script:
 
     With `handles=True` (provenance configuration 4) the agent passes data it
     forwards as references: a `Tpl` argument is sent in the wire form of
-    toolgate.provenance, built from the handles the gateway returned, and
+    caveat.provenance, built from the handles the gateway returned, and
     every constant argument is sent as a literal. This holds for injected
     steps too: the attacker chooses the text the hijacked agent writes, but a
     reference carries the label the gateway gave the stored value, which the

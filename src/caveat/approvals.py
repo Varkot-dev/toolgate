@@ -54,8 +54,8 @@ from dataclasses import dataclass, replace
 from types import MappingProxyType
 from typing import Any
 
-from toolgate.audit import canonical_json, hash_args
-from toolgate.capability import Call
+from caveat.audit import canonical_json, hash_args
+from caveat.capability import Call
 
 PENDING, APPROVED, REJECTED, EXPIRED, DENIED = (
     "pending",

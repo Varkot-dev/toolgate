@@ -1,11 +1,13 @@
-# toolgate
+# caveat
+
+**Authorization for AI agents, where every hand-off can only narrow authority.**
 
 <p align="center">
   <img src="assets/hero.gif" width="800" alt="One sub-agent token makes two calls through the gateway: read_file is allowed and runs, delete_file is denied by policy, and both decisions appear as hash-chained audit entries">
 </p>
 <p align="center"><sub>Also as a <a href="assets/hero_poster.png">still image</a>. Drawn from one real run recorded in <a href="results/m6_hero.json">results/m6_hero.json</a>.</sub></p>
 
-toolgate is an authorization gateway that sits between an LLM agent and its tools and checks every tool call against a short-lived, narrowly scoped grant and an operator policy, outside the model. An agent can hand a sub-agent a weaker token but never a stronger one, sensitive calls wait for a person, and every decision is written to a hash-chained audit log before anything runs. The model does not decide what it is allowed to do.
+caveat is an authorization gateway that sits between an LLM agent and its tools and checks every tool call against a short-lived, narrowly scoped grant and an operator policy, outside the model. An agent can hand a sub-agent a weaker token but never a stronger one, sensitive calls wait for a person, and every decision is written to a hash-chained audit log before anything runs. The model does not decide what it is allowed to do.
 
 | Result | Value | Source |
 |---|---|---|
@@ -14,7 +16,7 @@ toolgate is an authorization gateway that sits between an LLM agent and its tool
 | Attacks that succeeded, scripted agents, 18 attacks | 18 of 18 with no gateway; 0 of 17 with value labels and 0 of 18 with plan-then-execute (careful approver) | `results/m5_scripted.json` |
 | Benign tasks completed, scripted agents | 8 of 8 in every configuration | `results/m5_scripted.json` |
 | Attacks a real model attempted, one pass, 18 attacks | Claude Sonnet 5.5: 0. Claude Haiku 4.5: 2, both went through with no gateway, both stopped with session labels | `results/m5_real_model.json`, `results/m5_real_model_haiku45.json` |
-| Added latency per allowed call, median (reused token, audit fsync on) | 448 us | `results/m6_latency.json` |
+| Added latency per allowed call, median (reused token, audit fsync on) | 319 us | `results/m6_latency.json` |
 
 Protection numbers come from **scripted agents** on 26 hand-written tasks; a single pass with two real models is reported separately, and never blended with them; see [Protection](#2-protection-scripted-agents) and [A real model](#2b-a-real-model-one-pass).
 
@@ -27,11 +29,11 @@ An agent that calls tools usually holds one broad, long-lived credential. That c
 3. **Unlimited delegation.** An orchestrator passes its full credential to every sub-agent.
 4. **No record of who authorized what.** Afterwards nobody can reconstruct which person or agent allowed an action.
 
-toolgate applies ordinary least-privilege access control to agents: a separate component checks every call against an explicit grant.
+caveat applies ordinary least-privilege access control to agents: a separate component checks every call against an explicit grant.
 
 ## How a call is decided
 
-`Gateway.handle_call` in [src/toolgate/gateway.py](src/toolgate/gateway.py) is the only way a tool runs. The HTTP server and the MCP proxy are thin adapters over it. Each step fails closed.
+`Gateway.handle_call` in [src/caveat/gateway.py](src/caveat/gateway.py) is the only way a tool runs. The HTTP server and the MCP proxy are thin adapters over it. Each step fails closed.
 
 1. **Canonicalize.** Rewrite each argument the operator has typed (path, email, URL) to one spelling, or refuse it if it is ambiguous. In value-label mode, resolve handle references and label every argument.
 2. **Build the call.** A read-only plain-JSON copy of the arguments; this copy is what is checked, hashed, stored for approval and passed to the tool.
@@ -138,18 +140,18 @@ From `results/m6_latency.json`, `pipeline.<config>.added` (time of `Gateway.hand
 
 | Token | Audit fsync | p50 | p99 |
 |---|---|---|---|
-| Warm (one token reused, verify cache hit) | on | 448 us | 1,404 us |
-| Cold (new token every call, signature checked) | on | 772 us | 1,783 us |
-| Warm | off | 117 us | 241 us |
-| Cold | off | 348 us | 705 us |
+| Warm (one token reused, verify cache hit) | on | 319 us | 707 us |
+| Cold (new token every call, signature checked) | on | 657 us | 1,326 us |
+| Warm | off | 136 us | 245 us |
+| Cold | off | 378 us | 643 us |
 
-Components timed alone (`stages.*.p50_us`): cold verify 193.8 us, of which the Ed25519 signature check 95.1 us; audit append with fsync 225.6 us, without 30.1 us. With the SQLite store instead of memory, warm with fsync, p50 is 1,806 us (`pipeline.sqlite_fsync_on_warm`).
+Components timed alone (`stages.*.p50_us`): cold verify 211.9 us, of which the Ed25519 signature check 110.2 us; audit append with fsync 205.6 us, without 34.0 us. For a reused token the audit fsync is the largest step and most of the added time (p50 319 us with it, 136 us without). With the SQLite store instead of memory, warm with fsync, p50 is 1,245 us (`pipeline.sqlite_fsync_on_warm`).
 
-Throughput (`throughput`): in-process, one thread, warm, 1,768.3 calls/s with fsync and 7,148.6 without; cold with fsync 1,221.9. Over HTTP to the FastAPI app on one uvicorn process on localhost, 341.9 calls/s with 1 client (p50 2,835 us) and 619.2 with 16 clients. Through the MCP proxy, the median `tools/call` was 3,990 us slower than the same call made directly to the upstream (`mcp_proxy.added_p50_us`, a difference of medians).
+Throughput (`throughput`): in-process, one thread, warm, 2,679.5 calls/s with fsync and 7,050.2 without; cold with fsync 1,554.3. Over HTTP to the FastAPI app on one uvicorn process on localhost, 461.6 calls/s with 1 client (p50 2,096 us) and 720.5 with 16 clients. Through the MCP proxy, the median `tools/call` was 2,711 us slower than the same call made directly to the upstream (`mcp_proxy.added_p50_us`, a difference of medians).
 
-![Latency: median added time per allowed call for a reused and a new token, and the median of each pipeline step, with the audit fsync the largest](assets/latency.png)
+![Latency: median added time per allowed call for a reused and a new token, and the median of each pipeline step, with the audit fsync the largest step of a reused-token call](assets/latency.png)
 
-Caveat: one shared cloud container (Intel Xeon at 2.10 GHz, 4 logical cores, ext4 temp directory), not isolated from other tenants. The numbers are indicative, vary from run to run, and so does the latency figure drawn from them (given the same results file it renders identically). Nothing here is compared with any other system. fsync cost depends entirely on the disk.
+Measured on one shared cloud container (Intel Xeon at 2.10 GHz, 4 logical cores, ext4 temp directory), not isolated from other tenants. The numbers are indicative, vary from run to run, and so does the latency figure drawn from them (given the same results file it renders identically). Nothing here is compared with any other system. fsync cost depends entirely on the disk.
 
 ### 4. Delegation, offline tokens, audit and dashboard
 
@@ -175,14 +177,14 @@ Python 3.11 or later.
 
 ```bash
 pip install -e ".[dev]"
-pytest -q                          # TOOLGATE_EXAMPLES=300 for a faster property-test run
+pytest -q                          # CAVEAT_EXAMPLES=300 for a faster property-test run
 ruff check . && ruff format --check .
 ```
 
 The capability model as a library:
 
 ```python
-from toolgate import Call, Grant, check_attenuation
+from caveat import Call, Grant, check_attenuation
 
 parent = Grant.from_dict(
     {
@@ -206,10 +208,10 @@ assert not child.allows(Call("read_file", {"path": "reports/q1/a.txt"}), 1_800_0
 Run the gateway. The two secrets come from environment variables, never from files; read [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) before listening on anything but loopback.
 
 ```bash
-export TOOLGATE_SIGNING_KEY="$(openssl rand -base64 32)"
+export CAVEAT_SIGNING_KEY="$(openssl rand -base64 32)"
 ADMIN_KEY="$(openssl rand -base64 32 | tr '+/' '-_' | tr -d '=')"
-export TOOLGATE_ADMIN_KEY_SHA256="$(printf %s "$ADMIN_KEY" | sha256sum | cut -d' ' -f1)"
-python -m toolgate.server --config config/gateway.example.yaml   # 127.0.0.1:8000, audit log in config/
+export CAVEAT_ADMIN_KEY_SHA256="$(printf %s "$ADMIN_KEY" | sha256sum | cut -d' ' -f1)"
+python -m caveat.server --config config/gateway.example.yaml   # 127.0.0.1:8000, audit log in config/
 
 # in a second shell (same ADMIN_KEY): mint a root token, then call the example tool
 curl -s -X POST localhost:8000/token -H "Authorization: Bearer $ADMIN_KEY" \
@@ -236,12 +238,12 @@ MCP proxy in front of the example MCP server. The token audience must be the pro
 
 ```bash
 python examples/mcp_upstream_server.py --port 8765 &
-sed 's|^audience: "toolgate"|audience: "http://127.0.0.1:8000/mcp"|' \
+sed 's|^audience: "caveat"|audience: "http://127.0.0.1:8000/mcp"|' \
   config/gateway.example.yaml > config/proxy.local.yaml
-python -m toolgate.mcp_proxy --config config/proxy.local.yaml --upstream http://127.0.0.1:8765/mcp
+python -m caveat.mcp_proxy --config config/proxy.local.yaml --upstream http://127.0.0.1:8765/mcp
 ```
 
-The admin API is mounted under `/admin` on the same port. Audit logs can be checked offline with `python -m toolgate.audit verify <path> --head <hash>`.
+The admin API is mounted under `/admin` on the same port. Audit logs can be checked offline with `python -m caveat.audit verify <path> --head <hash>`.
 
 ## Reproducing every number
 
@@ -256,7 +258,7 @@ npm i -D playwright                # creates node_modules/ in the repo (ignored 
 npx playwright install chromium
 ```
 
-`render.py` looks for the package in this order: the directory in `TOOLGATE_NODE_PATH`, then `NODE_PATH`, then `node_modules/` in the repo, then `/opt/node-tools/node_modules` (the build environment's preinstalled copy) if it exists. `scripts/fig_dashboard.py` uses the Python `playwright` package instead if it is installed. Fonts are bundled in `scripts/design/fonts/`, so output does not depend on system fonts.
+`render.py` looks for the package in this order: the directory in `CAVEAT_NODE_PATH`, then `NODE_PATH`, then `node_modules/` in the repo, then `/opt/node-tools/node_modules` (the build environment's preinstalled copy) if it exists. `scripts/fig_dashboard.py` uses the Python `playwright` package instead if it is installed. Fonts are bundled in `scripts/design/fonts/`, so output does not depend on system fonts.
 
 | Script | Writes |
 |---|---|
@@ -299,24 +301,24 @@ Seeds, clocks and ids are fixed, so every file except `m6_latency.json`, the lat
 - **Budget edge cases.** First-fit derivation can strand budget; a limited capability does not cap an overlapping unlimited one; offline chain tokens carry no budget at all.
 - **Expiry is only as good as the clock.** A clock set backwards can revive an expired token.
 - **Policy limits.** Conditions see top-level arguments only; `absent` and `any` on a deny or approve rule are presence tests the caller controls; an approve rule opens a path to execution that no allow rule covers.
-- **MCP proxy scope.** Only tools are proxied (resources, prompts and sampling are refused); the tool set is fixed at startup; tool descriptions and results pass through as the upstream wrote them; toolgate is not an OAuth authorization server.
+- **MCP proxy scope.** Only tools are proxied (resources, prompts and sampling are refused); the tool set is fixed at startup; tool descriptions and results pass through as the upstream wrote them; caveat is not an OAuth authorization server.
 - **Incomplete by design.** The attenuation check rejects 208 safe pairs in the measured universe; the proofs cover the rules as modeled, within the stated bounds.
 
 ## Relation to prior work
 
 Statements in this section are about other work and are quoted from the named source; none of our numbers is derived from them.
 
-- **MCP authorization**, spec revision 2026-07-28 (modelcontextprotocol.io/specification/2026-07-28/basic/authorization): OAuth 2.1, the MCP server is a resource server, servers publish Protected Resource Metadata (RFC 9728), clients send the `resource` parameter (RFC 8707), and token passthrough is forbidden. toolgate's proxy follows these (it serves the RFC 9728 document, requires the token audience to be its own URL, and never sends the caller's token upstream) and adds what the spec leaves out: per-call argument limits, narrowing down a chain of sub-agents, and human approval.
-- **OAuth 2.0 Token Exchange, RFC 8693**, and the IETF WIMSE drafts `draft-sweeney-wimse-credential-delegation-02` and `draft-asor-wimse-agent-delegation-chain-03`: both drafts state monotonic attenuation, monotonic expiry, bounded depth, an unchanged principal and deny on unknown constraint types, and both treat the nested `act` claim as attribution only. toolgate enforces the same invariants and uses `act` the same way; where the Asor draft links hops with a hash of the parent token (`par_hash`), toolgate carries ancestor token ids (`chain`).
-- **Macaroons** (Birgisson et al., NDSS 2014) and **Biscuit** (github.com/biscuit-auth/biscuit): tokens whose holder can only add restrictions. toolgate's offline chains are an HMAC construction in the macaroon style and an Ed25519 block chain in the Biscuit style, with a much smaller caveat language and no Datalog.
-- **CaMeL**, "Defeating Prompt Injections by Design" (Debenedetti et al., arXiv 2503.18813): a privileged model writes the plan from the user's request, a quarantined model parses untrusted data, and a custom interpreter tracks data and control-flow dependencies and checks policies at tool calls. toolgate borrows the plan-then-execute shape but enforces at the tool boundary, sees only tool calls and the references they carry, and does not claim CaMeL's guarantees.
-- **Cedar** (AWS) and **Open Policy Agent** are general policy languages and engines; toolgate's policy is a small YAML rule language with three-valued matching. A Cedar or OPA backend was a stretch goal and is not built.
-- **Zanzibar** (Google, 2019) is relationship-based access control at global scale. toolgate has no relationship graph and runs on a single node; the contrast is the point: it authorizes individual tool calls and arguments for one delegation chain.
+- **MCP authorization**, spec revision 2026-07-28 (modelcontextprotocol.io/specification/2026-07-28/basic/authorization): OAuth 2.1, the MCP server is a resource server, servers publish Protected Resource Metadata (RFC 9728), clients send the `resource` parameter (RFC 8707), and token passthrough is forbidden. caveat's proxy follows these (it serves the RFC 9728 document, requires the token audience to be its own URL, and never sends the caller's token upstream) and adds what the spec leaves out: per-call argument limits, narrowing down a chain of sub-agents, and human approval.
+- **OAuth 2.0 Token Exchange, RFC 8693**, and the IETF WIMSE drafts `draft-sweeney-wimse-credential-delegation-02` and `draft-asor-wimse-agent-delegation-chain-03`: both drafts state monotonic attenuation, monotonic expiry, bounded depth, an unchanged principal and deny on unknown constraint types, and both treat the nested `act` claim as attribution only. caveat enforces the same invariants and uses `act` the same way; where the Asor draft links hops with a hash of the parent token (`par_hash`), caveat carries ancestor token ids (`chain`).
+- **Macaroons** (Birgisson et al., NDSS 2014) and **Biscuit** (github.com/biscuit-auth/biscuit): tokens whose holder can only add restrictions. The name caveat comes from macaroon caveats: restrictions that can only be added, which is how delegation narrows here. caveat's offline chains are an HMAC construction in the macaroon style and an Ed25519 block chain in the Biscuit style, with a much smaller caveat language and no Datalog.
+- **CaMeL**, "Defeating Prompt Injections by Design" (Debenedetti et al., arXiv 2503.18813): a privileged model writes the plan from the user's request, a quarantined model parses untrusted data, and a custom interpreter tracks data and control-flow dependencies and checks policies at tool calls. caveat borrows the plan-then-execute shape but enforces at the tool boundary, sees only tool calls and the references they carry, and does not claim CaMeL's guarantees.
+- **Cedar** (AWS) and **Open Policy Agent** are general policy languages and engines; caveat's policy is a small YAML rule language with three-valued matching. A Cedar or OPA backend was a stretch goal and is not built.
+- **Zanzibar** (Google, 2019) is relationship-based access control at global scale. caveat has no relationship graph and runs on a single node; the contrast is the point: it authorizes individual tool calls and arguments for one delegation chain.
 
 ## Project layout
 
 ```
-src/toolgate/
+src/caveat/
   constraints.py   the five argument operators: eq, in, max, glob, any
   capability.py    Call, Capability, Grant and the closed-world allows(call)
   attenuation.py   check_attenuation: sound, deliberately incomplete

@@ -1,8 +1,8 @@
-# Deploying toolgate
+# Deploying caveat
 
 This page says what the gateway process enforces by itself, what has to be in
 front of it, and the limits that are known and not fixed. It is written for
-the HTTP service started with `python -m toolgate.server --config <file>`.
+the HTTP service started with `python -m caveat.server --config <file>`.
 
 ## What the app enforces
 
@@ -70,7 +70,7 @@ own hash chain starting at entry 0; nothing links a new file to the old one.
 1. Stop the gateway. Do not rotate under a running gateway, and never use
    copy-and-truncate rotation: a truncated log is reported as tampering.
 2. Verify the old file and record its last head:
-   `python -m toolgate.audit verify <old> --head <hash>`.
+   `python -m caveat.audit verify <old> --head <hash>`.
 3. Move it to the archive, read-only, together with its final head and every
    `--checkpoint SEQ:HASH` value published for it. A checkpoint proves only
    the file it was taken from, so keep each one with its file across

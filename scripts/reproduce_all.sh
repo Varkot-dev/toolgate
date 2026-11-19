@@ -9,7 +9,7 @@
 # m0b_completeness.py and bench_latency.py take a few minutes each.
 # Every fig_*.py renders HTML pages from scripts/design/ with headless Chromium
 # through Node.js Playwright (Node 18+; `npm i -D playwright` and
-# `npx playwright install chromium` in the repo root, or set TOOLGATE_NODE_PATH;
+# `npx playwright install chromium` in the repo root, or set CAVEAT_NODE_PATH;
 # see node_path in scripts/design/render.py). fig_dashboard.py uses the Python
 # playwright package instead if it is installed.
 set -euo pipefail

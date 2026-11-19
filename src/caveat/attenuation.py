@@ -10,8 +10,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from toolgate.capability import Capability, Grant
-from toolgate.constraints import Constraint
+from caveat.capability import Capability, Grant
+from caveat.constraints import Constraint
 
 
 def _prefix_extends(parent: str, child: str) -> bool:

@@ -4,8 +4,8 @@
     "mcp_sdk": "2.3.0",
     "protocol_version": "2026-07-28",
     "policy_file": "config/policy.example.yaml",
-    "policy_sha256": "8fce9026e625da739489f944929b4b0045fb3f188bd244fdcca30ae359429052",
-    "key_seed": "toolgate m4 demo key, not a secret",
+    "policy_sha256": "dbe89dcff069889d4ebcced1345cb56f085bc16411daaeaf1877f0a353a37d65",
+    "key_seed": "caveat m4 demo key, not a secret",
     "start_unix": 1794873600,
     "proxy_url": "http://proxy.demo/mcp",
     "orchestrator_capabilities": [
@@ -98,16 +98,16 @@
       "write_file"
     ],
     "orchestrator": [
+      "caveat_approval_status",
       "list_files",
       "read_file",
       "send_email",
-      "toolgate_approval_status",
       "write_file"
     ],
     "sub-agent": [
+      "caveat_approval_status",
       "list_files",
-      "read_file",
-      "toolgate_approval_status"
+      "read_file"
     ]
   },
   "steps": [
@@ -136,7 +136,7 @@
         "mcp": "result",
         "is_error": true,
         "outcome": "denied",
-        "text": "Denied by toolgate at the policy check (policy rule deny-secret-paths): The secrets directory is off limits to agents. The call did not run. Repeating it unchanged will be denied again.",
+        "text": "Denied by caveat at the policy check (policy rule deny-secret-paths): The secrets directory is off limits to agents. The call did not run. Repeating it unchanged will be denied again.",
         "rule": "deny-secret-paths"
       }
     },
@@ -207,14 +207,14 @@
         "mcp": "result",
         "is_error": false,
         "outcome": "pending_approval",
-        "text": "This call has NOT run. Operator policy requires a person to approve it (rule approve-external-email: Mail to recipients outside example.com needs approval). Approval id: apr-1. Call toolgate_approval_status with that approval_id to see the decision and collect the result. Do not repeat the original call.",
+        "text": "This call has NOT run. Operator policy requires a person to approve it (rule approve-external-email: Mail to recipients outside example.com needs approval). Approval id: apr-1. Call caveat_approval_status with that approval_id to see the decision and collect the result. Do not repeat the original call.",
         "approval_id": "apr-1",
         "rule": "approve-external-email"
       }
     },
     {
       "who": "orchestrator",
-      "tool": "toolgate_approval_status",
+      "tool": "caveat_approval_status",
       "arguments": {
         "approval_id": "apr-1"
       },
@@ -238,7 +238,7 @@
     },
     {
       "who": "orchestrator",
-      "tool": "toolgate_approval_status",
+      "tool": "caveat_approval_status",
       "arguments": {
         "approval_id": "apr-1"
       },
@@ -275,7 +275,7 @@
         "mcp": "result",
         "is_error": true,
         "outcome": "denied",
-        "text": "Denied by toolgate at the grant check (constraint_failed): argument 'path' fails glob. The call did not run. Repeating it unchanged will be denied again."
+        "text": "Denied by caveat at the grant check (constraint_failed): argument 'path' fails glob. The call did not run. Repeating it unchanged will be denied again."
       }
     },
     {
@@ -318,7 +318,7 @@
         "mcp": "result",
         "is_error": true,
         "outcome": "denied",
-        "text": "Denied by toolgate at the budget check (budget_exhausted): budget exhausted. The call did not run. Repeating it unchanged will be denied again."
+        "text": "Denied by caveat at the budget check (budget_exhausted): budget exhausted. The call did not run. Repeating it unchanged will be denied again."
       }
     }
   ],

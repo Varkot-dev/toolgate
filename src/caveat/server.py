@@ -1,4 +1,4 @@
-"""HTTP front of the gateway: a thin FastAPI layer over `toolgate.gateway.Gateway`.
+"""HTTP front of the gateway: a thin FastAPI layer over `caveat.gateway.Gateway`.
 
 Every decision is made by `Gateway`; this module only authenticates the
 caller, parses the request strictly and turns a `CallOutcome` into a status
@@ -82,10 +82,10 @@ from fastapi import Depends, FastAPI, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 
-from toolgate.approvals import PENDING, Approval, ApprovalError, ApprovalQueue, valid_name
-from toolgate.audit import AuditLog, verify
-from toolgate.capability import Capability, Grant
-from toolgate.gateway import (
+from caveat.approvals import PENDING, Approval, ApprovalError, ApprovalQueue, valid_name
+from caveat.audit import AuditLog, verify
+from caveat.capability import Capability, Grant
+from caveat.gateway import (
     ALLOWED,
     DEFAULT_UNVERIFIED_AUDIT_BURST,
     DEFAULT_UNVERIFIED_AUDIT_RATE,
@@ -98,10 +98,10 @@ from toolgate.gateway import (
     bounded,
     plain_args,
 )
-from toolgate.gateway import PENDING as CALL_PENDING
-from toolgate.policy import Policy
-from toolgate.store import MemoryStore, SqliteStore
-from toolgate.tokens import Authority, EscalationError, TokenError
+from caveat.gateway import PENDING as CALL_PENDING
+from caveat.policy import Policy
+from caveat.store import MemoryStore, SqliteStore
+from caveat.tokens import Authority, EscalationError, TokenError
 
 DEFAULT_MAX_BODY_BYTES = 64 * 1024
 DEFAULT_ADMIN_THREADS = 4
@@ -168,7 +168,7 @@ class ApiError(Exception):
 
 def _unauthorized(error: str = "", description: str = "") -> ApiError:
     """401 with the challenge RFC 6750 asks for. `description` is a fixed code."""
-    challenge = 'Bearer realm="toolgate"'
+    challenge = 'Bearer realm="caveat"'
     if error:
         challenge += f', error="{error}"'
     if description:
@@ -466,7 +466,7 @@ def create_app(
     stored = admin_key_hash.encode("ascii")
 
     app = FastAPI(
-        title="toolgate",
+        title="caveat",
         redirect_slashes=False,
         docs_url="/docs" if docs else None,
         redoc_url=None,
@@ -1017,7 +1017,7 @@ def build(
             admin_threads=admin_threads,
         )
         if dashboard_enabled:  # off by default: without it no /dashboard route exists
-            from toolgate.dashboard import mount_dashboard
+            from caveat.dashboard import mount_dashboard
 
             options = {k: v for k, v in dashboard.items() if k != "enabled"}
             mount_dashboard(app, gateway, admin_hash, admin_threads=admin_threads, **options)
@@ -1031,20 +1031,20 @@ def build(
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(prog="python -m toolgate.server")
+    parser = argparse.ArgumentParser(prog="python -m caveat.server")
     parser.add_argument("--config", default="config/gateway.example.yaml")
     options = parser.parse_args(argv)
     config_path = Path(options.config).resolve()
     try:
         app, gateway, settings = build(load_config(config_path), os.environ, config_path.parent)
     except ConfigError as exc:
-        print(f"toolgate: cannot start: {exc}", file=sys.stderr)
+        print(f"caveat: cannot start: {exc}", file=sys.stderr)
         return 2
     for warning in getattr(gateway.policy, "warnings", ()):
-        print(f"toolgate: policy warning: {warning}", file=sys.stderr)
+        print(f"caveat: policy warning: {warning}", file=sys.stderr)
     if not is_loopback(settings["host"]):
         print(
-            f"toolgate: warning: listening on {settings['host']}, which is not loopback. "
+            f"caveat: warning: listening on {settings['host']}, which is not loopback. "
             "There is no TLS here: every token and the admin key cross the network in clear "
             "unless a TLS proxy is in front (see docs/DEPLOYMENT.md).",
             file=sys.stderr,

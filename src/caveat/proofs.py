@@ -1,6 +1,6 @@
 """Solver proofs of the attenuation rules (PLAN.md sections 3.2 and 3.9).
 
-`toolgate.smt` answers the escalation question for one concrete pair of
+`caveat.smt` answers the escalation question for one concrete pair of
 constraints. This module asks it for a whole RULE at once: the constraint
 parameters (the ceiling, the allow-lists, the pattern prefix, even the parent
 predicate itself) are solver variables, so one `unsat` covers every instance
@@ -31,7 +31,7 @@ from dataclasses import dataclass
 
 import z3
 
-from toolgate.smt import Value, glob_regex, string_lit
+from caveat.smt import Value, glob_regex, string_lit
 
 TIMEOUT_MS = 20_000
 
@@ -145,7 +145,7 @@ def _v() -> z3.ExprRef:
 
 
 def _max_holds(v: z3.ExprRef, ceiling: z3.ArithRef) -> z3.BoolRef:
-    """`max m` on a symbolic ceiling. Same shape as toolgate.smt.holds."""
+    """`max m` on a symbolic ceiling. Same shape as caveat.smt.holds."""
     return z3.And(Value.is_N(v), Value.n(v) <= ceiling)
 
 
@@ -280,7 +280,7 @@ def star_free_glob_is_literal() -> Lemma:
     return _lemma_all(
         "L1e a star-free glob g accepts exactly the string g",
         "glob",
-        "A string t on which membership in toolgate.smt.glob_regex(g) and t == g "
+        "A string t on which membership in caveat.smt.glob_regex(g) and t == g "
         "disagree, for a pattern g that contains no star. A regex cannot be built from "
         "a symbolic pattern, so this is checked for fixed g only. Together with L1 "
         "(the enumeration rule for an arbitrary parent predicate, taking T = {g}) this "
@@ -387,7 +387,7 @@ def glob_regex_is_prefix() -> Lemma:
     return _lemma_all(
         "L4c the model's regex for P* means 'starts with P'",
         "glob",
-        "A string t on which membership in toolgate.smt.glob_regex(P + '*') and "
+        "A string t on which membership in caveat.smt.glob_regex(P + '*') and "
         "PrefixOf(P, t) disagree. A regex cannot be built from a symbolic pattern, "
         "so this is checked for fixed P only.",
         "concrete P in " + ", ".join(repr(p) for p in REGEX_PREFIXES),

@@ -1944,7 +1944,7 @@
   "hypothesis_version": "6.170.15",
   "python_version": "3.13.18",
   "seconds": {
-    "exhaustive": 67.6,
-    "total": 118.1
+    "exhaustive": 59.3,
+    "total": 103.7
   }
 }

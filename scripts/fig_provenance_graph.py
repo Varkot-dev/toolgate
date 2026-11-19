@@ -30,11 +30,11 @@ from typing import Any
 from urllib.parse import urlparse
 
 import style
+from caveat.provenance import USER_LABEL, Label
+from caveat.sandbox.agents import HijackedAgent
+from caveat.sandbox.runner import configuration, run_task
+from caveat.sandbox.tasks import all_tasks
 from design.render import Shot, render
-from toolgate.provenance import USER_LABEL, Label
-from toolgate.sandbox.agents import HijackedAgent
-from toolgate.sandbox.runner import configuration, run_task
-from toolgate.sandbox.tasks import all_tasks
 
 TASK, CONFIG = "misuse-04", "4-value-labels"
 TITLE = "Labels follow the data"

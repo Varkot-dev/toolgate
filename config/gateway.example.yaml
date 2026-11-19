@@ -1,17 +1,17 @@
 # Example gateway configuration.
 #
-#   python -m toolgate.server --config config/gateway.example.yaml
+#   python -m caveat.server --config config/gateway.example.yaml
 #
 # No secret is ever written in this file. The two secrets are read from the
 # environment variables NAMED here, and the server refuses to start if either
 # is missing or malformed.
 #
 #   signing key   base64 of 32 random bytes (an Ed25519 seed):
-#                   export TOOLGATE_SIGNING_KEY="$(openssl rand -base64 32)"
+#                   export CAVEAT_SIGNING_KEY="$(openssl rand -base64 32)"
 #   admin key     a long random string that only the operator holds. The
 #                 server is given its SHA-256, never the key itself:
 #                   ADMIN_KEY="$(openssl rand -base64 32 | tr '+/' '-_' | tr -d '=')"
-#                   export TOOLGATE_ADMIN_KEY_SHA256="$(printf %s "$ADMIN_KEY" | sha256sum | cut -d' ' -f1)"
+#                   export CAVEAT_ADMIN_KEY_SHA256="$(printf %s "$ADMIN_KEY" | sha256sum | cut -d' ' -f1)"
 #                 A plain SHA-256 is only safe because the key is long and
 #                 random. Do not use a password here. The key may contain
 #                 only letters, digits and . _ ~ + / = - so that it fits in
@@ -25,17 +25,17 @@
 # Unknown keys are an error, here and in every section.
 
 issuer: "https://gateway.example"     # `iss` of every token this gateway signs
-audience: "toolgate"                  # `aud`: tokens for another gateway are refused
+audience: "caveat"                    # `aud`: tokens for another gateway are refused
 
-signing_key_env: TOOLGATE_SIGNING_KEY
-admin_key_hash_env: TOOLGATE_ADMIN_KEY_SHA256
+signing_key_env: CAVEAT_SIGNING_KEY
+admin_key_hash_env: CAVEAT_ADMIN_KEY_SHA256
 
 # Operator policy (deny beats approve beats allow, default deny). Read once at
 # startup; restart the server to load a changed policy.
 policy_file: "policy.example.yaml"
 
 # Hash-chained audit log, one JSON entry per decision. One writer per file.
-# Check it offline with:  python -m toolgate.audit verify <path> --head <hash>
+# Check it offline with:  python -m caveat.audit verify <path> --head <hash>
 # Created with mode 0600. A symbolic link here is refused, not followed.
 audit_log: "audit.jsonl"
 
@@ -47,7 +47,7 @@ audit_log: "audit.jsonl"
 store:
   kind: memory
   # kind: sqlite
-  # path: "toolgate.sqlite"
+  # path: "caveat.sqlite"
 
 tokens:
   max_ttl_seconds: 900    # ceiling for `expires_in` on /token and /token/exchange
@@ -113,4 +113,4 @@ dashboard:
 # token or the policy says. Listing a tool imports and runs that module, so
 # this file must be writable only by the operator.
 tools:
-  echo: "toolgate.server:echo"   # example tool that returns its arguments
+  echo: "caveat.server:echo"   # example tool that returns its arguments

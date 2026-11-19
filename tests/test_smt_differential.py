@@ -1,6 +1,6 @@
 """Differential tests: the Python checker against the Z3 model (milestone M0b).
 
-The solver proves things about formulas (src/toolgate/smt.py). These tests are
+The solver proves things about formulas (src/caveat/smt.py). These tests are
 what ties the Python implementation to those formulas, in three layers:
 
   a. model fidelity    Constraint.holds(x) and glob_match agree with the model
@@ -15,7 +15,7 @@ bug. The reverse (checker rejects, solver proves safe) is the completeness gap,
 which is expected; scripts/m0b_completeness.py measures it.
 
 Solver calls are slow, so the default is 2,000 examples per test. Set
-TOOLGATE_SMT_EXAMPLES to change it.
+CAVEAT_SMT_EXAMPLES to change it.
 
 One input restriction: Z3's string theory has no character above code point
 0x2FFFF, so generated strings stay at or below it.
@@ -38,7 +38,7 @@ from hypothesis import HealthCheck, given, settings
 from hypothesis import strategies as st
 
 import strategies as pools
-from toolgate import (
+from caveat import (
     Call,
     Constraint,
     Grant,
@@ -48,7 +48,7 @@ from toolgate import (
     smt,
 )
 
-EXAMPLES = int(os.environ.get("TOOLGATE_SMT_EXAMPLES", "2000"))
+EXAMPLES = int(os.environ.get("CAVEAT_SMT_EXAMPLES", "2000"))
 SETTINGS = settings(
     max_examples=EXAMPLES,
     derandomize=True,

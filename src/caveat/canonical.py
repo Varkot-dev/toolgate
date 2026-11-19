@@ -56,7 +56,7 @@ Why these refusals (each is a string two programs can read differently):
     or resolve the real path and check it against the canonical one before
     acting). The sandbox's file tool is an in-memory dict with no links.
   * Addresses. "*@northwind.example" is how provenance writes the whole
-    domain as a reader (toolgate.provenance), so a recipient spelled that way
+    domain as a reader (caveat.provenance), so a recipient spelled that way
     would pass `readers_include` for any data the organization may read; "?"
     is a wildcard in other matchers. "%" and "!" are old source-routing
     syntax ("bob%evil.example@relay.example"): some relays forward on them,

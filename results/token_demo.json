@@ -1,5 +1,5 @@
 {
-  "description": "M1 token scenario: scripted, fixed clock, fixed key, no network",
+  "description": "Token scenario: scripted, fixed clock, fixed key, no network",
   "config": {
     "issuer": "https://gateway.example",
     "audience": "caveat-demo",

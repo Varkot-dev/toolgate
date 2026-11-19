@@ -1,5 +1,5 @@
 {
-  "description": "M3 gateway story: scripted, in-process HTTP, fixed clock and ids",
+  "description": "Gateway story: scripted, in-process HTTP, fixed clock and ids",
   "config": {
     "issuer": "https://gateway.example",
     "audience": "caveat-demo",

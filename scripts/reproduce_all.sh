@@ -7,10 +7,11 @@
 # Everything is deterministic (fixed seeds, fixed clocks, counting ids) except
 # the latency benchmark and its figure, whose numbers vary run to run.
 # m0b_completeness.py and bench_latency.py take a few minutes each.
-# fig_dashboard.py needs a headless Chromium driven by Playwright (Python
-# package, or the Node.js package found through NODE_PATH). fig_hero.py and
-# fig_delegation_tree.py render HTML pages from scripts/design/ with the
-# Node.js Playwright (NODE_PATH, default /opt/node-tools/node_modules).
+# Every fig_*.py renders HTML pages from scripts/design/ with headless Chromium
+# through Node.js Playwright (Node 18+; `npm i -D playwright` and
+# `npx playwright install chromium` in the repo root, or set TOOLGATE_NODE_PATH;
+# see node_path in scripts/design/render.py). fig_dashboard.py uses the Python
+# playwright package instead if it is installed.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"

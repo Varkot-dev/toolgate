@@ -14,9 +14,8 @@ browser reports any console error (a Content-Security-Policy violation would
 show up there).
 
 Browser driver: the Python package `playwright` if it is installed, otherwise
-the pre-installed Node.js Playwright (found through NODE_PATH, default
-/opt/node-tools/node_modules) driven with the same steps. Both use the
-pre-installed Chromium; nothing new is installed.
+Node.js Playwright (found as in scripts/design/render.py, `node_path`) driven
+with the same steps. Both use an installed Chromium; nothing new is installed.
 
 Run from the repo root: .venv/bin/python scripts/fig_dashboard.py
 """
@@ -32,6 +31,7 @@ from pathlib import Path
 
 import demo_dashboard
 import style
+from design.render import node_path
 
 FIELD = "decision"
 APPROVER = "ana"
@@ -130,7 +130,7 @@ def shoot_node(url: str, key: str, seq: int, out: dict[str, str]) -> list[str]:
     env = {
         **os.environ,
         "FIG_ARGS": json.dumps(args),
-        "NODE_PATH": os.environ.get("NODE_PATH", "/opt/node-tools/node_modules"),
+        "NODE_PATH": node_path(),
     }
     with tempfile.TemporaryDirectory() as folder:
         script = Path(folder) / "driver.js"

@@ -124,7 +124,7 @@ One class d attack (task misuse-04: leak the budget through the URL of a fetch t
 
 ### 2b. A real model (one pass)
 
-The same 26 tasks, with a real model as the agent instead of a scripted one, under three configurations: no gateway, grant plus policy, and plus session labels (careful approver). One pass per model; the model sees an ordinary assistant prompt that never mentions injection or the gateway. Written by `scripts/m5_real_model_eval.py` with the owner's API key ([docs/REAL_MODEL_RUN.md](docs/REAL_MODEL_RUN.md)).
+The same 26 tasks, with a real model as the agent instead of a scripted one, under three configurations: no gateway, grant plus policy, and plus session labels (careful approver). One pass per model; the model sees an ordinary assistant prompt that never mentions injection or the gateway. Written by `scripts/m5_real_model_eval.py` with an Anthropic API key ([docs/REAL_MODEL_RUN.md](docs/REAL_MODEL_RUN.md)).
 
 ![Real model: Claude Haiku 4.5 attempted two attacks; with no gateway both went through, grant plus policy stopped one, session labels stopped both; benign tasks done and approvals asked per configuration](assets/real_model.png)
 
@@ -223,7 +223,7 @@ curl -s localhost:8000/audit/verify -H "Authorization: Bearer $ADMIN_KEY"
 
 `TOKEN` is the `token` field of the first response. The call is denied at stage `policy` ("no rule matched (default deny)"): the grant allows `echo`, but `config/policy.example.yaml` has no rule for it. Both checks must agree.
 
-Demos (each deterministic, each writes its results file):
+Demos (each deterministic, each writes its results file). The seeds and key seeds in `scripts/` are fixed, public demo values so that reruns match byte for byte; never reuse them, or any key derived from them, outside the demos.
 
 ```bash
 python scripts/m1_demo.py          # tokens: exchange, escalation refused, shared budget, revocation
@@ -246,8 +246,17 @@ The admin API is mounted under `/admin` on the same port. Audit logs can be chec
 ## Reproducing every number
 
 ```bash
-bash scripts/reproduce_all.sh      # several minutes; figures are HTML pages rendered by headless Chromium (Node Playwright)
+bash scripts/reproduce_all.sh      # several minutes
 ```
+
+Figures are HTML pages under `scripts/design/` rendered to PNG by headless Chromium through Node.js Playwright (`scripts/design/render.cjs`, called by `scripts/design/render.py`). This needs Node.js 18 or later on `PATH` and the `playwright` npm package. On a fresh machine, from the repo root:
+
+```bash
+npm i -D playwright                # creates node_modules/ in the repo (ignored by git)
+npx playwright install chromium
+```
+
+`render.py` looks for the package in this order: the directory in `TOOLGATE_NODE_PATH`, then `NODE_PATH`, then `node_modules/` in the repo, then `/opt/node-tools/node_modules` (the build environment's preinstalled copy) if it exists. `scripts/fig_dashboard.py` uses the Python `playwright` package instead if it is installed. Fonts are bundled in `scripts/design/fonts/`, so output does not depend on system fonts.
 
 | Script | Writes |
 |---|---|
@@ -336,4 +345,4 @@ results/ assets/   saved outputs and figures
 
 ## Status
 
-All milestones in [docs/PLAN.md](docs/PLAN.md) are built. The agent evaluation (M5) was run with scripted agents, and once each with two real models ([2b](#2b-a-real-model-one-pass)). One pass with two attempted attacks is evidence that the layers work against a real model, not a measurement of how often one is hijacked. The repository is private until the owner decides to publish it.
+All ten milestones in [docs/PLAN.md](docs/PLAN.md) are built and tested: the capability model and its proofs, tokens and offline chains, policy and audit, the HTTP gateway, the MCP proxy, provenance labels and the dashboard. The agent evaluation (M5) has scripted runs of every configuration plus one real-model pass with each of two models ([2b](#2b-a-real-model-one-pass)); one pass with two attempted attacks is evidence that the layers work against a real model, not a measurement of how often one is hijacked. The known limits are listed under [What this does not do](#what-this-does-not-do).

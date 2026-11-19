@@ -40,7 +40,7 @@ from test_properties import (  # noqa: E402
     grant_violation,
     kill,
 )
-from toolgate import Capability, Grant, at_least_as_strict, check_attenuation  # noqa: E402
+from caveat import Capability, Grant, at_least_as_strict, check_attenuation  # noqa: E402
 
 
 def show_capability(cap: Capability) -> str:

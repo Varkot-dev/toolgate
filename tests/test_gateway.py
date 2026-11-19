@@ -27,10 +27,10 @@ from hypothesis import given, settings
 from hypothesis import strategies as st
 from jwt import PyJWS
 
-from toolgate.approvals import ApprovalQueue
-from toolgate.audit import AuditError, AuditLog, hash_args, verify
-from toolgate.capability import Capability, Grant
-from toolgate.gateway import (
+from caveat.approvals import ApprovalQueue
+from caveat.audit import AuditError, AuditLog, hash_args, verify
+from caveat.capability import Capability, Grant
+from caveat.gateway import (
     INVALID_TOOL,
     MAX_REASON_CHARS,
     TRUNCATED,
@@ -41,9 +41,9 @@ from toolgate.gateway import (
     loggable_tool,
     token_fingerprint,
 )
-from toolgate.policy import Policy
-from toolgate.store import MemoryStore
-from toolgate.tokens import Authority, EscalationError, TokenError
+from caveat.policy import Policy
+from caveat.store import MemoryStore
+from caveat.tokens import Authority, EscalationError, TokenError
 
 KEY = Ed25519PrivateKey.from_private_bytes(bytes(range(32)))
 OTHER_KEY = Ed25519PrivateKey.from_private_bytes(bytes(range(1, 33)))
@@ -819,7 +819,7 @@ _REPO = Path(__file__).resolve().parent.parent
 _OWN_TEXT = "\n".join(
     p.read_text(encoding="utf-8")
     for p in [
-        *sorted((_REPO / "src" / "toolgate").rglob("*.py")),
+        *sorted((_REPO / "src" / "caveat").rglob("*.py")),
         Path(__file__),
         *sorted((_REPO / "config").glob("*.yaml")),
     ]
@@ -1008,7 +1008,7 @@ def test_a_call_that_cannot_be_logged_is_refused_before_any_charge(
         seen.append((tool, tuple(actors)))
         return "actors take too many bytes"
 
-    monkeypatch.setattr("toolgate.gateway.loggable", never)
+    monkeypatch.setattr("caveat.gateway.loggable", never)
     token = env.mint()
     outcome = env.gateway.handle_call(token, "read_file", {"path": "reports/x"})
     assert (outcome.status, outcome.stage) == ("denied", "audit")
@@ -1248,7 +1248,7 @@ def test_a_tool_that_does_not_finish_in_time_is_an_error_and_stays_charged(
     env.rebuild({"ghost": blocker}, tool_timeout=0.05, max_in_flight_per_root=1)
     token = env.mint([{"tool": "ghost", "args": {}, "max_calls": 5}])
     try:
-        with caplog.at_level(logging.ERROR, logger="toolgate.gateway"):
+        with caplog.at_level(logging.ERROR, logger="caveat.gateway"):
             outcome = env.gateway.handle_call(token, "ghost", {})
         assert (outcome.status, outcome.stage, outcome.code) == ("error", "tool", "tool_timeout")
         assert "may still complete in the background" in outcome.reason
@@ -1414,7 +1414,7 @@ def test_an_approved_call_checks_the_signature_once_more(
 def test_a_call_with_provenance_checks_the_signature_once(
     env: Env, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from toolgate.provenance import Label, Provenance
+    from caveat.provenance import Label, Provenance
 
     provenance = Provenance(lambda *a: Label(frozenset({"user"})), handles=None)
     env.rebuild(provenance=provenance)

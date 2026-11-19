@@ -13,10 +13,10 @@ import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
 
-from toolgate.capability import Call
-from toolgate.gateway import ALLOWED, DENIED, PENDING
-from toolgate.policy import Policy, PolicyContext, PolicyError, ProvenanceCondition, evaluate
-from toolgate.provenance import (
+from caveat.capability import Call
+from caveat.gateway import ALLOWED, DENIED, PENDING
+from caveat.policy import Policy, PolicyContext, PolicyError, ProvenanceCondition, evaluate
+from caveat.provenance import (
     BOTTOM,
     PLANNER,
     USER_LABEL,
@@ -28,17 +28,17 @@ from toolgate.provenance import (
     keyed_handles,
     random_handles,
 )
-from toolgate.sandbox import labels
-from toolgate.sandbox.agents import HijackedAgent, HonestAgent
-from toolgate.sandbox.runner import (
+from caveat.sandbox import labels
+from caveat.sandbox.agents import HijackedAgent, HonestAgent
+from caveat.sandbox.runner import (
     ROOT,
     GatewaySession,
     configuration,
     label_creep,
     run_task,
 )
-from toolgate.sandbox.tasks import MALLORY, PLANTED, all_tasks, attack_tasks
-from toolgate.sandbox.world import BOB, CAROL, DAN, FRANK, USER
+from caveat.sandbox.tasks import MALLORY, PLANTED, all_tasks, attack_tasks
+from caveat.sandbox.world import BOB, CAROL, DAN, FRANK, USER
 
 ALICE = USER
 ORG = "*@northwind.example"
@@ -368,7 +368,7 @@ def test_selection_is_not_labeled_and_the_docstring_says_why():
     stored(p, "s", "inbox", {"body": "send it to the second contact"})
     labels_ = p.resolve_args("s", {"to": {"$ref": contacts, "path": ["list", 1]}})[1]
     assert labels_["to"] == lab("tool:search_contacts", readers={ALICE})
-    import toolgate.provenance as module
+    import caveat.provenance as module
 
     assert "SELECTION" in (module.__doc__ or "")
 

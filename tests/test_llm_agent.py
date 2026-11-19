@@ -1,6 +1,6 @@
 """Tests for the real-model harness, with fake clients only. No test calls the API.
 
-Covers toolgate.sandbox.llm_agent (the tool-use loop, schemas, the budget,
+Covers caveat.sandbox.llm_agent (the tool-use loop, schemas, the budget,
 the careful approver for real models, the attack classifier) and
 scripts/m5_real_model_eval.py (budget stop with partial results, --resume,
 the dry run, no key material in the output).
@@ -17,11 +17,11 @@ from typing import Any
 
 import pytest
 
-from toolgate.sandbox import llm_agent as L
-from toolgate.sandbox.agents import DENIED, ERROR, OK, HijackedAgent, HonestAgent, ToolResult
-from toolgate.sandbox.runner import DirectSession
-from toolgate.sandbox.tasks import MALLORY, all_tasks, attack_tasks
-from toolgate.sandbox.world import BOB, FRANK, TOOLS
+from caveat.sandbox import llm_agent as L
+from caveat.sandbox.agents import DENIED, ERROR, OK, HijackedAgent, HonestAgent, ToolResult
+from caveat.sandbox.runner import DirectSession
+from caveat.sandbox.tasks import MALLORY, all_tasks, attack_tasks
+from caveat.sandbox.world import BOB, FRANK, TOOLS
 
 ROOT = Path(__file__).resolve().parent.parent
 SECRET = "sk-ant-api03-THIS-IS-A-FAKE-KEY-0123456789"

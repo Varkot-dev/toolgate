@@ -61,7 +61,7 @@
     {
       "name": "L1e a star-free glob g accepts exactly the string g",
       "table_row": "glob",
-      "statement": "A string t on which membership in toolgate.smt.glob_regex(g) and t == g disagree, for a pattern g that contains no star. A regex cannot be built from a symbolic pattern, so this is checked for fixed g only. Together with L1 (the enumeration rule for an arbitrary parent predicate, taking T = {g}) this covers rule A: a child glob with no star is accepted exactly when the parent accepts the string g.",
+      "statement": "A string t on which membership in caveat.smt.glob_regex(g) and t == g disagree, for a pattern g that contains no star. A regex cannot be built from a symbolic pattern, so this is checked for fixed g only. Together with L1 (the enumeration rule for an arbitrary parent predicate, taking T = {g}) this covers rule A: a child glob with no star is accepted exactly when the parent accepts the string g.",
       "bound": "concrete g in '', 'a', 'abc', 'reports/q3.csv', 'a b', '?[x].+(y)|z\\\\^$', 'é/ü'",
       "result": "unsat",
       "counterexample": null,
@@ -115,7 +115,7 @@
     {
       "name": "L4c the model's regex for P* means 'starts with P'",
       "table_row": "glob",
-      "statement": "A string t on which membership in toolgate.smt.glob_regex(P + '*') and PrefixOf(P, t) disagree. A regex cannot be built from a symbolic pattern, so this is checked for fixed P only.",
+      "statement": "A string t on which membership in caveat.smt.glob_regex(P + '*') and PrefixOf(P, t) disagree. A regex cannot be built from a symbolic pattern, so this is checked for fixed P only.",
       "bound": "concrete P in '', 'a', 'reports/', 'reports/q3/', 'a b', '?[x]', 'é/ü'",
       "result": "unsat",
       "counterexample": null,

@@ -12,7 +12,7 @@ import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
 
-from toolgate.plan import (
+from caveat.plan import (
     EMAIL,
     PATH,
     TEXT,
@@ -28,10 +28,10 @@ from toolgate.plan import (
     execute,
     validate,
 )
-from toolgate.sandbox.agents import INFLUENCED, LEGIT, SKIPPED, HijackedAgent, HonestAgent, call_key
-from toolgate.sandbox.plans import ScriptedExtractor, plan_for, plan_tools
-from toolgate.sandbox.runner import PLAN, PlanSession, configuration, legitimate_calls, run_task
-from toolgate.sandbox.tasks import all_tasks, attack_tasks, load_grants
+from caveat.sandbox.agents import INFLUENCED, LEGIT, SKIPPED, HijackedAgent, HonestAgent, call_key
+from caveat.sandbox.plans import ScriptedExtractor, plan_for, plan_tools
+from caveat.sandbox.runner import PLAN, PlanSession, configuration, legitimate_calls, run_task
+from caveat.sandbox.tasks import all_tasks, attack_tasks, load_grants
 
 TASKS = all_tasks()
 ATTACKS = attack_tasks()

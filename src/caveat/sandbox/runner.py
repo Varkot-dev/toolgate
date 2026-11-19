@@ -1,6 +1,6 @@
 """Run the sandbox suite under each configuration and summarize what happened.
 
-Scripted agents, not a language model: see toolgate.sandbox.agents.
+Scripted agents, not a language model: see caveat.sandbox.agents.
 
 Configurations
 
@@ -9,7 +9,7 @@ Configurations
   2-policy-careful         grant plus config/sandbox_policy.yaml, careful approver
   2-policy-rubber-stamp    the same, with an approver who approves everything
   1c-grant-canonical       configuration 1 plus argument canonicalization
-                           (toolgate.canonical), to isolate what it changes
+                           (caveat.canonical), to isolate what it changes
   3-session-labels         plan 3.7 level 1: configuration 2 plus
                            canonicalization plus config/sandbox_policy_session.yaml
                            (approve every acting call in a tainted session)
@@ -17,7 +17,7 @@ Configurations
                            canonicalization plus config/sandbox_policy_values.yaml;
                            the gateway issues handles and the scripted agents
                            pass references for data they forward
-  5-plan-execute           plan-then-execute (toolgate.plan) with the policy of
+  5-plan-execute           plan-then-execute (caveat.plan) with the policy of
                            configuration 4; a scripted planner that sees only
                            the request, a scripted quarantined extractor
   3-, 4-, 5-...-rubber-stamp   the same with the rubber-stamp approver
@@ -29,7 +29,7 @@ reproduce; 1c shows the effect of canonicalization on its own.
 Configuration 4 assumes an agent runtime that passes handles. Real agents do
 not do this unless they run in a plan-then-execute mode like configuration 5.
 In configuration 5 the "hijacked" run is the same plan with an extractor that
-the injection fools (toolgate.sandbox.plans): the planner never reads tool
+the injection fools (caveat.sandbox.plans): the planner never reads tool
 results, so no injected call can be issued. There, an attack counts as
 attempted when its injected text was returned by a tool (it reached the
 system), and a call counts as unintended when it ran with an argument the
@@ -75,15 +75,15 @@ from typing import Any
 
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
-from toolgate.approvals import ApprovalQueue
-from toolgate.audit import AuditLog
-from toolgate.gateway import DENIED as GATEWAY_DENIED
-from toolgate.gateway import PENDING, CallOutcome, Gateway, plain_args
-from toolgate.plan import execute, references
-from toolgate.policy import Policy
-from toolgate.provenance import SESSION, VALUE, Provenance, keyed_handles
-from toolgate.sandbox import labels
-from toolgate.sandbox.agents import (
+from caveat.approvals import ApprovalQueue
+from caveat.audit import AuditLog
+from caveat.gateway import DENIED as GATEWAY_DENIED
+from caveat.gateway import PENDING, CallOutcome, Gateway, plain_args
+from caveat.plan import execute, references
+from caveat.policy import Policy
+from caveat.provenance import SESSION, VALUE, Provenance, keyed_handles
+from caveat.sandbox import labels
+from caveat.sandbox.agents import (
     AGENTS,
     CAREFUL,
     DENIED,
@@ -102,8 +102,8 @@ from toolgate.sandbox.agents import (
     call_key,
     contains_text,
 )
-from toolgate.sandbox.plans import ScriptedExtractor, plan_for
-from toolgate.sandbox.tasks import (
+from caveat.sandbox.plans import ScriptedExtractor, plan_for
+from caveat.sandbox.tasks import (
     BUDGET,
     GRANT_ARGS,
     GRANT_TOOL,
@@ -113,17 +113,17 @@ from toolgate.sandbox.tasks import (
     Task,
     all_tasks,
 )
-from toolgate.sandbox.world import World, result_is_untrusted
-from toolgate.store import MemoryStore
-from toolgate.tokens import Authority
+from caveat.sandbox.world import World, result_is_untrusted
+from caveat.store import MemoryStore
+from caveat.tokens import Authority
 
 ROOT = Path(__file__).resolve().parents[3]
 POLICY_FILE = ROOT / "config" / "sandbox_policy.yaml"
 SEED = 0
 START = 1_794_873_600  # 2026-11-17 00:00:00 UTC, the gateway's fixed clock
-KEY_SEED = "toolgate m5 sandbox key, not a secret"
+KEY_SEED = "caveat m5 sandbox key, not a secret"
 ISSUER = "https://gateway.example"
-AUDIENCE = "toolgate-sandbox"
+AUDIENCE = "caveat-sandbox"
 TTL = 600
 STAND_IN = "scripted agents, not a language model"
 NOT_IMPLEMENTED = "not implemented"
@@ -229,7 +229,7 @@ class GatewaySession:
             new_id=lambda: next(token_ids),
         )
         # The audit log is the gateway's own and needs a file; the WORLD does no I/O.
-        self._directory = tempfile.TemporaryDirectory(prefix="toolgate-sandbox-")
+        self._directory = tempfile.TemporaryDirectory(prefix="caveat-sandbox-")
         policy = Policy.from_file(POLICY_FILE) if config.policy == "sandbox" else allow_all_policy()
         if config.overlay is not None:
             policy = labels.policy(policy, config.overlay)

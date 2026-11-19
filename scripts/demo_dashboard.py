@@ -3,9 +3,9 @@
 What it does:
 
   1. sets a demo signing key and a demo admin key in its own environment
-     (TOOLGATE_DEMO_SIGNING_KEY, TOOLGATE_DEMO_ADMIN_KEY and the admin key's
-     SHA-256 in TOOLGATE_DEMO_ADMIN_KEY_SHA256), unless they are already set
-  2. builds the real service with `toolgate.server.build`, the repo's
+     (CAVEAT_DEMO_SIGNING_KEY, CAVEAT_DEMO_ADMIN_KEY and the admin key's
+     SHA-256 in CAVEAT_DEMO_ADMIN_KEY_SHA256), unless they are already set
+  2. builds the real service with `caveat.server.build`, the repo's
      config/policy.example.yaml and `dashboard.enabled: true`, and serves it
      with uvicorn on 127.0.0.1 (a free port unless --port is given)
   3. drives scripted agent calls over HTTP: an orchestrator token, a child
@@ -13,7 +13,7 @@ What it does:
      the admin approves through the API, and two approvals left pending
   4. prints the dashboard URL and the demo admin key, and serves until Ctrl-C
 
-The tools are stand-ins: every one is `toolgate.server:echo`, which returns its
+The tools are stand-ins: every one is `caveat.server:echo`, which returns its
 arguments. Nothing is read, sent or written anywhere. The audit log is a file
 in a temporary directory that is removed on exit. The demo keys protect
 nothing and must never be used for a real gateway.
@@ -38,7 +38,7 @@ from typing import Any
 import httpx
 import uvicorn
 
-from toolgate.server import build
+from caveat.server import build
 
 ROOT = Path(__file__).resolve().parent.parent
 POLICY_FILE = ROOT / "config" / "policy.example.yaml"
@@ -127,25 +127,25 @@ class Demo:
 
 def _set_demo_keys() -> None:
     os.environ.setdefault(
-        "TOOLGATE_DEMO_SIGNING_KEY", base64.b64encode(secrets.token_bytes(32)).decode()
+        "CAVEAT_DEMO_SIGNING_KEY", base64.b64encode(secrets.token_bytes(32)).decode()
     )
-    os.environ.setdefault("TOOLGATE_DEMO_ADMIN_KEY", secrets.token_urlsafe(32))
-    key = os.environ["TOOLGATE_DEMO_ADMIN_KEY"]
-    os.environ["TOOLGATE_DEMO_ADMIN_KEY_SHA256"] = hashlib.sha256(key.encode()).hexdigest()
+    os.environ.setdefault("CAVEAT_DEMO_ADMIN_KEY", secrets.token_urlsafe(32))
+    key = os.environ["CAVEAT_DEMO_ADMIN_KEY"]
+    os.environ["CAVEAT_DEMO_ADMIN_KEY_SHA256"] = hashlib.sha256(key.encode()).hexdigest()
 
 
 def start(port: int = 0) -> Demo:
     """Serve the demo gateway in a background thread and run the story against it."""
     _set_demo_keys()
-    tmp = tempfile.TemporaryDirectory(prefix="toolgate-dashboard-demo-")
+    tmp = tempfile.TemporaryDirectory(prefix="caveat-dashboard-demo-")
     config = {
         "issuer": "https://gateway.example",
-        "audience": "toolgate-demo",
-        "signing_key_env": "TOOLGATE_DEMO_SIGNING_KEY",
-        "admin_key_hash_env": "TOOLGATE_DEMO_ADMIN_KEY_SHA256",
+        "audience": "caveat-demo",
+        "signing_key_env": "CAVEAT_DEMO_SIGNING_KEY",
+        "admin_key_hash_env": "CAVEAT_DEMO_ADMIN_KEY_SHA256",
         "policy_file": str(POLICY_FILE),
         "audit_log": "audit.jsonl",
-        "tools": {name: "toolgate.server:echo" for name in TOOLS},
+        "tools": {name: "caveat.server:echo" for name in TOOLS},
         "dashboard": {"enabled": True},
     }
     app, gateway, _ = build(config, os.environ, Path(tmp.name))
@@ -161,7 +161,7 @@ def start(port: int = 0) -> Demo:
         time.sleep(0.01)
     bound = server.servers[0].sockets[0].getsockname()[1]
     url = f"http://127.0.0.1:{bound}"
-    demo = Demo(url, os.environ["TOOLGATE_DEMO_ADMIN_KEY"], server, thread, gateway, tmp, [])
+    demo = Demo(url, os.environ["CAVEAT_DEMO_ADMIN_KEY"], server, thread, gateway, tmp, [])
     try:
         _run_story(demo)
     except BaseException:
@@ -226,7 +226,7 @@ def main() -> int:
     options = parser.parse_args()
     demo = start(options.port)
     print(f"dashboard: {demo.url}/dashboard")
-    print(f"demo admin key (TOOLGATE_DEMO_ADMIN_KEY, protects nothing): {demo.admin_key}")
+    print(f"demo admin key (CAVEAT_DEMO_ADMIN_KEY, protects nothing): {demo.admin_key}")
     print("Ctrl-C to stop; the demo audit log is deleted on exit.")
     try:
         while demo.thread.is_alive():

@@ -81,13 +81,13 @@ import anyio.to_thread
 from fastapi import FastAPI, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 
-from toolgate.approvals import Approval, ApprovalError, valid_name
-from toolgate.audit import FIELDS, GENESIS, Head, VerifyResult, canonical_json, verify
-from toolgate.gateway import ALLOWED, ERROR, Gateway, plain_args
-from toolgate.server import safe_text, strict_json
+from caveat.approvals import Approval, ApprovalError, valid_name
+from caveat.audit import FIELDS, GENESIS, Head, VerifyResult, canonical_json, verify
+from caveat.gateway import ALLOWED, ERROR, Gateway, plain_args
+from caveat.server import safe_text, strict_json
 
 PREFIX = "/dashboard"
-COOKIE = "toolgate_dashboard"
+COOKIE = "caveat_dashboard"
 CSRF_HEADER = "x-csrf-token"
 STATIC = Path(__file__).resolve().parent / "static"
 ASSETS = {
@@ -195,7 +195,7 @@ class Session:
 
 def _session_key(session_id: str) -> str:
     """What the server stores instead of the session id."""
-    return hashlib.sha256(b"toolgate dashboard session\x00" + session_id.encode()).hexdigest()
+    return hashlib.sha256(b"caveat dashboard session\x00" + session_id.encode()).hexdigest()
 
 
 class Sessions:
@@ -373,7 +373,7 @@ def tamper_demo(source: Path, seq: int, field: str) -> TamperResult:
     new = edited_value(field, old)
     entry[field] = new
     lines[seq] = canonical_json(entry)
-    folder = tempfile.mkdtemp(prefix="toolgate-demo-copy-")
+    folder = tempfile.mkdtemp(prefix="caveat-demo-copy-")
     try:
         copy = Path(folder) / "audit-demo-copy.jsonl"
         flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0)
@@ -618,12 +618,12 @@ def _window_of(lines: list[bytes], first: int, *, count_earlier: bool = True) ->
 LOGIN_PAGE = """<!doctype html>
 <html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>toolgate dashboard: sign in</title>
+<title>caveat dashboard: sign in</title>
 <link rel="stylesheet" href="/dashboard/static/dashboard.css">
 <script src="/dashboard/static/dashboard.js" defer></script>
 </head><body class="login-page">
 <main class="login">
-<h1>toolgate</h1>
+<h1>caveat</h1>
 <p class="sub">Operator dashboard. Sign in with the gateway's admin key.</p>
 <form id="login" autocomplete="off">
 <label>Admin key<input id="key" name="key" type="password" required></label>

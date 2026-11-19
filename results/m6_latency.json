@@ -14,7 +14,7 @@
   "python_implementation": "CPython",
   "temp_dir_filesystem": "ext4",
   "packages": {
-   "toolgate": "0.0.1",
+   "caveat": "0.0.1",
    "PyJWT": "2.15.1",
    "cryptography": "50.0.2",
    "PyYAML": "6.0.3",
@@ -85,7 +85,7 @@
   },
   "fsync_off": "os.fsync replaced by a no-op for the audit log only; SQLite keeps its own syncs (default rollback journal, synchronous=FULL)",
   "clock": "real time.time for tokens and policy, time.time_ns for the audit log",
-  "gateway_options": "library defaults (tool runs on the calling thread, no in-flight limit) unless stated; 'server_options' matches toolgate.server.build"
+  "gateway_options": "library defaults (tool runs on the calling thread, no in-flight limit) unless stated; 'server_options' matches caveat.server.build"
  },
  "direct_tool_call": {
   "n": 100000,
@@ -21098,7 +21098,7 @@
    }
   ],
   "http": {
-   "server": "toolgate.server.create_app on uvicorn 0.54.0, 1 worker process, 127.0.0.1, HTTP/1.1 keep-alive",
+   "server": "caveat.server.create_app on uvicorn 0.54.0, 1 worker process, 127.0.0.1, HTTP/1.1 keep-alive",
    "gateway_options": {
     "tool_timeout": 30,
     "max_in_flight_per_root": 8,

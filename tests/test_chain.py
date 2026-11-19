@@ -9,7 +9,7 @@ The attack tests build the forged token the way an attacker would: start from
 tokens they legitimately hold and rearrange the parts. They never use the
 authority's key, because the attacker does not have it.
 
-Set TOOLGATE_EXAMPLES to change the number of Hypothesis cases (default 1000).
+Set CAVEAT_EXAMPLES to change the number of Hypothesis cases (default 1000).
 """
 
 from __future__ import annotations
@@ -31,9 +31,9 @@ from hypothesis import HealthCheck, find, given, settings
 from hypothesis import strategies as st
 
 from strategies import EXPIRIES, TOOLS, calls_for, constraints, grants, times
-from toolgate import Call, Capability, Constraint, Decision, Grant
-from toolgate import chain as chain_module
-from toolgate.chain import (
+from caveat import Call, Capability, Constraint, Decision, Grant
+from caveat import chain as chain_module
+from caveat.chain import (
     MAX_CAVEATS,
     MAX_TOKEN_CHARS,
     ArgCaveat,
@@ -53,7 +53,7 @@ from toolgate.chain import (
     verify_public,
 )
 
-EXAMPLES = int(os.environ.get("TOOLGATE_EXAMPLES", "1000"))
+EXAMPLES = int(os.environ.get("CAVEAT_EXAMPLES", "1000"))
 NOW = 1000
 ROOT_KEY = bytes(range(32))
 OTHER_ROOT_KEY = bytes(range(1, 33))

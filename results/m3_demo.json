@@ -2,11 +2,11 @@
   "description": "M3 gateway story: scripted, in-process HTTP, fixed clock and ids",
   "config": {
     "issuer": "https://gateway.example",
-    "audience": "toolgate-demo",
+    "audience": "caveat-demo",
     "start_unix": 1794873600,
     "policy_file": "config/policy.example.yaml",
     "policy_sha256": "8fce9026e625da739489f944929b4b0045fb3f188bd244fdcca30ae359429052",
-    "key_seed": "toolgate m3 demo key, not a secret",
+    "key_seed": "caveat m3 demo key, not a secret",
     "user_capabilities": [
       {
         "tool": "read_file",

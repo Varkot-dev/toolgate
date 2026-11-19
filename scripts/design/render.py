@@ -40,18 +40,18 @@ class Shot:
 def node_path() -> str:
     """The node_modules directory that holds the Node.js `playwright` package.
 
-    In order: $TOOLGATE_NODE_PATH, $NODE_PATH, node_modules/ in the repo (as
+    In order: $CAVEAT_NODE_PATH, $NODE_PATH, node_modules/ in the repo (as
     made by `npm i -D playwright`), then the preinstalled FALLBACK_NODE_MODULES.
     An environment variable is used only if the package is actually in it.
     """
-    candidates = [os.environ.get("TOOLGATE_NODE_PATH"), os.environ.get("NODE_PATH")]
+    candidates = [os.environ.get("CAVEAT_NODE_PATH"), os.environ.get("NODE_PATH")]
     candidates += [str(ROOT / "node_modules"), str(FALLBACK_NODE_MODULES)]
     for directory in filter(None, candidates):
         if (Path(directory) / "playwright").is_dir():
             return directory
     raise SystemExit(
         "Node.js Playwright not found: run `npm i -D playwright` and "
-        "`npx playwright install chromium` in the repo root, or set TOOLGATE_NODE_PATH "
+        "`npx playwright install chromium` in the repo root, or set CAVEAT_NODE_PATH "
         "to the node_modules directory that contains it"
     )
 

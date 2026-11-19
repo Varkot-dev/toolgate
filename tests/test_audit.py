@@ -18,7 +18,7 @@ import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
 
-from toolgate.audit import (
+from caveat.audit import (
     FIELDS,
     GENESIS,
     MAX_LINE_BYTES,
@@ -33,7 +33,7 @@ from toolgate.audit import (
     main,
     verify,
 )
-from toolgate.capability import Call
+from caveat.capability import Call
 
 T0 = 1_800_000_000_000_000_000
 SAMPLES = [
@@ -647,7 +647,7 @@ def test_cli_as_a_module(ten: tuple[Path, list[bytes], Head]) -> None:
     path, lines, head = ten
 
     def run(*args: str) -> subprocess.CompletedProcess:
-        cmd = [sys.executable, "-m", "toolgate.audit", "verify", str(path), *args]
+        cmd = [sys.executable, "-m", "caveat.audit", "verify", str(path), *args]
         return subprocess.run(cmd, capture_output=True, text=True, timeout=60)
 
     good = run("--head", head.hash)
@@ -913,7 +913,7 @@ def test_a5_cli_survives_a_closed_pipe(tmp_path: Path, damage: bool, code: int) 
     build(path, 3)
     if damage:
         rewrite(path, lines_of(path)[1:])
-    cmd = [sys.executable, "-m", "toolgate.audit", "verify", str(path)]
+    cmd = [sys.executable, "-m", "caveat.audit", "verify", str(path)]
     # `verify log | true`: the reader is gone before anything is printed
     proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     assert proc.stdout is not None and proc.stderr is not None

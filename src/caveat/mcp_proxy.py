@@ -1,6 +1,6 @@
 """MCP proxy mode: the gateway in front of a real MCP server (plan section 3.6).
 
-An MCP client connects to this proxy instead of to the server, with a toolgate
+An MCP client connects to this proxy instead of to the server, with a caveat
 token as its bearer credential. The proxy reduces `tools/list` to what that
 token can use, runs every `tools/call` through `Gateway.handle_call`, and only
 then forwards the call to the upstream server over its own connection.
@@ -17,7 +17,7 @@ A tool is VISIBLE to a token iff all of these hold:
 
   1. its name is one the proxy was started with (`tool_names`), which also
      means the name matches the gateway's tool-name alphabet
-     [A-Za-z0-9_.:/-]{1,128} and is not the reserved `toolgate_approval_status`;
+     [A-Za-z0-9_.:/-]{1,128} and is not the reserved `caveat_approval_status`;
   2. the token's grant has a capability whose tool is exactly that name, and
      the grant has not expired;
   3. operator policy does not deny the tool outright. "Outright" is decided
@@ -32,7 +32,7 @@ A tool is VISIBLE to a token iff all of these hold:
      the grant names; it never lists a tool the grant does not name.
 
 `tools/list` returns the upstream page filtered to visible tools, plus the
-proxy's own `toolgate_approval_status` on the first page. Listing never
+proxy's own `caveat_approval_status` on the first page. Listing never
 decides anything: a listed tool is still checked in full on every call.
 
 What a call turns into
@@ -61,7 +61,7 @@ on the exact arguments, policy, approval, budget, audit entry, then the tool.
       output over the limit)                       reason, in the detail the gateway allows
 
 An upstream failure is not an exception inside the gateway: the forwarding
-callable returns a small envelope built by the proxy ({"toolgate_upstream":
+callable returns a small envelope built by the proxy ({"caveat_upstream":
 "failed", "message": ...}), so the agent's message does not depend on the
 gateway's `tool_error_detail` setting, and the proxy never parses gateway
 text. The decision was "allow" and was logged before the call went out.
@@ -86,7 +86,7 @@ Approvals
 ---------
 
 A parked call returns at once. The agent polls with the proxy's own tool
-`toolgate_approval_status(approval_id)`, which is visible to every valid
+`caveat_approval_status(approval_id)`, which is visible to every valid
 token. It is exempt from grant, policy and budget, and it writes no audit
 entry: it runs nothing and releases nothing new. It only reads a record that
 the caller's own token created (`Gateway.get_approval` compares the token),
@@ -168,7 +168,7 @@ Limits, stated plainly
     them. The proxy controls which calls happen, not what the text says.
   * Requests refused with HTTP 401 are logged (with a fingerprint, never the
     token) but are not in the audit log, which records decisions on calls.
-  * toolgate is not an OAuth authorization server. The metadata document
+  * caveat is not an OAuth authorization server. The metadata document
     names the token issuer, but there is no OAuth discovery or client
     registration behind it; tokens come from the gateway's own endpoints.
   * `Gateway.handle_call` is synchronous, so each call occupies a worker
@@ -229,11 +229,11 @@ from starlette.responses import JSONResponse, Response
 from starlette.routing import Route
 from starlette.types import ASGIApp, Receive, Scope, Send
 
-from toolgate.approvals import PENDING as APPROVAL_PENDING
-from toolgate.approvals import ApprovalError, ApprovalQueue
-from toolgate.audit import AuditLog
-from toolgate.constraints import glob_match
-from toolgate.gateway import (
+from caveat.approvals import PENDING as APPROVAL_PENDING
+from caveat.approvals import ApprovalError, ApprovalQueue
+from caveat.audit import AuditLog
+from caveat.constraints import glob_match
+from caveat.gateway import (
     ALLOWED,
     DENIED,
     ERROR,
@@ -245,14 +245,14 @@ from toolgate.gateway import (
     loggable_tool,
     token_fingerprint,
 )
-from toolgate.policy import ALLOW, APPROVE, DENY, Policy
-from toolgate.tokens import Authority, TokenError, Verified
+from caveat.policy import ALLOW, APPROVE, DENY, Policy
+from caveat.tokens import Authority, TokenError, Verified
 
 logger = logging.getLogger(__name__)
 
-PROXY_NAME = "toolgate-mcp-proxy"
+PROXY_NAME = "caveat-mcp-proxy"
 PROXY_VERSION = "0.0.1"
-APPROVAL_TOOL = "toolgate_approval_status"
+APPROVAL_TOOL = "caveat_approval_status"
 
 DEFAULT_LIST_TTL_MS = 5_000
 DEFAULT_UPSTREAM_TIMEOUT = 30.0
@@ -264,10 +264,10 @@ MAX_UPSTREAM_MESSAGE_CHARS = 1024
 MAX_FAILURE_CHARS = 2048
 
 # The envelope the forwarder hands the gateway (see `_upstream_result`).
-OUTCOME_KEY, OK, FAILED = "toolgate_upstream", "ok", "failed"
+OUTCOME_KEY, OK, FAILED = "caveat_upstream", "ok", "failed"
 
 _APPROVAL_ID = re.compile(r"[A-Za-z0-9_-]{1,128}")
-_VERIFIED_CLAIM = "toolgate.verified"
+_VERIFIED_CLAIM = "caveat.verified"
 
 Upstream = str | Callable[[], Client]
 """Where the real MCP server is: a streamable-HTTP URL, or a function that
@@ -329,7 +329,7 @@ def _approval_tool() -> Tool:
         name=APPROVAL_TOOL,
         title="Approval status",
         description=(
-            "Check a tool call that toolgate parked for human approval. Give the approval id "
+            "Check a tool call that caveat parked for human approval. Give the approval id "
             "from the parked call. While a person has not decided, this says so; once they "
             "approve, it returns the result of the original call."
         ),
@@ -543,7 +543,7 @@ class McpProxy:
             PROXY_NAME,
             version=PROXY_VERSION,
             instructions=(
-                "Tool calls are authorized by toolgate. A refused call says why; do not repeat "
+                "Tool calls are authorized by caveat. A refused call says why; do not repeat "
                 f"it unchanged. A call waiting for human approval is polled with {APPROVAL_TOOL}."
             ),
             lifespan=self._lifespan,
@@ -906,7 +906,7 @@ class McpProxy:
                 "the result. Do not repeat the original call.",
                 is_error=False,
                 structured={
-                    "toolgate": "pending_approval",
+                    "caveat": "pending_approval",
                     "approval_id": outcome.approval_id,
                     "rule": outcome.rule,
                     "poll_with": APPROVAL_TOOL,
@@ -919,7 +919,7 @@ class McpProxy:
             return _text_result(
                 f"The call was authorized and sent, but it failed: {reason}",
                 is_error=True,
-                structured={"toolgate": "error", "reason": reason},
+                structured={"caveat": "error", "reason": reason},
             )
         if outcome.status != DENIED:  # no such status exists; refuse rather than guess
             raise MCPError(INTERNAL_ERROR, "Unexpected gateway outcome")
@@ -929,7 +929,7 @@ class McpProxy:
         if outcome.stage == "token":
             raise MCPError(INVALID_REQUEST, "The access token is no longer valid")
         if outcome.stage in ("unavailable", "audit"):
-            raise MCPError(INTERNAL_ERROR, "toolgate could not authorize the call; nothing was run")
+            raise MCPError(INTERNAL_ERROR, "caveat could not authorize the call; nothing was run")
         # A policy refusal is identified by its rule id; any other refusal by
         # the gateway's code (a capability decision code, "budget_exhausted",
         # "in_flight_limit"), when it gave one.
@@ -940,12 +940,12 @@ class McpProxy:
         else:
             which = ""
         return _text_result(
-            f"Denied by toolgate at the {outcome.stage} check{which}: "
+            f"Denied by caveat at the {outcome.stage} check{which}: "
             f"{outcome.reason.rstrip('.')}. "
             "The call did not run. Repeating it unchanged will be denied again.",
             is_error=True,
             structured={
-                "toolgate": "denied",
+                "caveat": "denied",
                 "stage": outcome.stage,
                 "reason": outcome.reason,
                 "rule": outcome.rule,
@@ -968,21 +968,21 @@ class McpProxy:
             record = await anyio.to_thread.run_sync(self.gateway.get_approval, approval_id, token)
         except TokenError as exc:
             if exc.code == "unavailable":
-                raise MCPError(INTERNAL_ERROR, "toolgate could not check the token") from None
+                raise MCPError(INTERNAL_ERROR, "caveat could not check the token") from None
             raise MCPError(INVALID_REQUEST, "The access token is no longer valid") from None
         except ApprovalError:
             # One answer for "no such id" and "not yours".
             return _text_result(
                 "No approval with that id belongs to this token.",
                 is_error=True,
-                structured={"toolgate": "approval_not_found"},
+                structured={"caveat": "approval_not_found"},
             )
         outcome = record.outcome
         if record.state == APPROVAL_PENDING:
             return _text_result(
                 "Still waiting for a person to decide. The call has not run. Check again later.",
                 is_error=False,
-                structured={"toolgate": "pending_approval", "approval_id": record.id},
+                structured={"caveat": "pending_approval", "approval_id": record.id},
             )
         if type(outcome) is CallOutcome and outcome.status == ALLOWED:
             return _upstream_result(outcome.result, "The call was approved and sent")
@@ -991,13 +991,13 @@ class McpProxy:
             return _text_result(
                 f"The call was approved and sent, but it failed: {reason}",
                 is_error=True,
-                structured={"toolgate": "error", "state": record.state, "reason": reason},
+                structured={"caveat": "error", "state": record.state, "reason": reason},
             )
         reason = outcome.reason if type(outcome) is CallOutcome else record.state
         return _text_result(
             f"The call did not run. Approval state: {record.state} ({reason}).",
             is_error=True,
-            structured={"toolgate": "denied", "state": record.state, "reason": reason},
+            structured={"caveat": "denied", "state": record.state, "reason": reason},
         )
 
 
@@ -1016,8 +1016,8 @@ def _upstream_result(data: Any, sent: str) -> CallToolResult:
     The forwarder returns one of two envelopes, both built by the proxy (the
     upstream's data only ever sits inside `content` and `structuredContent`):
 
-        {"toolgate_upstream": "ok", "content": [...], "structuredContent": ...}
-        {"toolgate_upstream": "failed", "message": "<bounded text by the proxy>"}
+        {"caveat_upstream": "ok", "content": [...], "structuredContent": ...}
+        {"caveat_upstream": "failed", "message": "<bounded text by the proxy>"}
 
     Anything else is withheld. `sent` starts the sentence for a failure.
     """
@@ -1032,7 +1032,7 @@ def _upstream_result(data: Any, sent: str) -> CallToolResult:
             return _text_result(
                 f"{sent}, but it failed: {reason}",
                 is_error=True,
-                structured={"toolgate": "error", "reason": reason},
+                structured={"caveat": "error", "reason": reason},
             )
         if data.get(OUTCOME_KEY) != OK or set(data) - {OUTCOME_KEY, "content", "structuredContent"}:
             raise ValueError("unexpected shape")
@@ -1181,20 +1181,20 @@ def create_proxy(
 def main(argv: list[str] | None = None) -> int:
     """Run the proxy from a gateway config file.
 
-    The config is the one `toolgate.server` reads. Its `audience` must be the
+    The config is the one `caveat.server` reads. Its `audience` must be the
     proxy's public MCP URL, and its `tools` section is ignored: the tools are
     the upstream's. The M3 admin API (approvals, revocation, minting, audit
     verification) is served under /admin on the same port, backed by the same
     Gateway, so a person can approve a parked call.
     """
-    from toolgate.server import ConfigError, build, create_app, load_config
+    from caveat.server import ConfigError, build, create_app, load_config
 
-    parser = argparse.ArgumentParser(prog="python -m toolgate.mcp_proxy")
+    parser = argparse.ArgumentParser(prog="python -m caveat.mcp_proxy")
     parser.add_argument("--config", default="config/gateway.example.yaml")
     parser.add_argument("--upstream", required=True, help="URL of the upstream MCP endpoint")
     parser.add_argument(
         "--upstream-auth-env",
-        default="TOOLGATE_UPSTREAM_AUTHORIZATION",
+        default="CAVEAT_UPSTREAM_AUTHORIZATION",
         help="environment variable holding the Authorization header value the PROXY sends "
         "upstream (its own credential); unset means none",
     )
@@ -1215,7 +1215,7 @@ def main(argv: list[str] | None = None) -> int:
         _, base, settings = build(config, os.environ, config_path.parent)
         admin_hash = os.environ[config["admin_key_hash_env"]].strip()
     except ConfigError as exc:
-        print(f"toolgate: cannot start: {exc}", file=sys.stderr)
+        print(f"caveat: cannot start: {exc}", file=sys.stderr)
         return 2
     try:
         names = [n for n in options.tools.split(",") if n] or asyncio.run(
@@ -1233,11 +1233,11 @@ def main(argv: list[str] | None = None) -> int:
             max_output_bytes=base.max_output_bytes,
         )
     except Exception as exc:
-        print(f"toolgate: cannot start: {type(exc).__name__}: {exc}", file=sys.stderr)
+        print(f"caveat: cannot start: {type(exc).__name__}: {exc}", file=sys.stderr)
         return 2
     proxy.app.mount("/admin", create_app(proxy.gateway, admin_hash))
     print(
-        f"toolgate: proxying {len(names)} tools at {proxy.resource_url}: {json.dumps(names)}",
+        f"caveat: proxying {len(names)} tools at {proxy.resource_url}: {json.dumps(names)}",
         file=sys.stderr,
     )
     import uvicorn

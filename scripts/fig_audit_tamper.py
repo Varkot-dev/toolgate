@@ -1,6 +1,6 @@
 """Audit chain figure for M2: edit one entry and verification fails at that entry.
 
-Builds a real 8-entry log through toolgate.audit.AuditLog with a fixed clock,
+Builds a real 8-entry log through caveat.audit.AuditLog with a fixed clock,
 copies it, changes one field of entry 3 in the copy (leaving its stored hash
 alone), runs the real verify on both files, and writes
 
@@ -24,7 +24,7 @@ from pathlib import Path
 
 import style
 from design.render import Shot, render
-from toolgate.audit import AuditLog, canonical_json, verify
+from caveat.audit import AuditLog, canonical_json, verify
 
 T0_NS = 1_800_000_000 * 10**9  # fixed start time, one entry per second after it
 EDIT_INDEX, EDIT_FIELD, EDIT_VALUE = 3, "decision", "rejected"

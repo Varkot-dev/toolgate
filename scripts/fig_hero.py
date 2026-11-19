@@ -37,21 +37,21 @@ from PIL import Image
 
 import style
 from design.render import Shot, render
-from toolgate.approvals import ApprovalQueue
-from toolgate.audit import AuditLog, verify
-from toolgate.capability import Capability, Grant
-from toolgate.gateway import Gateway
-from toolgate.policy import Policy
-from toolgate.store import MemoryStore
-from toolgate.tokens import Authority
+from caveat.approvals import ApprovalQueue
+from caveat.audit import AuditLog, verify
+from caveat.capability import Capability, Grant
+from caveat.gateway import Gateway
+from caveat.policy import Policy
+from caveat.store import MemoryStore
+from caveat.tokens import Authority
 
 # ---------------------------------------------------------------- the real run
 
 POLICY_FILE = style.ROOT / "config" / "policy.example.yaml"
-KEY_SEED = "toolgate hero figure key, not a secret"
+KEY_SEED = "caveat hero figure key, not a secret"
 START = 1_794_873_600  # 2026-11-17 00:00:00 UTC
 ISSUER = "https://gateway.example"
-AUDIENCE = "toolgate-demo"
+AUDIENCE = "caveat-demo"
 ROOT_CAPS = [
     {"tool": "read_file", "args": {"path": {"glob": "reports/*"}}, "max_calls": 5},
     {"tool": "delete_file", "args": {"path": {"any": True}}, "max_calls": 1},

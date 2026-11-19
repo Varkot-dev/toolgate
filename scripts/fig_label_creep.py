@@ -1,6 +1,6 @@
 """Label creep figure for M4b: what provenance stops, and what it asks a person.
 
-Runs toolgate.sandbox.runner.label_creep() (scripted agents, not a language
+Runs caveat.sandbox.runner.label_creep() (scripted agents, not a language
 model), writes results/m4b_label_creep.json, then draws from that JSON (and
 results/m5_scripted.json, which it is checked against) only:
 
@@ -26,7 +26,7 @@ from typing import Any
 
 import style
 from design.render import Shot, render
-from toolgate.sandbox.runner import label_creep
+from caveat.sandbox.runner import label_creep
 
 # The configurations drawn, in order, with their row labels. Careful approver
 # throughout; the rubber-stamp variants and 1c stay in the JSON.

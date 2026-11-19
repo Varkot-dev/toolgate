@@ -1,4 +1,4 @@
-# Grants for the sandbox task suite (src/toolgate/sandbox/tasks.py), one per task:
+# Grants for the sandbox task suite (src/caveat/sandbox/tasks.py), one per task:
 # what a careful user would delegate for that one request and nothing more.
 #
 # How they were written, the same way for every task and before any run:
@@ -13,7 +13,7 @@
 #     needs; tools that only read get one extra call for a retry.
 #
 # A capability is closed-world: a call may carry only the arguments listed.
-# Format of one capability: Capability.from_dict in src/toolgate/capability.py.
+# Format of one capability: Capability.from_dict in src/caveat/capability.py.
 
 grants:
   # ------------------------------------------------------------------ benign

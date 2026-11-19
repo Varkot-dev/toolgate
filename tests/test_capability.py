@@ -4,7 +4,7 @@ import json
 
 import pytest
 
-from toolgate.capability import (
+from caveat.capability import (
     DECISION_CODES,
     MAX_ARG_NODES,
     MAX_ARGS_PER_LEVEL,
@@ -15,7 +15,7 @@ from toolgate.capability import (
     Decision,
     Grant,
 )
-from toolgate.constraints import Constraint
+from caveat.constraints import Constraint
 
 NAN = float("nan")
 INF = float("inf")

@@ -1,7 +1,7 @@
 """Delegation tree figure for M0: authority only shrinks down the chain.
 
 Builds four grants with the real library, validates every edge with
-toolgate.check_attenuation, adds one request the checker rejects, and writes
+caveat.check_attenuation, adds one request the checker rejects, and writes
 
     results/m0_delegation_tree.json
     assets/delegation_tree.png    2x, drawn from scripts/design/delegation_tree.html
@@ -18,7 +18,7 @@ import json
 
 import style
 from design.render import Shot, render
-from toolgate import Capability, Grant, check_attenuation
+from caveat import Capability, Grant, check_attenuation
 
 T0 = 1_800_000_000  # fixed "now" in epoch seconds, so the output never changes
 ADDRESSES = ("ana@x.com", "ben@x.com", "cy@x.com")

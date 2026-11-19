@@ -2,9 +2,9 @@
   "description": "Hero animation data: two real calls through the gateway with one token",
   "config": {
     "issuer": "https://gateway.example",
-    "audience": "toolgate-demo",
+    "audience": "caveat-demo",
     "start_unix": 1794873600,
-    "key_seed": "toolgate hero figure key, not a secret",
+    "key_seed": "caveat hero figure key, not a secret",
     "policy_file": "config/policy.example.yaml",
     "policy_sha256": "8fce9026e625da739489f944929b4b0045fb3f188bd244fdcca30ae359429052",
     "root_capabilities": [

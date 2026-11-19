@@ -18,7 +18,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from test_gateway import READ, SEND, T0, Env  # noqa: E402
-from toolgate.approvals import (  # noqa: E402
+from caveat.approvals import (  # noqa: E402
     APPROVED,
     DENIED,
     EXPIRED,
@@ -31,11 +31,11 @@ from toolgate.approvals import (  # noqa: E402
     request_hash,
     valid_name,
 )
-from toolgate.audit import canonical_json, hash_args, verify  # noqa: E402
-from toolgate.capability import Call, Capability, Grant  # noqa: E402
-from toolgate.gateway import CallOutcome  # noqa: E402
-from toolgate.policy import Policy  # noqa: E402
-from toolgate.tokens import TokenError  # noqa: E402
+from caveat.audit import canonical_json, hash_args, verify  # noqa: E402
+from caveat.capability import Call, Capability, Grant  # noqa: E402
+from caveat.gateway import CallOutcome  # noqa: E402
+from caveat.policy import Policy  # noqa: E402
+from caveat.tokens import TokenError  # noqa: E402
 
 EXTERNAL = {"to": "x@evil.test", "body": "hello"}
 INTERNAL = {"to": "bob@example.com", "body": "hello"}

@@ -1,4 +1,4 @@
-# toolgate: plan
+# caveat: plan
 
 An authorization gateway for LLM agents.
 

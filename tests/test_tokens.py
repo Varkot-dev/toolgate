@@ -21,9 +21,9 @@ from jwt import PyJWS
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from strategies import grants, scenarios  # noqa: E402
-from toolgate import Call, Capability, Constraint, Grant, check_attenuation  # noqa: E402
-from toolgate.store import MemoryStore, SqliteStore  # noqa: E402
-from toolgate.tokens import (  # noqa: E402
+from caveat import Call, Capability, Constraint, Grant, check_attenuation  # noqa: E402
+from caveat.store import MemoryStore, SqliteStore  # noqa: E402
+from caveat.tokens import (  # noqa: E402
     Authority,
     Authorization,
     EscalationError,
@@ -1833,7 +1833,7 @@ def test_an_oversized_child_request_is_refused_before_the_attenuation_check(requ
         calls.append(child)
         return check_attenuation(parent, child)
 
-    monkeypatch.setattr("toolgate.tokens.check_attenuation", spy)
+    monkeypatch.setattr("caveat.tokens.check_attenuation", spy)
     authority, _ = make()
     root = authority.mint("u", GRANT, "a0", ttl=300)
     with pytest.raises(TokenError) as info:

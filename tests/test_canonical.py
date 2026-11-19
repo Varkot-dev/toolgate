@@ -14,9 +14,9 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from hypothesis import given, settings
 from hypothesis import strategies as st
 
-from toolgate.approvals import ApprovalQueue
-from toolgate.audit import AuditLog, verify
-from toolgate.canonical import (
+from caveat.approvals import ApprovalQueue
+from caveat.audit import AuditLog, verify
+from caveat.canonical import (
     CODES,
     CanonicalError,
     Canonicalizer,
@@ -25,14 +25,14 @@ from toolgate.canonical import (
     canonical_tool,
     canonical_url,
 )
-from toolgate.capability import Capability, Grant
-from toolgate.gateway import ALLOWED, DENIED, PENDING, Gateway
-from toolgate.policy import Policy
-from toolgate.sandbox.agents import HijackedAgent
-from toolgate.sandbox.runner import configuration, run_task
-from toolgate.sandbox.tasks import GRANT_ARGS, attack_tasks
-from toolgate.store import MemoryStore
-from toolgate.tokens import Authority
+from caveat.capability import Capability, Grant
+from caveat.gateway import ALLOWED, DENIED, PENDING, Gateway
+from caveat.policy import Policy
+from caveat.sandbox.agents import HijackedAgent
+from caveat.sandbox.runner import configuration, run_task
+from caveat.sandbox.tasks import GRANT_ARGS, attack_tasks
+from caveat.store import MemoryStore
+from caveat.tokens import Authority
 
 T0 = 1_800_000_000
 KEY = Ed25519PrivateKey.from_private_bytes(bytes(range(32)))
@@ -441,6 +441,6 @@ def test_a_trailing_slash_is_refused_not_dropped(raw):
 def test_path_resolution_is_lexical_and_says_so():
     """normpath cannot see links: the documented limit, pinned so it cannot drift silently."""
     assert canonical_path("a/link/../b") == "a/b"
-    import toolgate.canonical as module
+    import caveat.canonical as module
 
     assert "symlink" in (module.__doc__ or "")

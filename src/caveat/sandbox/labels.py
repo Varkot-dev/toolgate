@@ -4,7 +4,7 @@ Written once, from the organization's point of view, before any provenance
 run, the way config/sandbox_policy.yaml was: it knows the directory layout and
 what each tool returns, not which tasks attack what.
 
-Initial labels (see toolgate.provenance for the rules that combine them)
+Initial labels (see caveat.provenance for the rules that combine them)
 
     the user's request              sources {user}, readers ANY
     read_inbox                      {tool:read_inbox, untrusted}; readers: the
@@ -63,10 +63,10 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
-from toolgate.canonical import Canonicalizer
-from toolgate.policy import Policy
-from toolgate.provenance import Label, join_all, tool_source
-from toolgate.sandbox.world import TOOLS, USER, result_is_untrusted
+from caveat.canonical import Canonicalizer
+from caveat.policy import Policy
+from caveat.provenance import Label, join_all, tool_source
+from caveat.sandbox.world import TOOLS, USER, result_is_untrusted
 
 ROOT = Path(__file__).resolve().parents[3]
 SESSION_POLICY_FILE = ROOT / "config" / "sandbox_policy_session.yaml"

@@ -2,13 +2,13 @@
 
 This runs the 26 sandbox tasks with a real model (`claude-sonnet-5-5`) as the agent, under three configurations: no gateway (0), grant plus policy with the careful approver (2), and configuration 2 plus session labels (3). It writes `results/m5_real_model.json`. It spends real money on your Anthropic API key, capped in code.
 
-How the harness works, and the exact rules for "attempted", "ignored" and "stopped", are in the docstring of `src/toolgate/sandbox/llm_agent.py`.
+How the harness works, and the exact rules for "attempted", "ignored" and "stopped", are in the docstring of `src/caveat/sandbox/llm_agent.py`.
 
 ## 1. Set up
 
 ```bash
-git clone https://github.com/Varkot-dev/toolgate
-cd toolgate                               # everything is on main
+git clone https://github.com/Varkot-dev/caveat
+cd caveat                               # everything is on main
 python3.11 -m venv .venv                  # 3.11 or newer
 source .venv/bin/activate
 pip install -e ".[dev,llm]"

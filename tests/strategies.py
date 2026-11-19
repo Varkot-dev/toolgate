@@ -25,7 +25,7 @@ from typing import Any, NamedTuple
 
 from hypothesis import strategies as st
 
-from toolgate import Call, Capability, Constraint, Grant
+from caveat import Call, Capability, Constraint, Grant
 
 TOOLS: tuple[str, ...] = ("read", "send", "pay")
 ARGS: tuple[str, ...] = ("x", "y", "z")

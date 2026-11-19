@@ -10,3 +10,12 @@ dist/
 config/audit.jsonl
 config/*.sqlite
 config/*.local.yaml
+
+# Secrets, local databases and logs, editor and OS files
+.env
+.env.*
+node_modules/
+*.sqlite
+*.db
+audit.jsonl
+.DS_Store

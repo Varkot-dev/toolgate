@@ -1,7 +1,7 @@
 """Real-model figure for M5: the attacks a real model fell for, and which setup stopped them.
 
 Reads only the two committed real-model results files (one pass each, written by
-scripts/m5_real_model_eval.py with the owner's API key; this script calls no model):
+scripts/m5_real_model_eval.py with an Anthropic API key; this script calls no model):
 
     results/m5_real_model.json            Claude Sonnet 5.5
     results/m5_real_model_haiku45.json    Claude Haiku 4.5

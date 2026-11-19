@@ -8,11 +8,10 @@ How the harness works, and the exact rules for "attempted", "ignored" and "stopp
 
 ```bash
 git clone https://github.com/Varkot-dev/toolgate
-cd toolgate
-git checkout claude/tender-euler-4c8w1h   # the branch this harness is on
+cd toolgate                               # everything is on main
 python3.11 -m venv .venv                  # 3.11 or newer
 source .venv/bin/activate
-pip install -e ".[dev,llm]"        # or: pip install -e ".[dev,llm]"
+pip install -e ".[dev,llm]"
 ```
 
 ## 2. Protect the key first
@@ -56,12 +55,13 @@ Tasks already in the file are skipped and not paid for again. A task that was cu
 
 ## 6. Send the results back
 
-Either commit and push the one file to the branch:
+Either commit the one file on a branch of your own and push it:
 
 ```bash
+git switch -c real-model-run
 git add results/m5_real_model.json
 git commit -m "Real-model M5 run"
-git push
+git push -u origin real-model-run
 ```
 
 or attach `results/m5_real_model.json` to a message. Check with `git status` that nothing else is staged.

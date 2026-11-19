@@ -3,10 +3,10 @@
 A template is an HTML file in this directory. It links system.css, marks
 icons as {{icon:NAME}} (inlined here from icons/, Lucide, ISC license) and
 reads its data from window.DATA, which this module injects. The page is
-captured by render.cjs, driven by the Node.js Playwright that ships with the
-environment (found through NODE_PATH, default /opt/node-tools/node_modules)
-and its pre-installed Chromium. Fonts come from fonts/ (OFL), never from the
-system, so output does not depend on what the machine has installed.
+captured by render.cjs with headless Chromium, driven by Node.js Playwright
+(Node 18 or later on PATH; see `node_path` for where the package is looked
+for). Fonts come from fonts/ (OFL), never from the system, so output does not
+depend on what the machine has installed.
 """
 
 from __future__ import annotations
@@ -21,7 +21,9 @@ from pathlib import Path
 from typing import Any
 
 DESIGN = Path(__file__).resolve().parent
-NODE_PATH = os.environ.get("NODE_PATH", "/opt/node-tools/node_modules")
+ROOT = DESIGN.parent.parent
+# The build environment's preinstalled copy; used only if nothing else is found.
+FALLBACK_NODE_MODULES = Path("/opt/node-tools/node_modules")
 WIDTH = 800  # CSS px: the README display width every figure is designed at
 
 
@@ -33,6 +35,25 @@ class Shot:
     t: float | None = None
     scale: float = 2
     square: bool = False  # square stage corners, for formats without alpha (GIF)
+
+
+def node_path() -> str:
+    """The node_modules directory that holds the Node.js `playwright` package.
+
+    In order: $TOOLGATE_NODE_PATH, $NODE_PATH, node_modules/ in the repo (as
+    made by `npm i -D playwright`), then the preinstalled FALLBACK_NODE_MODULES.
+    An environment variable is used only if the package is actually in it.
+    """
+    candidates = [os.environ.get("TOOLGATE_NODE_PATH"), os.environ.get("NODE_PATH")]
+    candidates += [str(ROOT / "node_modules"), str(FALLBACK_NODE_MODULES)]
+    for directory in filter(None, candidates):
+        if (Path(directory) / "playwright").is_dir():
+            return directory
+    raise SystemExit(
+        "Node.js Playwright not found: run `npm i -D playwright` and "
+        "`npx playwright install chromium` in the repo root, or set TOOLGATE_NODE_PATH "
+        "to the node_modules directory that contains it"
+    )
 
 
 def icon(name: str) -> str:
@@ -61,7 +82,7 @@ def render(template: str, data: dict[str, Any], shots: list[Shot]) -> None:
         job.write_text(
             json.dumps({"html": str(page), "width": WIDTH, "shots": [asdict(s) for s in shots]})
         )
-        env = {**os.environ, "NODE_PATH": NODE_PATH}
+        env = {**os.environ, "NODE_PATH": node_path()}
         done = subprocess.run(
             ["node", str(DESIGN / "render.cjs"), str(job)],
             env=env,

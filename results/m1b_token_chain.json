@@ -2,7 +2,7 @@
   "construction": "HMAC chain (construction 1)",
   "now": 1800000000,
   "identifier": "demo-token-1",
-  "root_key_hex_demo_only": "746f6f6c67617465206d316220666967757265206b65792c2064656d6f212121",
+  "root_key_hex_demo_only": "636176656174206d316220666967757265206b65792c20612064656d6f212121",
   "grant": {
     "capabilities": [
       {
@@ -36,8 +36,8 @@
       "added": null,
       "signature_rule": "sig0 = HMAC-SHA256(root key, tag + canonical(identifier, grant))",
       "caveats": [],
-      "signature_hex": "2864a5e7fefc52ff07c86e70a81960e3f3b70cce90e42116f44eff52b6071107",
-      "token": "tgm1.eyJncmFudCI6eyJjYXBhYmlsaXRpZXMiOlt7ImNvbnN0cmFpbnRzIjpbeyJhcmciOiJwYXRoIiwib3AiOiJnbG9iIiwidmFsdWUiOiJyZXBvcnRzLyoifV0sIm1heF9jYWxscyI6bnVsbCwidG9vbCI6InJlYWRfZmlsZSJ9LHsiY29uc3RyYWludHMiOlt7ImFyZyI6InRvIiwib3AiOiJpbiIsInZhbHVlIjpbImFuYUB4LmNvbSIsImJlbkB4LmNvbSJdfSx7ImFyZyI6ImJvZHkiLCJvcCI6ImFueSJ9XSwibWF4X2NhbGxzIjpudWxsLCJ0b29sIjoic2VuZF9lbWFpbCJ9XSwiZXhwaXJlc19hdCI6MTgwMDAwMzYwMH0sImlkIjoiZGVtby10b2tlbi0xIn0.KGSl5_78Uv8HyG5wqBlg4_O3DM6Q5CEW9E7_UrYHEQc",
+      "signature_hex": "710955200a4fda05b7e2b8e26cb67e6bd371c557d985dd155506f3a20cfd1963",
+      "token": "tgm1.eyJncmFudCI6eyJjYXBhYmlsaXRpZXMiOlt7ImNvbnN0cmFpbnRzIjpbeyJhcmciOiJwYXRoIiwib3AiOiJnbG9iIiwidmFsdWUiOiJyZXBvcnRzLyoifV0sIm1heF9jYWxscyI6bnVsbCwidG9vbCI6InJlYWRfZmlsZSJ9LHsiY29uc3RyYWludHMiOlt7ImFyZyI6InRvIiwib3AiOiJpbiIsInZhbHVlIjpbImFuYUB4LmNvbSIsImJlbkB4LmNvbSJdfSx7ImFyZyI6ImJvZHkiLCJvcCI6ImFueSJ9XSwibWF4X2NhbGxzIjpudWxsLCJ0b29sIjoic2VuZF9lbWFpbCJ9XSwiZXhwaXJlc19hdCI6MTgwMDAwMzYwMH0sImlkIjoiZGVtby10b2tlbi0xIn0.cQlVIApP2gW34rjibLZ-a9NxxVfZhd0VVQbzogz9GWM",
       "token_chars": 464,
       "sample_calls": [
         {
@@ -99,8 +99,8 @@
           "type": "arg"
         }
       ],
-      "signature_hex": "f9f492bb519bd7c394309567fb6b9a7e417100f1a343173342916984535ad065",
-      "token": "tgm1.eyJncmFudCI6eyJjYXBhYmlsaXRpZXMiOlt7ImNvbnN0cmFpbnRzIjpbeyJhcmciOiJwYXRoIiwib3AiOiJnbG9iIiwidmFsdWUiOiJyZXBvcnRzLyoifV0sIm1heF9jYWxscyI6bnVsbCwidG9vbCI6InJlYWRfZmlsZSJ9LHsiY29uc3RyYWludHMiOlt7ImFyZyI6InRvIiwib3AiOiJpbiIsInZhbHVlIjpbImFuYUB4LmNvbSIsImJlbkB4LmNvbSJdfSx7ImFyZyI6ImJvZHkiLCJvcCI6ImFueSJ9XSwibWF4X2NhbGxzIjpudWxsLCJ0b29sIjoic2VuZF9lbWFpbCJ9XSwiZXhwaXJlc19hdCI6MTgwMDAwMzYwMH0sImlkIjoiZGVtby10b2tlbi0xIn0.eyJjb25zdHJhaW50Ijp7ImFyZyI6InRvIiwib3AiOiJlcSIsInZhbHVlIjoiYW5hQHguY29tIn0sInRvb2wiOiJzZW5kX2VtYWlsIiwidHlwZSI6ImFyZyJ9.-fSSu1Gb18OUMJVn-2uafkFxAPGjQxczQpFphFNa0GU",
+      "signature_hex": "e16f2135ba467a1ae6d08e935831b8f45b577f102c50a9f1cdd09b50f283e977",
+      "token": "tgm1.eyJncmFudCI6eyJjYXBhYmlsaXRpZXMiOlt7ImNvbnN0cmFpbnRzIjpbeyJhcmciOiJwYXRoIiwib3AiOiJnbG9iIiwidmFsdWUiOiJyZXBvcnRzLyoifV0sIm1heF9jYWxscyI6bnVsbCwidG9vbCI6InJlYWRfZmlsZSJ9LHsiY29uc3RyYWludHMiOlt7ImFyZyI6InRvIiwib3AiOiJpbiIsInZhbHVlIjpbImFuYUB4LmNvbSIsImJlbkB4LmNvbSJdfSx7ImFyZyI6ImJvZHkiLCJvcCI6ImFueSJ9XSwibWF4X2NhbGxzIjpudWxsLCJ0b29sIjoic2VuZF9lbWFpbCJ9XSwiZXhwaXJlc19hdCI6MTgwMDAwMzYwMH0sImlkIjoiZGVtby10b2tlbi0xIn0.eyJjb25zdHJhaW50Ijp7ImFyZyI6InRvIiwib3AiOiJlcSIsInZhbHVlIjoiYW5hQHguY29tIn0sInRvb2wiOiJzZW5kX2VtYWlsIiwidHlwZSI6ImFyZyJ9.4W8hNbpGehrm0I6TWDG49FtXfxAsUKnxzdCbUPKD6Xc",
       "token_chars": 585,
       "sample_calls": [
         {
@@ -165,8 +165,8 @@
           "type": "tools"
         }
       ],
-      "signature_hex": "506a7a90a4e5d7ecf2cd093901ea1e2cf3e5777d394c8e9a8bc6f0adf544e6f6",
-      "token": "tgm1.eyJncmFudCI6eyJjYXBhYmlsaXRpZXMiOlt7ImNvbnN0cmFpbnRzIjpbeyJhcmciOiJwYXRoIiwib3AiOiJnbG9iIiwidmFsdWUiOiJyZXBvcnRzLyoifV0sIm1heF9jYWxscyI6bnVsbCwidG9vbCI6InJlYWRfZmlsZSJ9LHsiY29uc3RyYWludHMiOlt7ImFyZyI6InRvIiwib3AiOiJpbiIsInZhbHVlIjpbImFuYUB4LmNvbSIsImJlbkB4LmNvbSJdfSx7ImFyZyI6ImJvZHkiLCJvcCI6ImFueSJ9XSwibWF4X2NhbGxzIjpudWxsLCJ0b29sIjoic2VuZF9lbWFpbCJ9XSwiZXhwaXJlc19hdCI6MTgwMDAwMzYwMH0sImlkIjoiZGVtby10b2tlbi0xIn0.eyJjb25zdHJhaW50Ijp7ImFyZyI6InRvIiwib3AiOiJlcSIsInZhbHVlIjoiYW5hQHguY29tIn0sInRvb2wiOiJzZW5kX2VtYWlsIiwidHlwZSI6ImFyZyJ9.eyJ0b29scyI6WyJyZWFkX2ZpbGUiXSwidHlwZSI6InRvb2xzIn0.UGp6kKTl1-zyzQk5AeoeLPPld305TI6ai8bwrfVE5vY",
+      "signature_hex": "4f657693970221876a62cd50b2d7c6680ed937e904afee57a8c0d55d029ce0d5",
+      "token": "tgm1.eyJncmFudCI6eyJjYXBhYmlsaXRpZXMiOlt7ImNvbnN0cmFpbnRzIjpbeyJhcmciOiJwYXRoIiwib3AiOiJnbG9iIiwidmFsdWUiOiJyZXBvcnRzLyoifV0sIm1heF9jYWxscyI6bnVsbCwidG9vbCI6InJlYWRfZmlsZSJ9LHsiY29uc3RyYWludHMiOlt7ImFyZyI6InRvIiwib3AiOiJpbiIsInZhbHVlIjpbImFuYUB4LmNvbSIsImJlbkB4LmNvbSJdfSx7ImFyZyI6ImJvZHkiLCJvcCI6ImFueSJ9XSwibWF4X2NhbGxzIjpudWxsLCJ0b29sIjoic2VuZF9lbWFpbCJ9XSwiZXhwaXJlc19hdCI6MTgwMDAwMzYwMH0sImlkIjoiZGVtby10b2tlbi0xIn0.eyJjb25zdHJhaW50Ijp7ImFyZyI6InRvIiwib3AiOiJlcSIsInZhbHVlIjoiYW5hQHguY29tIn0sInRvb2wiOiJzZW5kX2VtYWlsIiwidHlwZSI6ImFyZyJ9.eyJ0b29scyI6WyJyZWFkX2ZpbGUiXSwidHlwZSI6InRvb2xzIn0.T2V2k5cCIYdqYs1QstfGaA7ZN-kEr-5XqMDVXQKc4NU",
       "token_chars": 637,
       "sample_calls": [
         {
@@ -243,8 +243,8 @@
           "type": "arg"
         }
       ],
-      "signature_hex": "6e3710e45bc73211d4ecc7637b298d44a575b41d3dc988a6c71970f11e797b3c",
-      "token": "tgm1.eyJncmFudCI6eyJjYXBhYmlsaXRpZXMiOlt7ImNvbnN0cmFpbnRzIjpbeyJhcmciOiJwYXRoIiwib3AiOiJnbG9iIiwidmFsdWUiOiJyZXBvcnRzLyoifV0sIm1heF9jYWxscyI6bnVsbCwidG9vbCI6InJlYWRfZmlsZSJ9LHsiY29uc3RyYWludHMiOlt7ImFyZyI6InRvIiwib3AiOiJpbiIsInZhbHVlIjpbImFuYUB4LmNvbSIsImJlbkB4LmNvbSJdfSx7ImFyZyI6ImJvZHkiLCJvcCI6ImFueSJ9XSwibWF4X2NhbGxzIjpudWxsLCJ0b29sIjoic2VuZF9lbWFpbCJ9XSwiZXhwaXJlc19hdCI6MTgwMDAwMzYwMH0sImlkIjoiZGVtby10b2tlbi0xIn0.eyJjb25zdHJhaW50Ijp7ImFyZyI6InRvIiwib3AiOiJlcSIsInZhbHVlIjoiYW5hQHguY29tIn0sInRvb2wiOiJzZW5kX2VtYWlsIiwidHlwZSI6ImFyZyJ9.eyJ0b29scyI6WyJyZWFkX2ZpbGUiXSwidHlwZSI6InRvb2xzIn0.eyJjb25zdHJhaW50Ijp7ImFyZyI6InBhdGgiLCJvcCI6Imdsb2IiLCJ2YWx1ZSI6InJlcG9ydHMvcTMvKiJ9LCJ0b29sIjoicmVhZF9maWxlIiwidHlwZSI6ImFyZyJ9.bjcQ5FvHMhHU7MdjeymNRKV1tB09yYimxxlw8R55ezw",
+      "signature_hex": "324d425017120947e6d51a0e60cae9dce69aa08da9e1f6743b73505a91b4a33e",
+      "token": "tgm1.eyJncmFudCI6eyJjYXBhYmlsaXRpZXMiOlt7ImNvbnN0cmFpbnRzIjpbeyJhcmciOiJwYXRoIiwib3AiOiJnbG9iIiwidmFsdWUiOiJyZXBvcnRzLyoifV0sIm1heF9jYWxscyI6bnVsbCwidG9vbCI6InJlYWRfZmlsZSJ9LHsiY29uc3RyYWludHMiOlt7ImFyZyI6InRvIiwib3AiOiJpbiIsInZhbHVlIjpbImFuYUB4LmNvbSIsImJlbkB4LmNvbSJdfSx7ImFyZyI6ImJvZHkiLCJvcCI6ImFueSJ9XSwibWF4X2NhbGxzIjpudWxsLCJ0b29sIjoic2VuZF9lbWFpbCJ9XSwiZXhwaXJlc19hdCI6MTgwMDAwMzYwMH0sImlkIjoiZGVtby10b2tlbi0xIn0.eyJjb25zdHJhaW50Ijp7ImFyZyI6InRvIiwib3AiOiJlcSIsInZhbHVlIjoiYW5hQHguY29tIn0sInRvb2wiOiJzZW5kX2VtYWlsIiwidHlwZSI6ImFyZyJ9.eyJ0b29scyI6WyJyZWFkX2ZpbGUiXSwidHlwZSI6InRvb2xzIn0.eyJjb25zdHJhaW50Ijp7ImFyZyI6InBhdGgiLCJvcCI6Imdsb2IiLCJ2YWx1ZSI6InJlcG9ydHMvcTMvKiJ9LCJ0b29sIjoicmVhZF9maWxlIiwidHlwZSI6ImFyZyJ9.Mk1CUBcSCUfm1RoOYMrp3OaaoI2p4fZ0O3NQWpG0oz4",
       "token_chars": 766,
       "sample_calls": [
         {
@@ -303,9 +303,9 @@
         "type": "tools"
       }
     ],
-    "signature_hex": "6e3710e45bc73211d4ecc7637b298d44a575b41d3dc988a6c71970f11e797b3c",
-    "signature_needed_hex": "506a7a90a4e5d7ecf2cd093901ea1e2cf3e5777d394c8e9a8bc6f0adf544e6f6",
-    "token": "tgm1.eyJncmFudCI6eyJjYXBhYmlsaXRpZXMiOlt7ImNvbnN0cmFpbnRzIjpbeyJhcmciOiJwYXRoIiwib3AiOiJnbG9iIiwidmFsdWUiOiJyZXBvcnRzLyoifV0sIm1heF9jYWxscyI6bnVsbCwidG9vbCI6InJlYWRfZmlsZSJ9LHsiY29uc3RyYWludHMiOlt7ImFyZyI6InRvIiwib3AiOiJpbiIsInZhbHVlIjpbImFuYUB4LmNvbSIsImJlbkB4LmNvbSJdfSx7ImFyZyI6ImJvZHkiLCJvcCI6ImFueSJ9XSwibWF4X2NhbGxzIjpudWxsLCJ0b29sIjoic2VuZF9lbWFpbCJ9XSwiZXhwaXJlc19hdCI6MTgwMDAwMzYwMH0sImlkIjoiZGVtby10b2tlbi0xIn0.eyJjb25zdHJhaW50Ijp7ImFyZyI6InRvIiwib3AiOiJlcSIsInZhbHVlIjoiYW5hQHguY29tIn0sInRvb2wiOiJzZW5kX2VtYWlsIiwidHlwZSI6ImFyZyJ9.eyJ0b29scyI6WyJyZWFkX2ZpbGUiXSwidHlwZSI6InRvb2xzIn0.bjcQ5FvHMhHU7MdjeymNRKV1tB09yYimxxlw8R55ezw",
+    "signature_hex": "324d425017120947e6d51a0e60cae9dce69aa08da9e1f6743b73505a91b4a33e",
+    "signature_needed_hex": "4f657693970221876a62cd50b2d7c6680ed937e904afee57a8c0d55d029ce0d5",
+    "token": "tgm1.eyJncmFudCI6eyJjYXBhYmlsaXRpZXMiOlt7ImNvbnN0cmFpbnRzIjpbeyJhcmciOiJwYXRoIiwib3AiOiJnbG9iIiwidmFsdWUiOiJyZXBvcnRzLyoifV0sIm1heF9jYWxscyI6bnVsbCwidG9vbCI6InJlYWRfZmlsZSJ9LHsiY29uc3RyYWludHMiOlt7ImFyZyI6InRvIiwib3AiOiJpbiIsInZhbHVlIjpbImFuYUB4LmNvbSIsImJlbkB4LmNvbSJdfSx7ImFyZyI6ImJvZHkiLCJvcCI6ImFueSJ9XSwibWF4X2NhbGxzIjpudWxsLCJ0b29sIjoic2VuZF9lbWFpbCJ9XSwiZXhwaXJlc19hdCI6MTgwMDAwMzYwMH0sImlkIjoiZGVtby10b2tlbi0xIn0.eyJjb25zdHJhaW50Ijp7ImFyZyI6InRvIiwib3AiOiJlcSIsInZhbHVlIjoiYW5hQHguY29tIn0sInRvb2wiOiJzZW5kX2VtYWlsIiwidHlwZSI6ImFyZyJ9.eyJ0b29scyI6WyJyZWFkX2ZpbGUiXSwidHlwZSI6InRvb2xzIn0.Mk1CUBcSCUfm1RoOYMrp3OaaoI2p4fZ0O3NQWpG0oz4",
     "verifier_error": "signature mismatch: the chain does not lead to this signature",
     "sample_calls": [
       {

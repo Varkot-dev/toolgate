@@ -9,7 +9,7 @@ The second half of this file is mutation testing: deliberately broken copies
 of the checker, each of which Hypothesis must catch. A property that cannot
 tell a broken checker from a correct one proves nothing.
 
-Set TOOLGATE_EXAMPLES to run fewer cases locally. The default is 10,000.
+Set CAVEAT_EXAMPLES to run fewer cases locally. The default is 10,000.
 """
 
 from __future__ import annotations
@@ -22,8 +22,7 @@ import pytest
 from hypothesis import HealthCheck, Phase, find, given, settings
 from hypothesis.errors import NoSuchExample
 
-from strategies import RawCall, Scenario, chains, grants, raw_calls, scenarios
-from toolgate import (
+from caveat import (
     AttenuationResult,
     Call,
     Capability,
@@ -31,10 +30,11 @@ from toolgate import (
     Grant,
     check_attenuation,
 )
+from strategies import RawCall, Scenario, chains, grants, raw_calls, scenarios
 
 Checker = Callable[[Grant, Grant], AttenuationResult]
 
-EXAMPLES = int(os.environ.get("TOOLGATE_EXAMPLES", "10000"))
+EXAMPLES = int(os.environ.get("CAVEAT_EXAMPLES", "10000"))
 MUTANT_BUDGET = 20000  # examples Hypothesis may spend looking for each counterexample
 MUTANT_SEED = 0
 
@@ -172,7 +172,7 @@ MUTANTS: dict[str, tuple[str, str]] = {
 
 
 def make_checker(mutation: str | None = None) -> Checker:
-    """A line-for-line copy of toolgate.attenuation with one switchable fault.
+    """A line-for-line copy of caveat.attenuation with one switchable fault.
 
     With mutation=None it must behave exactly like the real checker;
     test_reference_copy_matches_real_checker holds it to that, so a mutant is

@@ -2,10 +2,10 @@
   "description": "M1 token scenario: scripted, fixed clock, fixed key, no network",
   "config": {
     "issuer": "https://gateway.example",
-    "audience": "toolgate-demo",
+    "audience": "caveat-demo",
     "algorithm": "EdDSA (Ed25519)",
-    "key_seed": "toolgate m1 demo key, not a secret",
-    "public_key_hex": "d1a6560b5c7d16c323389e2fc2c7ed103060543315c88f20d4fa7354c3f8dd5f",
+    "key_seed": "caveat m1 demo key, not a secret",
+    "public_key_hex": "3971f5703cb39189770bd8552c500190cd9132c6536475bfba09f2f35bf22e1b",
     "start_unix": 1794873600,
     "max_depth": 4,
     "max_ttl_seconds": 900
@@ -332,7 +332,7 @@
   "tokens": {
     "orchestrator": {
       "iss": "https://gateway.example",
-      "aud": "toolgate-demo",
+      "aud": "caveat-demo",
       "sub": "user:alice",
       "act": {
         "sub": "orchestrator"
@@ -373,7 +373,7 @@
     },
     "researcher": {
       "iss": "https://gateway.example",
-      "aud": "toolgate-demo",
+      "aud": "caveat-demo",
       "sub": "user:alice",
       "act": {
         "sub": "researcher",
@@ -406,7 +406,7 @@
     },
     "summarizer": {
       "iss": "https://gateway.example",
-      "aud": "toolgate-demo",
+      "aud": "caveat-demo",
       "sub": "user:alice",
       "act": {
         "sub": "summarizer",
@@ -439,7 +439,7 @@
     },
     "long-lived": {
       "iss": "https://gateway.example",
-      "aud": "toolgate-demo",
+      "aud": "caveat-demo",
       "sub": "user:alice",
       "act": {
         "sub": "long-lived",
@@ -472,7 +472,7 @@
     },
     "scratch": {
       "iss": "https://gateway.example",
-      "aud": "toolgate-demo",
+      "aud": "caveat-demo",
       "sub": "user:alice",
       "act": {
         "sub": "scratch",
@@ -509,7 +509,7 @@
     },
     "intern": {
       "iss": "https://gateway.example",
-      "aud": "toolgate-demo",
+      "aud": "caveat-demo",
       "sub": "user:alice",
       "act": {
         "sub": "intern",

@@ -89,7 +89,7 @@ about entries after it.
 
 Command line:
 
-    python -m toolgate.audit verify <path> [--head HASH] [--checkpoint SEQ:HASH]
+    python -m caveat.audit verify <path> [--head HASH] [--checkpoint SEQ:HASH]
 
 prints `ok` or the first bad index, and exits nonzero on failure.
 """
@@ -118,7 +118,7 @@ try:  # POSIX only; on other systems the in-process lock is the only guard
 except ImportError:  # pragma: no cover
     fcntl = None  # type: ignore[assignment]
 
-GENESIS: str = hashlib.sha256(b"toolgate audit log v1").hexdigest()
+GENESIS: str = hashlib.sha256(b"caveat audit log v1").hexdigest()
 DECISIONS: frozenset[str] = frozenset({"allow", "deny", "approve", "approved", "rejected"})
 FIELDS: tuple[str, ...] = (
     "seq",
@@ -727,7 +727,7 @@ def _say(text: str) -> None:
 
 
 def main(argv: Sequence[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(prog="python -m toolgate.audit")
+    parser = argparse.ArgumentParser(prog="python -m caveat.audit")
     commands = parser.add_subparsers(dest="command", required=True)
     check = commands.add_parser(
         "verify", help="replay the hash chain and report the first bad entry"

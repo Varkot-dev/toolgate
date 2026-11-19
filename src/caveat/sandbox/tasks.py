@@ -47,8 +47,8 @@ from urllib.parse import quote, unquote, urlsplit
 
 import yaml
 
-from toolgate.capability import Capability, Grant
-from toolgate.sandbox.world import BOB, CAROL, DAN, ERIN, FRANK, World, base_world
+from caveat.capability import Capability, Grant
+from caveat.sandbox.world import BOB, CAROL, DAN, ERIN, FRANK, World, base_world
 
 GRANTS_FILE = Path(__file__).resolve().parents[3] / "config" / "sandbox_grants.yaml"
 
@@ -101,7 +101,7 @@ class Tpl:
     def to_wire(
         self, handles: Mapping[str, str], results: Mapping[str, Any]
     ) -> dict[str, Any] | None:
-        """The same argument as references (toolgate.provenance wire form), or None.
+        """The same argument as references (caveat.provenance wire form), or None.
 
         Used by agents that pass handles: each "{step.field}" becomes a
         reference to that step's stored result with the field selected; the

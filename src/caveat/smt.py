@@ -1,7 +1,7 @@
 """A Z3 model of the constraint language, used to verify the attenuation rules.
 
 This module is verification tooling, not part of the gateway's decision path.
-It needs the optional `z3-solver` dependency (`pip install toolgate[verify]`).
+It needs the optional `z3-solver` dependency (`pip install caveat[verify]`).
 
 The model. An argument value is one of four kinds:
 
@@ -44,8 +44,8 @@ from typing import Any
 
 import z3
 
-from toolgate.capability import Call, Capability, Grant
-from toolgate.constraints import Constraint
+from caveat.capability import Call, Capability, Grant
+from caveat.constraints import Constraint
 
 TIMEOUT_MS = 30_000
 

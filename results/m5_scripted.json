@@ -18,9 +18,9 @@
   "seed": 0,
   "clock_unix": 1794873600,
   "policy_file": "config/sandbox_policy.yaml",
-  "policy_sha256": "6f5f8e68dcf44dba9775536b25ff3f38890d19c9ab2d3a52649daa7fe7083da5",
+  "policy_sha256": "84ca1bcf87f5fb09752564b7570a8881ee5dbafcba7f1e1e49cbe70ad3edfc7c",
   "grants_file": "config/sandbox_grants.yaml",
-  "grants_sha256": "1460f4e9e00ebdb4ea2541c4bdf436978dbf2ce06d060b4e06532f76f8f37d61",
+  "grants_sha256": "108b85d035c31e0eb2660f1c879f5b935fe7bef451486ed63040efc397946bd0",
   "tasks": [
     {
       "id": "benign-01",

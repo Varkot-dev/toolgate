@@ -1,6 +1,6 @@
 """Prove the attenuation rules with Z3 and write results/m0b_rules.json.
 
-Runs every lemma in toolgate.proofs (each must be unsat), every wrong variant
+Runs every lemma in caveat.proofs (each must be unsat), every wrong variant
 (each must be sat, with the solver's counterexample recorded) and the premise
 check of every lemma (each must be sat). Exits non-zero if any of them comes
 back otherwise, including `unknown`.
@@ -19,7 +19,7 @@ from pathlib import Path
 
 import z3
 
-from toolgate import proofs
+from caveat import proofs
 
 ROOT = Path(__file__).resolve().parent.parent
 

@@ -28,10 +28,9 @@ import uvicorn
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-import toolgate.server as server_module  # noqa: E402
-from test_gateway import Blocker, Env  # noqa: E402
-from toolgate.audit import verify  # noqa: E402
-from toolgate.server import (  # noqa: E402
+import caveat.server as server_module  # noqa: E402
+from caveat.audit import verify  # noqa: E402
+from caveat.server import (  # noqa: E402
     ConfigError,
     build,
     create_app,
@@ -41,6 +40,7 @@ from toolgate.server import (  # noqa: E402
     safe_text,
     strict_json,
 )
+from test_gateway import Blocker, Env  # noqa: E402
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -873,8 +873,8 @@ def test_config_errors_fail_closed(tmp_path: Path) -> None:
     bad_configs = [
         {**config, "signing_key_env": "literal secret, not a variable name"},
         {**config, "policy_file": "missing.yaml"},
-        {**config, "tools": {"echo": "toolgate.server:nope"}},
-        {**config, "tools": {"bad name": "toolgate.server:echo"}},
+        {**config, "tools": {"echo": "caveat.server:nope"}},
+        {**config, "tools": {"bad name": "caveat.server:echo"}},
         {**config, "store": {"kind": "redis"}},
         {**config, "approvals": {"ttl_seconds": 0}},
         {**config, "approvals": {"surprise": 1}},
@@ -1248,10 +1248,10 @@ def test_build_does_not_follow_a_symlinked_audit_log(tmp_path: Path) -> None:
 
 def test_build_creates_a_private_store_file_and_refuses_a_shared_one(tmp_path: Path) -> None:
     config = load_config(example_config(tmp_path))
-    config = {**config, "store": {"kind": "sqlite", "path": "toolgate.sqlite"}}
+    config = {**config, "store": {"kind": "sqlite", "path": "caveat.sqlite"}}
     _, gateway, _ = build(config, good_environ(config), tmp_path)
     close(gateway)
-    store_file = tmp_path / "toolgate.sqlite"
+    store_file = tmp_path / "caveat.sqlite"
     assert store_file.stat().st_mode & 0o777 == 0o600
     assert (tmp_path / "audit.jsonl").stat().st_mode & 0o777 == 0o600
     os.chmod(store_file, 0o644)

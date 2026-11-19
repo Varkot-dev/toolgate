@@ -30,15 +30,15 @@ from typing import Any
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
-from toolgate import Call, Capability, Grant
-from toolgate.store import MemoryStore
-from toolgate.tokens import Authority, EscalationError, TokenError
+from caveat import Call, Capability, Grant
+from caveat.store import MemoryStore
+from caveat.tokens import Authority, EscalationError, TokenError
 
 ROOT = Path(__file__).resolve().parent.parent
-KEY_SEED = "toolgate m1 demo key, not a secret"
+KEY_SEED = "caveat m1 demo key, not a secret"
 START = 1_794_873_600  # 2026-11-17 00:00:00 UTC
 ISSUER = "https://gateway.example"
-AUDIENCE = "toolgate-demo"
+AUDIENCE = "caveat-demo"
 USER = "user:alice"
 
 

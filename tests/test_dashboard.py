@@ -22,16 +22,16 @@ from fastapi.testclient import TestClient
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from test_gateway import Env  # noqa: E402
-from toolgate.audit import FIELDS, verify  # noqa: E402
-from toolgate.dashboard import (  # noqa: E402
+from caveat.audit import FIELDS, verify  # noqa: E402
+from caveat.dashboard import (  # noqa: E402
     COOKIE,
     CSP,
     Sessions,
     mount_dashboard,
     tamper_demo,
 )
-from toolgate.server import ConfigError, build, create_app, hash_admin_key, load_config  # noqa: E402
+from caveat.server import ConfigError, build, create_app, hash_admin_key, load_config  # noqa: E402
+from test_gateway import Env  # noqa: E402
 
 ROOT = Path(__file__).resolve().parent.parent
 EXTERNAL_MAIL = {"to": "kim@partner.org", "body": "<script>alert('arg')</script> Q3 notes"}
@@ -485,7 +485,7 @@ def test_security_headers_are_on_every_dashboard_response(dash: Dash) -> None:
 
 
 def test_vendored_fonts_and_icons_are_served_from_the_app(dash: Dash) -> None:
-    static = ROOT / "src" / "toolgate" / "static"
+    static = ROOT / "src" / "caveat" / "static"
     expected = {
         "plus-jakarta-sans-latin-500-normal.woff2": "font/woff2",
         "plus-jakarta-sans-latin-700-normal.woff2": "font/woff2",

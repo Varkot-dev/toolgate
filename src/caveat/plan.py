@@ -39,7 +39,7 @@ It can never add a call, remove a call that does not depend on an extracted
 value, change a tool, or change a literal argument.
 
 What is modeled and what is not. The planner and extractor here are
-deterministic functions (toolgate.sandbox.plans), not models: the planner is
+deterministic functions (caveat.sandbox.plans), not models: the planner is
 written per task from the request alone, the extractor returns what an
 accurate model would, and a "fooled" extractor returns the attacker's text
 whenever its input contains the injection. This shows the mechanism, not how
@@ -57,7 +57,7 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from typing import Any
 
-from toolgate.canonical import CanonicalError, canonical_email, canonical_path, canonical_url
+from caveat.canonical import CanonicalError, canonical_email, canonical_path, canonical_url
 
 TEXT, EMAIL, DATE, ID, URL, PATH = "text", "email", "date", "id", "url", "path"
 SCHEMAS = frozenset({TEXT, EMAIL, DATE, ID, URL, PATH})

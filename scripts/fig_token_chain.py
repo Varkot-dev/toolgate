@@ -1,7 +1,7 @@
 """Token chain figure for M1b: a token gains restrictions offline, and none can be dropped.
 
 Issues one HMAC chain token with the real library and a fixed demo root key,
-appends three caveats with toolgate.chain.attenuate (no key, no authority),
+appends three caveats with caveat.chain.attenuate (no key, no authority),
 asks the real verifier about four sample calls at every step, then removes
 the last caveat the way an attacker would and records the verifier's error.
 Writes
@@ -22,9 +22,8 @@ import json
 from dataclasses import replace
 
 import style
-from design.render import Shot, render
-from toolgate import Call, Capability, Constraint, Grant
-from toolgate.chain import (
+from caveat import Call, Capability, Constraint, Grant
+from caveat.chain import (
     ArgCaveat,
     ChainError,
     HmacAuthority,
@@ -33,10 +32,11 @@ from toolgate.chain import (
     attenuate,
     encode_caveat,
 )
+from design.render import Shot, render
 
 T0 = 1_800_000_000  # fixed "now" in epoch seconds, so the output never changes
 # A demo key, published here on purpose so the figure is reproducible. Never a real key.
-ROOT_KEY = bytes.fromhex("746f6f6c67617465206d316220666967757265206b65792c2064656d6f212121")
+ROOT_KEY = bytes.fromhex("636176656174206d316220666967757265206b65792c20612064656d6f212121")
 IDENTIFIER = "demo-token-1"
 
 GRANT = Grant(

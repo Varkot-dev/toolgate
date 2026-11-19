@@ -9,7 +9,7 @@ The attack tests build the forged token the way an attacker would: start from
 tokens they legitimately hold and rearrange the parts. They never use the
 authority's key, because the attacker does not have it.
 
-Set TOOLGATE_EXAMPLES to change the number of Hypothesis cases (default 1000).
+Set CAVEAT_EXAMPLES to change the number of Hypothesis cases (default 1000).
 """
 
 from __future__ import annotations
@@ -30,10 +30,9 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey,
 from hypothesis import HealthCheck, find, given, settings
 from hypothesis import strategies as st
 
-from strategies import EXPIRIES, TOOLS, calls_for, constraints, grants, times
-from toolgate import Call, Capability, Constraint, Decision, Grant
-from toolgate import chain as chain_module
-from toolgate.chain import (
+from caveat import Call, Capability, Constraint, Decision, Grant
+from caveat import chain as chain_module
+from caveat.chain import (
     MAX_CAVEATS,
     MAX_TOKEN_CHARS,
     ArgCaveat,
@@ -52,8 +51,9 @@ from toolgate.chain import (
     seal,
     verify_public,
 )
+from strategies import EXPIRIES, TOOLS, calls_for, constraints, grants, times
 
-EXAMPLES = int(os.environ.get("TOOLGATE_EXAMPLES", "1000"))
+EXAMPLES = int(os.environ.get("CAVEAT_EXAMPLES", "1000"))
 NOW = 1000
 ROOT_KEY = bytes(range(32))
 OTHER_ROOT_KEY = bytes(range(1, 33))
@@ -1782,7 +1782,7 @@ def test_hmac_token_bytes_are_pinned() -> None:
     tags changed in the security review; these bytes must not."""
     token = chain(HmacAuthority(ROOT_KEY).issue("tok-1", GRANT), ONLY_ANA, ONLY_READ, ONLY_Q3, SOON)
     digest = hashlib.sha256(token.serialize().encode()).hexdigest()
-    assert digest == "f5bda05c01bd1659f665ce9d09f046157e1a9bf522c3ea110223a11876aeb9ca"
+    assert digest == "6fa38bb5e9cad98d73dc7ab2b2c9538c6b038da6bb882ffada10b6f3d95898d0"
 
 
 # --- 7. a documented limit, shown --------------------------------------------

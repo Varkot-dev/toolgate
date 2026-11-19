@@ -32,6 +32,7 @@ from hypothesis import HealthCheck, Phase, given, seed, settings
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "tests"))
 
+from caveat import Capability, Grant, at_least_as_strict, check_attenuation  # noqa: E402
 from strategies import Scenario, scenarios  # noqa: E402
 from test_properties import (  # noqa: E402
     MUTANT_BUDGET,
@@ -40,7 +41,6 @@ from test_properties import (  # noqa: E402
     grant_violation,
     kill,
 )
-from toolgate import Capability, Grant, at_least_as_strict, check_attenuation  # noqa: E402
 
 
 def show_capability(cap: Capability) -> str:

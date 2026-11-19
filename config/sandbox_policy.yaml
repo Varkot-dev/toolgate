@@ -5,7 +5,7 @@
 # is, and not from the task list: it does not know which addresses, files or
 # sites the attack tasks use.
 #
-# Semantics are in src/toolgate/policy.py: deny beats approve, approve beats
+# Semantics are in src/caveat/policy.py: deny beats approve, approve beats
 # allow, no matching rule means deny. Paths and addresses are matched as
 # strings; nothing here canonicalizes them.
 

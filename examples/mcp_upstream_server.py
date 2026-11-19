@@ -1,4 +1,4 @@
-"""A small, real MCP server to put behind the toolgate proxy.
+"""A small, real MCP server to put behind the caveat proxy.
 
 Six tools over an in-memory world (files, an outbox, a calendar), built with
 the MCP Python SDK's `MCPServer`. It is canned but stateful: a write shows up
@@ -7,7 +7,7 @@ That is what lets the tests assert on the observed absence of a side effect
 when a call is refused, not only on the error that came back.
 
 The server also offers one resource and one prompt. The proxy does not
-forward those (see toolgate.mcp_proxy), and the tests use them to show it.
+forward those (see caveat.mcp_proxy), and the tests use them to show it.
 
 Expected failures raise `ToolError`, whose message the SDK passes to the
 caller as an isError result; any other exception is reported only as

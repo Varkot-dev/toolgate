@@ -5,7 +5,7 @@
 # any run, like the base policy.
 #
 # `session: tainted` is TRUE once the session (one token id) has returned a
-# result from a tool whose output is untrusted (src/toolgate/sandbox/world.py:
+# result from a tool whose output is untrusted (src/caveat/sandbox/world.py:
 # the inbox, emails, web pages, files under downloads/). With no provenance
 # layer it is UNKNOWN, so this approve rule fires: the missing layer fails
 # closed.

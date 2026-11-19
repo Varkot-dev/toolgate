@@ -72,10 +72,10 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey,
 from jwt import PyJWS
 from jwt.exceptions import InvalidAlgorithmError, InvalidSignatureError, PyJWTError
 
-from toolgate.attenuation import check_attenuation
-from toolgate.capability import Call, Capability, Decision, Grant
-from toolgate.constraints import Constraint
-from toolgate.store import Entry, Store
+from caveat.attenuation import check_attenuation
+from caveat.capability import Call, Capability, Decision, Grant
+from caveat.constraints import Constraint
+from caveat.store import Entry, Store
 
 ALGORITHM = "EdDSA"
 _HEADER = {"alg": ALGORITHM, "typ": "JWT"}

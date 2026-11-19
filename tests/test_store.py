@@ -10,7 +10,7 @@ import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
 
-from toolgate.store import ChargeResult, MemoryStore, SqliteStore, Store
+from caveat.store import ChargeResult, MemoryStore, SqliteStore, Store
 
 
 @pytest.fixture(params=["memory", "sqlite-memory", "sqlite-file"])

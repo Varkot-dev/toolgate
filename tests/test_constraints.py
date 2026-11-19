@@ -4,7 +4,7 @@ import math
 
 import pytest
 
-from toolgate.constraints import Constraint, glob_match, same_value
+from caveat.constraints import Constraint, glob_match, same_value
 
 NAN = float("nan")
 INF = float("inf")

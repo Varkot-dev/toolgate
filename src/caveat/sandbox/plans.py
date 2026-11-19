@@ -16,7 +16,7 @@ writes can reach them. `plan_tools(task)` is fixed before anything runs.
 
   * honest: returns `answer`, what an accurate model would extract. The
     answers are the values the honest scripted agent uses for the same task
-    (toolgate.sandbox.tasks), so an honest plan makes exactly the honest
+    (caveat.sandbox.tasks), so an honest plan makes exactly the honest
     agent's calls.
   * fooled (the "hijacked" run): whenever an input contains the task's
     injected text it does the worst it can within the step's schema. For
@@ -41,7 +41,7 @@ from dataclasses import dataclass, field
 from functools import cache
 from typing import Any
 
-from toolgate.plan import (
+from caveat.plan import (
     DATE,
     EMAIL,
     ID,
@@ -55,8 +55,8 @@ from toolgate.plan import (
     ToolStep,
     validate,
 )
-from toolgate.sandbox.agents import contains_text
-from toolgate.sandbox.tasks import (
+from caveat.sandbox.agents import contains_text
+from caveat.sandbox.tasks import (
     _CONF,
     _ENTERPRISE,
     _HEADLINE,
@@ -67,7 +67,7 @@ from toolgate.sandbox.tasks import (
     _TRAVEL,
     Task,
 )
-from toolgate.sandbox.world import BOB, CAROL, DAN, ERIN, FRANK
+from caveat.sandbox.world import BOB, CAROL, DAN, ERIN, FRANK
 
 _FIRST = {
     EMAIL: re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+"),

@@ -1,7 +1,7 @@
 """Run the M4 story in-process and write results/m4_demo.json.
 
 A real MCP server (examples/mcp_upstream_server.py, six tools) sits behind the
-toolgate MCP proxy. A real MCP client (the SDK's `mcp.Client`) connects three
+caveat MCP proxy. A real MCP client (the SDK's `mcp.Client`) connects three
 ways and the script records what each one sees and what each call returns:
 
   1. straight to the upstream, with no proxy: every tool, no questions asked
@@ -54,16 +54,16 @@ import mcp_upstream_server as upstream_example  # noqa: E402
 
 sys.dont_write_bytecode = _WRITE_BYTECODE
 
-from toolgate.approvals import ApprovalQueue  # noqa: E402
-from toolgate.audit import AuditLog, verify  # noqa: E402
-from toolgate.capability import Capability, Grant  # noqa: E402
-from toolgate.mcp_proxy import APPROVAL_TOOL, McpProxy, create_proxy  # noqa: E402
-from toolgate.policy import Policy  # noqa: E402
-from toolgate.store import MemoryStore  # noqa: E402
-from toolgate.tokens import Authority  # noqa: E402
+from caveat.approvals import ApprovalQueue  # noqa: E402
+from caveat.audit import AuditLog, verify  # noqa: E402
+from caveat.capability import Capability, Grant  # noqa: E402
+from caveat.mcp_proxy import APPROVAL_TOOL, McpProxy, create_proxy  # noqa: E402
+from caveat.policy import Policy  # noqa: E402
+from caveat.store import MemoryStore  # noqa: E402
+from caveat.tokens import Authority  # noqa: E402
 
 POLICY_FILE = ROOT / "config" / "policy.example.yaml"
-KEY_SEED = "toolgate m4 demo key, not a secret"
+KEY_SEED = "caveat m4 demo key, not a secret"
 START = 1_794_873_600  # 2026-11-17 00:00:00 UTC
 ISSUER = "https://gateway.example"
 PROXY_URL = "http://proxy.demo/mcp"
@@ -116,7 +116,7 @@ async def connect(app: Any, url: str, token: str | None) -> AsyncIterator[Client
 def describe(result: CallToolResult) -> dict[str, Any]:
     text = " ".join(b.text for b in result.content if isinstance(b, TextContent))
     structured = result.structured_content or {}
-    kind = structured.get("toolgate") if isinstance(structured.get("toolgate"), str) else None
+    kind = structured.get("caveat") if isinstance(structured.get("caveat"), str) else None
     out: dict[str, Any] = {
         "mcp": "result",
         "is_error": bool(result.is_error),

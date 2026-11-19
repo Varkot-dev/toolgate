@@ -1,4 +1,4 @@
-// toolgate dashboard. No third-party code, no inline script (the page's CSP forbids it).
+// caveat dashboard. No third-party code, no inline script (the page's CSP forbids it).
 // Every HTML fragment inserted here was built and escaped by the server.
 "use strict";
 

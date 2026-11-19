@@ -12,11 +12,11 @@ import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
 
-from toolgate.capability import Call
-from toolgate.policy import Policy, PolicyContext
-from toolgate.provenance import USER_LABEL, Label
-from toolgate.sandbox import labels as sandbox_labels
-from toolgate.sandbox.agents import (
+from caveat.capability import Call
+from caveat.policy import Policy, PolicyContext
+from caveat.provenance import USER_LABEL, Label
+from caveat.sandbox import labels as sandbox_labels
+from caveat.sandbox.agents import (
     CAREFUL,
     DENIED,
     FALLBACK,
@@ -27,7 +27,7 @@ from toolgate.sandbox.agents import (
     HonestAgent,
     call_key,
 )
-from toolgate.sandbox.runner import (
+from caveat.sandbox.runner import (
     CONFIGURATIONS,
     NOT_IMPLEMENTED,
     POLICY_FILE,
@@ -40,7 +40,7 @@ from toolgate.sandbox.runner import (
     legitimate_calls,
     run_task,
 )
-from toolgate.sandbox.tasks import (
+from caveat.sandbox.tasks import (
     BUDGET,
     GRANT_ARGS,
     GRANT_TOOL,
@@ -54,7 +54,7 @@ from toolgate.sandbox.tasks import (
     benign_tasks,
     load_grants,
 )
-from toolgate.sandbox.world import (
+from caveat.sandbox.world import (
     BOB,
     FRANK,
     TOOLS,
@@ -629,7 +629,7 @@ def test_the_agent_passes_references_in_configuration_4_only():
 
 
 def test_tpl_wire_form_resolves_to_the_same_text():
-    from toolgate.provenance import Label, Provenance
+    from caveat.provenance import Label, Provenance
 
     p = Provenance(lambda *a: Label(frozenset({"user"})), handles=None)
 

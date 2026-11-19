@@ -9,9 +9,9 @@ import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
 
-from toolgate.capability import Call
-from toolgate.constraints import Constraint
-from toolgate.policy import (
+from caveat.capability import Call
+from caveat.constraints import Constraint
+from caveat.policy import (
     MAX_POLICY_BYTES,
     Policy,
     PolicyContext,

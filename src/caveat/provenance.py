@@ -28,7 +28,7 @@ Where labels come from, explicitly:
     saw only the request: sources {"user"}, readers ANY (`USER_LABEL`);
   * a tool result: whatever the operator's `declare(tool, args, result,
     arg_labels)` function says. Each deployment declares its tools (the
-    sandbox's declarations are in toolgate.sandbox.labels: a calendar entry is
+    sandbox's declarations are in caveat.sandbox.labels: a calendar entry is
     readable by its attendees and the user, a private file by the user, a
     fetched web page by anyone but its source is untrusted);
   * a literal written by an AGENT (a model that sees tool results): the join
@@ -41,7 +41,7 @@ Where labels come from, explicitly:
     sound rule for an agent that reads what it is given, and it is where
     label creep comes from (results/m4b_label_creep.json measures it);
   * a value made by the quarantined extractor of plan-then-execute
-    (toolgate.plan): the join of the labels of its inputs.
+    (caveat.plan): the join of the labels of its inputs.
 
 Handles (level 2)
 -----------------
@@ -101,7 +101,7 @@ available by picking a different handle, or by calling a lookup tool with a
 steered query (its result is labeled by the tool, not by the query). Joining
 every choice made after an untrusted read makes every argument carry the
 session's `seen` label, which is level 1 (session labels) again. The
-defence against steered selection is plan-then-execute (toolgate.plan),
+defence against steered selection is plan-then-execute (caveat.plan),
 where the planner picks handles and fields before any untrusted text is
 read; in agent mode a steered choice can only pick a value whose own label
 the policy still checks (its sources, and who may read it).
@@ -145,7 +145,7 @@ CaMeL's guarantees. In agent mode the context rule over-approximates instead
 before any data is read, which is what makes literals clean there.
 
 This module assumes an agent runtime that passes handles. Real agents do not
-do that unless they run in a plan-then-execute mode like toolgate.plan.
+do that unless they run in a plan-then-execute mode like caveat.plan.
 """
 
 from __future__ import annotations
@@ -162,7 +162,7 @@ from dataclasses import dataclass, field
 from typing import Any
 from urllib.parse import quote
 
-from toolgate.policy import CLEAN, TAINTED, PolicyContext
+from caveat.policy import CLEAN, TAINTED, PolicyContext
 
 USER, UNTRUSTED, PUBLIC = "user", "untrusted", "public"
 SESSION, VALUE = "session", "value"
@@ -322,7 +322,7 @@ class Provenance:
     handles  a function returning a fresh handle string (default random)
 
     The gateway calls `prepare`, `context` and `record`; a plan executor
-    (toolgate.plan) also calls `use_planner_literals`, `derive` and `value`.
+    (caveat.plan) also calls `use_planner_literals`, `derive` and `value`.
     Nothing here is reachable by an agent except through the gateway.
     """
 

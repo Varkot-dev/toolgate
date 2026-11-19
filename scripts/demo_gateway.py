@@ -39,21 +39,21 @@ from typing import Any
 import httpx
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
-from toolgate.approvals import ApprovalQueue
-from toolgate.audit import AuditLog, verify
-from toolgate.gateway import Gateway
-from toolgate.policy import Policy
-from toolgate.server import create_app, hash_admin_key
-from toolgate.store import MemoryStore
-from toolgate.tokens import Authority
+from caveat.approvals import ApprovalQueue
+from caveat.audit import AuditLog, verify
+from caveat.gateway import Gateway
+from caveat.policy import Policy
+from caveat.server import create_app, hash_admin_key
+from caveat.store import MemoryStore
+from caveat.tokens import Authority
 
 ROOT = Path(__file__).resolve().parent.parent
 POLICY_FILE = ROOT / "config" / "policy.example.yaml"
-KEY_SEED = "toolgate m3 demo key, not a secret"
+KEY_SEED = "caveat m3 demo key, not a secret"
 ADMIN_KEY = "demo-admin-key-not-a-secret"
 START = 1_794_873_600  # 2026-11-17 00:00:00 UTC
 ISSUER = "https://gateway.example"
-AUDIENCE = "toolgate-demo"
+AUDIENCE = "caveat-demo"
 
 USER_CAPS = [
     {"tool": "read_file", "args": {"path": {"glob": "reports/*"}}, "max_calls": 5},

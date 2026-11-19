@@ -8,7 +8,7 @@ their own (no `unsat` comes from a contradictory side condition).
 
 import pytest
 
-from toolgate import proofs
+from caveat import proofs
 
 TABLE_ROWS = ("eq", "in", "max", "glob")
 

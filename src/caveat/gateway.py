@@ -50,7 +50,7 @@ Every decision writes exactly one entry at the moment it is made:
 
 A tool that raises or times out does not add an entry: the "allow" entry was
 written before it ran, and the log records decisions, not tool results. (A
-timeout is also reported on the Python logger "toolgate.gateway".) One path
+timeout is also reported on the Python logger "caveat.gateway".) One path
 writes two entries: "allow", then "deny" with "token: <code>; allowed at seq
 <n> but not run", when the token stopped verifying while the allow entry was
 being written.
@@ -103,11 +103,11 @@ Optional hooks (M4b), both off by default; with neither configured the
 pipeline above is unchanged.
 
   canonicalizer  `canonicalizer(tool, args) -> (tool, args)`, e.g. a
-                 toolgate.canonical.Canonicalizer. Runs before step a, so the
+                 caveat.canonical.Canonicalizer. Runs before step a, so the
                  Call that is checked, stored for approval and run is built
                  from the canonical form. A CanonicalError is a refusal at
                  stage "canonical", logged as "canonical: <code>".
-  provenance     a toolgate.provenance.Provenance. Before step a, for a token
+  provenance     a caveat.provenance.Provenance. Before step a, for a token
                  that verifies, `prepare` resolves handle references in the
                  arguments (refused at stage "provenance", logged as
                  "provenance: <code>") and labels each argument; step c asks
@@ -138,7 +138,7 @@ from dataclasses import dataclass, replace
 from types import MappingProxyType
 from typing import Any
 
-from toolgate.approvals import (
+from caveat.approvals import (
     APPROVED,
     REJECTED,
     Approval,
@@ -148,15 +148,15 @@ from toolgate.approvals import (
     request_hash,
     valid_name,
 )
-from toolgate.audit import AuditEntry, AuditLog, hash_args, loggable
-from toolgate.canonical import CODES as CANONICAL_CODES
-from toolgate.canonical import CanonicalError
-from toolgate.capability import DECISION_CODES, Call, Decision, Grant
-from toolgate.constraints import OPS
-from toolgate.policy import ALLOW, APPROVE, DENY, Policy, PolicyContext
-from toolgate.provenance import CODES as PROVENANCE_CODES
-from toolgate.provenance import ProvenanceError
-from toolgate.tokens import Authority, Authorization, EscalationError, TokenError, Verified
+from caveat.audit import AuditEntry, AuditLog, hash_args, loggable
+from caveat.canonical import CODES as CANONICAL_CODES
+from caveat.canonical import CanonicalError
+from caveat.capability import DECISION_CODES, Call, Decision, Grant
+from caveat.constraints import OPS
+from caveat.policy import ALLOW, APPROVE, DENY, Policy, PolicyContext
+from caveat.provenance import CODES as PROVENANCE_CODES
+from caveat.provenance import ProvenanceError
+from caveat.tokens import Authority, Authorization, EscalationError, TokenError, Verified
 
 ALLOWED, DENIED, PENDING, ERROR = "allowed", "denied", "pending", "error"
 
@@ -179,7 +179,7 @@ DEFAULT_UNVERIFIED_AUDIT_BURST = 100
 
 _TOOL_NAME = re.compile(r"[A-Za-z0-9_.:/-]{1,128}")
 _MAX_FINGERPRINT_INPUT = 64 * 1024
-_LOG = logging.getLogger("toolgate.gateway")
+_LOG = logging.getLogger("caveat.gateway")
 # Reasons `Authority.authorize` gives for a refusal it made itself, as codes.
 _AUTHORIZE_CODES = {
     "budget exhausted": "budget_exhausted",
@@ -250,7 +250,7 @@ def token_fingerprint(token: Any) -> str:
     # Domain separated, so the fingerprint of a string is never a prefix of
     # its plain SHA-256 (which is how the admin key is stored).
     digest = hashlib.sha256(
-        b"toolgate token fingerprint\x00" + token.encode("utf-8", "backslashreplace")
+        b"caveat token fingerprint\x00" + token.encode("utf-8", "backslashreplace")
     ).hexdigest()
     return f"{UNVERIFIED}:{digest[:16]}"
 
@@ -284,7 +284,7 @@ def _run_awaitable(awaitable: Any) -> Any:
         except BaseException as exc:  # handed to the caller below
             box["error"] = exc
 
-    thread = threading.Thread(target=work, name="toolgate-async-tool")
+    thread = threading.Thread(target=work, name="caveat-async-tool")
     thread.start()
     thread.join()
     if "error" in box:
@@ -337,7 +337,7 @@ class Gateway:
     """Owns the whole pipeline. Thread safe; tools may run concurrently.
 
     Optional limits, all keyword-only. The first two default to "off" so
-    that code built on Gateway keeps its behaviour; `toolgate.server.build`
+    that code built on Gateway keeps its behaviour; `caveat.server.build`
     turns them on with the defaults in the example config. The third,
     tool_error_detail, defaults to the safe setting (text withheld).
 
@@ -1033,7 +1033,7 @@ class Gateway:
 
             # A daemon thread: a tool that never returns must not keep the
             # process from exiting. It cannot be killed, only abandoned.
-            thread = threading.Thread(target=work, name="toolgate-tool", daemon=True)
+            thread = threading.Thread(target=work, name="caveat-tool", daemon=True)
             try:
                 thread.start()
             except Exception:
